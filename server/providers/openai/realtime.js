@@ -14,6 +14,7 @@ import {
 import { realtimeInstructions } from './instructions.js';
 import { GEV_REALTIME_TOOLS } from './tools.js';
 import {
+  preferCodexOAuth,
   readCodexOAuthAccessToken,
   startCodexChatGptLogin,
 } from './codex-auth.js';
@@ -174,6 +175,7 @@ function createRealtimeTokenHandler({
   fetchImpl = (...args) => fetch(...args),
   resolveApiKey = () => process.env.OPENAI_API_KEY,
   resolveOAuthAccessToken = () => readCodexOAuthAccessToken(),
+  environment = process.env,
   models = {},
 } = {}) {
   return async (req, res) => {
@@ -191,6 +193,28 @@ function createRealtimeTokenHandler({
       res.statusCode = 400;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ error: 'Unsupported cloud voice auth mode' }));
+      return;
+    }
+
+    let oauthPinned;
+    try {
+      oauthPinned = preferCodexOAuth(environment);
+    } catch (error) {
+      res.statusCode = 503;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ error: error.message }));
+      return;
+    }
+    if (oauthPinned && authMode !== 'oauth') {
+      res.statusCode = 503;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(
+        JSON.stringify({
+          error:
+            'ChatGPT OAuth is required by GEV_PREFER_CODEX_OAUTH. Select USE CHATGPT OAUTH in Provider Settings.',
+          code: 'CODEX_OAUTH_REQUIRED',
+        }),
+      );
       return;
     }
 
@@ -332,6 +356,10 @@ function createRealtimeTokenHandler({
       // case where a bogus ?tier= was silently downgraded to standard.
       res.setHeader('X-GEV-Voice-Tier', tier);
       res.setHeader('X-GEV-Voice-Model', model);
+      res.setHeader(
+        'X-GEV-Voice-Auth',
+        authMode === 'oauth' ? 'codex-oauth' : 'env',
+      );
       if (requestedTier && !isKnownVoiceTier(requestedTier)) {
         res.setHeader('X-GEV-Voice-Tier-Fallback', '1');
       }

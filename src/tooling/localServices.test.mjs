@@ -217,13 +217,42 @@ test('Realtime handler keeps API key as default and uses OAuth only when request
   );
   const token = routes.get('/api/realtime/token');
 
-  assert.equal((await request(token)).status, 200);
+  const apiResponse = await request(token);
+  assert.equal(apiResponse.status, 200);
+  assert.equal(apiResponse.headers['x-gev-voice-auth'], 'env');
   assert.equal(oauthReads, 0, 'default cloud voice does not read OAuth');
   assert.equal(authorizations.at(-1), 'Bearer fixture-api-key');
 
-  assert.equal((await request(token, { url: '/?auth=oauth' })).status, 200);
+  const oauthResponse = await request(token, { url: '/?auth=oauth' });
+  assert.equal(oauthResponse.status, 200);
+  assert.equal(oauthResponse.headers['x-gev-voice-auth'], 'codex-oauth');
   assert.equal(oauthReads, 1);
   assert.equal(authorizations.at(-1), 'Bearer fixture-oauth-token');
+});
+
+test('a Codex OAuth pin refuses API-key minting without silently switching modes', async (t) => {
+  env(t, 'GEV_RATELIMIT_OPENAI_PER_MIN', undefined);
+  const authorizations = [];
+  const routes = install(
+    openAiRealtimeProxy({
+      realtime: {
+        environment: { GEV_PREFER_CODEX_OAUTH: 'true' },
+        resolveApiKey: () => assert.fail('pinned OAuth cannot read an API key'),
+        resolveOAuthAccessToken: () => 'fixture-oauth-token',
+        fetchImpl: async (_url, options) => {
+          authorizations.push(options.headers.Authorization);
+          return Response.json({ value: 'fixture-ephemeral' });
+        },
+      },
+    }),
+  );
+  const token = routes.get('/api/realtime/token');
+  const refused = await request(token);
+  assert.equal(refused.status, 503);
+  assert.equal(refused.json().code, 'CODEX_OAUTH_REQUIRED');
+  assert.equal(authorizations.length, 0);
+  assert.equal((await request(token, { url: '/?auth=oauth' })).status, 200);
+  assert.deepEqual(authorizations, ['Bearer fixture-oauth-token']);
 });
 
 test('OAuth status and token minting never expose local OAuth to remote clients', async () => {
