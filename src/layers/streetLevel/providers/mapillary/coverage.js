@@ -15,7 +15,6 @@ import {
   COVERAGE_MOVE_DEBOUNCE_MS,
   COVERAGE_OVERVIEW_MAX_TILES,
   COVERAGE_OVERVIEW_POINT_PX,
-  COVERAGE_RECENT_DAYS,
   PICK_PREFIX,
 } from './policy.js';
 
@@ -34,15 +33,11 @@ const PER_TILE_SEQUENCE_CAP = Math.floor(
   COVERAGE_MAX_SEQUENCES / COVERAGE_MAX_TILES,
 );
 
-/** Colour for a sequence: brand green, dimmer with age, magenta for panoramas. */
-function sequenceColor(sequence, { selected = false, now = Date.now() } = {}) {
-  if (selected) return Cesium.Color.fromCssColorString(COLORS.selected);
-  if (sequence.isPano)
-    return Cesium.Color.fromCssColorString(COLORS.pano).withAlpha(0.9);
-  const ageDays = (now - (sequence.capturedAt || 0)) / 86_400_000;
-  return ageDays <= COVERAGE_RECENT_DAYS
-    ? Cesium.Color.fromCssColorString(COLORS.coverage).withAlpha(0.92)
-    : Cesium.Color.fromCssColorString(COLORS.coverageOld).withAlpha(0.7);
+/** Colour for a sequence: Mapillary green, GEV cyan while selected. */
+function sequenceColor({ selected = false } = {}) {
+  return selected
+    ? Cesium.Color.fromCssColorString(COLORS.selected)
+    : Cesium.Color.fromCssColorString(COLORS.coverage).withAlpha(0.92);
 }
 
 /**
@@ -82,14 +77,13 @@ export function createCoverage({ state, source }) {
     );
   }
 
-  function sequenceInstance(sequence, geometry, now) {
+  function sequenceInstance(sequence, geometry) {
     return new Cesium.GeometryInstance({
       geometry,
       id: `${PICK_PREFIX.sequence}${sequence.id}`,
       attributes: {
         color: Cesium.ColorGeometryInstanceAttribute.fromColor(
-          sequenceColor(sequence, {
-            now,
+          sequenceColor({
             selected: sequence.id === state.sequence.selectedId,
           }),
         ),
@@ -103,7 +97,6 @@ export function createCoverage({ state, source }) {
    * bare-earth heights for every sequence whose heights are cached.
    */
   function buildSequencePrimitives(sequences) {
-    const now = Date.now();
     const ground = terrainMode() ? state.context.groundCaster : null;
     const draped = [];
     const cast = [];
@@ -129,7 +122,6 @@ export function createCoverage({ state, source }) {
               vertexFormat: Cesium.PolylineColorAppearance.VERTEX_FORMAT,
               arcType: Cesium.ArcType.NONE,
             }),
-            now,
           ),
         );
       else
@@ -140,7 +132,6 @@ export function createCoverage({ state, source }) {
               positions,
               width: COVERAGE_LINE_WIDTH_PX,
             }),
-            now,
           ),
         );
     }
@@ -234,13 +225,12 @@ export function createCoverage({ state, source }) {
     const green = Cesium.Color.fromCssColorString(COLORS.coverage).withAlpha(
       0.85,
     );
-    const pink = Cesium.Color.fromCssColorString(COLORS.pano).withAlpha(0.9);
     let count = 0;
     for (const point of points) {
       if (!passesImageryFilter(point, filter())) continue;
       collection.add({
         position: Cesium.Cartesian3.fromDegrees(point.lon, point.lat),
-        color: point.isPano ? pink : green,
+        color: green,
         pixelSize: COVERAGE_OVERVIEW_POINT_PX,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       });
@@ -519,7 +509,7 @@ export function createCoverage({ state, source }) {
             primitive.getGeometryInstanceAttributes(instanceId);
           if (attributes)
             attributes.color = Cesium.ColorGeometryInstanceAttribute.toValue(
-              sequenceColor(sequence, { selected }),
+              sequenceColor({ selected }),
               attributes.color,
             );
         } catch {

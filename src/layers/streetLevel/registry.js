@@ -7,10 +7,9 @@
  * @property {string} label         Chip text and link label, e.g. 'MAPILLARY'.
  * @property {string|null} requiresKeyId  Key-setup id the provider needs, or null when keyless.
  * @property {string} pickPrefix    Every primitive id the provider creates starts with it.
- * @property {{coverage: string, coverageOld?: string, pano?: string}} colors
+ * @property {{coverage: string}} colors   The source's one colour (policy.js PROVIDER_COLORS): chip, lines, points, cones and legend.
  * @property {{key: string, html: string}} credit   On-globe attribution while the provider is active.
  * @property {{coverage: 'tiles'|'bbox'|'none', sequences: boolean, pano: boolean, capturedAt: boolean, creator: boolean, follow: boolean}} capabilities
- * @property {Array<{key: string, label: string, color: string}>} legend  Coverage colour key.
  * @property {(imageId: string) => string} externalUrl  Deep link to the image on the provider's site.
  * @property {(context: ProviderContext) => ProviderInstance} create
  *
@@ -80,7 +79,6 @@ const REQUIRED = Object.freeze([
   'colors',
   'credit',
   'capabilities',
-  'legend',
   'externalUrl',
   'create',
 ]);
@@ -127,9 +125,12 @@ export function validateProviders(providers) {
         );
     if (!provider.credit?.key || !provider.credit?.html)
       throw new TypeError(`Street Level provider ${label} needs a credit`);
-    if (!Array.isArray(provider.legend))
+    if (
+      typeof provider.colors?.coverage !== 'string' ||
+      !provider.colors.coverage
+    )
       throw new TypeError(
-        `Street Level provider ${label}: legend is not a list`,
+        `Street Level provider ${label} needs a coverage colour`,
       );
     ids.add(provider.id);
     prefixes.push(provider.pickPrefix);

@@ -7,7 +7,6 @@ import {
   MAPILLARY_CREDIT_HTML,
   MAPILLARY_KEY_ID,
   MAPILLARY_LABEL,
-  MAPILLARY_LEGEND,
   MAPILLARY_NAME,
   MAPILLARY_PROVIDER_ID,
   NEAREST_LIMIT,
@@ -92,7 +91,6 @@ export function createMapillaryProvider({ source }) {
       creator: true,
       follow: true,
     }),
-    legend: MAPILLARY_LEGEND,
     externalUrl: mapillaryImageUrl,
 
     create(context) {

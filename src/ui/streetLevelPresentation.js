@@ -91,6 +91,7 @@ function presentProviders(state) {
     return {
       id: provider.id,
       label: provider.label,
+      color: provider.color || null,
       title,
       active: on,
       disabled: false,

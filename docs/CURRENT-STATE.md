@@ -2778,7 +2778,11 @@ collapsible panel (`#street-level-panel`, share token `0`, option owner
 overlay: one panel, a PROVIDERS chip per registered imagery provider, shared
 360°/flat and captured-since filters (stored as relative days so a link keeps
 its meaning), one viewer host, and one on-globe credit per active provider.
-Share options: `m` (Mapillary on/off), `p` (a/p/f panorama mode), `s`
+Each source has one colour (`PROVIDER_COLORS` in
+`src/layers/streetLevel/policy.js`: Mapillary green `#05cb63`, Panoramax
+purple, Google Street View blue), used for its chip, coverage lines, overview
+points, image cones and its single legend swatch; 360° cones are rings, and
+the selected sequence is GEV cyan. Share options: `m` (Mapillary on/off), `p` (a/p/f panorama mode), `s`
 (since, days). Only Mapillary is registered in this build. Without
 `MAPILLARY_CLIENT_TOKEN` the header reads KEY REQUIRED, the Mapillary chip
 turns amber and the controls stay disabled; with it, coverage draws as
@@ -2831,8 +2835,8 @@ the whole photo and caption fit without scrolling.
 
 Street-level providers implement the contract documented in
 `src/layers/streetLevel/registry.js`: a definition (`id`, `name`, `label`,
-`requiresKeyId`, `pickPrefix`, `colors`, `credit`, `capabilities`, `legend`,
-`externalUrl`, `create`) whose `create(context)` returns an instance with
+`requiresKeyId`, `pickPrefix`, `colors` (`{coverage}`, the source's one
+colour), `credit`, `capabilities`, `externalUrl`, `create`) whose `create(context)` returns an instance with
 `status`, `init`/`activate`/`deactivate`/`destroy`, `refreshCoverage`,
 `setFilter`, optional `setSurface`, `coverageStats`, `handlePick`, optional
 sequence selection,

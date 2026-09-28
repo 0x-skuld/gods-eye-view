@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createMapillaryProvider, mapillaryImageUrl } from './index.js';
 import { validateProviders } from '../../registry.js';
+import { PROVIDER_COLORS } from '../../policy.js';
 
 function fakeSource({ nearest = [] } = {}) {
   return {
@@ -41,10 +42,10 @@ test('the definition satisfies the Street Level provider contract', () => {
   assert.equal(def.pickPrefix, 'mly:');
   assert.equal(def.capabilities.coverage, 'tiles');
   assert.match(def.credit.html, /CC BY-SA 4\.0/);
-  assert.deepEqual(
-    def.legend.map((entry) => entry.key),
-    ['recent', 'older', 'pano'],
-  );
+  // One colour per source: Mapillary is green everywhere it draws.
+  assert.deepEqual(Object.keys(def.colors).sort(), ['coverage', 'selected']);
+  assert.equal(def.colors.coverage, PROVIDER_COLORS.mapillary);
+  assert.equal(PROVIDER_COLORS.mapillary, '#05cb63');
   assert.throws(() => createMapillaryProvider({ source: {} }), /source/);
 });
 

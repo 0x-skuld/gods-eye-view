@@ -103,8 +103,13 @@ export function createSequences({ state, source, parts }) {
     if (!collection) return;
     collection.removeAll();
     const heights = coneHeights(images);
-    const cone = imageConeGlyph({ size: 32, color: COLORS.image });
-    const ring = imageConeGlyph({ size: 32, color: COLORS.pano, pano: true });
+    // One colour per source; 360° images keep the ring shape.
+    const cone = imageConeGlyph({ size: 32, color: COLORS.coverage });
+    const ring = imageConeGlyph({
+      size: 32,
+      color: COLORS.coverage,
+      pano: true,
+    });
     images.forEach((image, index) => {
       if (!passesImageryFilter(image, state.filter)) return;
       const height = heights?.[index] ?? null;

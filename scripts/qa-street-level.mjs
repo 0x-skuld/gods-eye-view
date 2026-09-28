@@ -137,11 +137,18 @@ async function main() {
           ].map((chip) => chip.dataset.chipId),
         );
         assert.deepEqual(chips, EXPECTED_PROVIDERS);
+        // One swatch per source plus "Selected"; each chip wears its colour.
         assert.equal(
           await page.evaluate(
             () => document.querySelectorAll('#sl-legend li').length,
           ),
-          4,
+          EXPECTED_PROVIDERS.length + 1,
+        );
+        assert.equal(
+          await page.$eval('[data-chip-id="mapillary"]', (chip) =>
+            chip.style.getPropertyValue('--chip-color'),
+          ),
+          '#05cb63',
         );
       },
     );

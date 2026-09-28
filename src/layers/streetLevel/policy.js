@@ -4,6 +4,17 @@ export const STREET_LEVEL_LAYER_ID = 'street-level';
 /** Pick id of the viewer position marker; the core owns it, not a provider. */
 export const POSITION_PICK_ID = 'sl:pos';
 
+/**
+ * One colour per imagery source, used everywhere that source appears: its
+ * chip, coverage lines, overview points, image cones and legend swatch.
+ * Registered providers take their entry from here; a new source adds one.
+ */
+export const PROVIDER_COLORS = Object.freeze({
+  mapillary: '#05cb63',
+  panoramax: '#a66bff',
+  'google-street-view': '#4285f4',
+});
+
 /** Colours every provider shares: the selection highlight and the marker. */
 export const COLORS = Object.freeze({
   selected: '#00d4ff',

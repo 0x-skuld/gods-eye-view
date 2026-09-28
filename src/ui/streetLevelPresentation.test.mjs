@@ -18,7 +18,7 @@ const provider = (overrides = {}) => ({
   count: 0,
   hint: '',
   error: null,
-  legend: [],
+  color: '#05cb63',
   ...overrides,
 });
 
@@ -30,9 +30,7 @@ function snapshot(overrides = {}) {
     providers: [provider()],
     coverage: { loading: false, count: 0, hint: '', error: null },
     legend: [
-      { key: 'mapillary:recent', label: 'Recent (≤2 yr)', color: '#05cb63' },
-      { key: 'mapillary:older', label: 'Older', color: '#2e7d5b' },
-      { key: 'mapillary:pano', label: '360°', color: '#ff4fd8' },
+      { key: 'mapillary', label: 'Mapillary', color: '#05cb63' },
       { key: 'selected', label: 'Selected', color: '#00d4ff' },
     ],
     sequence: { providerId: null, selectedId: null, images: 0, loading: false },
@@ -239,7 +237,25 @@ test('legend passes through in the layer’s order', () => {
   const view = presentStreetLevelPanel(snapshot());
   assert.deepEqual(
     view.legend.map((entry) => entry.key),
-    ['mapillary:recent', 'mapillary:older', 'mapillary:pano', 'selected'],
+    ['mapillary', 'selected'],
+  );
+});
+
+test('each provider chip carries its source colour', () => {
+  const view = presentStreetLevelPanel(
+    snapshot({
+      providers: [
+        provider(),
+        provider({ id: 'panoramax', label: 'PANORAMAX', color: '#a66bff' }),
+      ],
+    }),
+  );
+  assert.deepEqual(
+    view.providers.map((chip) => [chip.id, chip.color]),
+    [
+      ['mapillary', '#05cb63'],
+      ['panoramax', '#a66bff'],
+    ],
   );
 });
 

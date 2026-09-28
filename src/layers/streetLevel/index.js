@@ -261,7 +261,7 @@ export function createStreetLevelLayer({
         count: stats.count || 0,
         hint: stats.hint || '',
         error: stats.error || null,
-        legend: entry.def.legend,
+        color: entry.def.colors.coverage,
       };
     });
   }

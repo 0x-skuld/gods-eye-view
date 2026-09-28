@@ -20,7 +20,6 @@ function fakeProvider() {
       creator: true,
       follow: true,
     },
-    legend: [],
     externalUrl: (id) => `https://example.test/${id}`,
     create: () => ({
       status: async () => ({ configured: true }),

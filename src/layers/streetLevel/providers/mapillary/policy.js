@@ -1,4 +1,4 @@
-import { COLORS as SHARED_COLORS } from '../../policy.js';
+import { COLORS as SHARED_COLORS, PROVIDER_COLORS } from '../../policy.js';
 
 /** Identity and tuning for the Mapillary street-level provider. */
 export const MAPILLARY_PROVIDER_ID = 'mapillary';
@@ -14,13 +14,13 @@ export const PICK_PREFIX = Object.freeze({
   image: 'mly:img:',
 });
 
-/** Brand green for coverage; panoramas get a distinct hue; selection is GEV cyan. */
+/**
+ * Mapillary draws in one colour, its brand green, for lines, overview points
+ * and cones alike (360° cones keep their ring shape); selection is GEV cyan.
+ */
 export const COLORS = Object.freeze({
-  coverage: '#05cb63',
-  coverageOld: '#2e7d5b',
-  pano: '#ff4fd8',
+  coverage: PROVIDER_COLORS.mapillary,
   selected: SHARED_COLORS.selected,
-  image: '#e8eaed',
 });
 
 /** Camera-driven coverage refresh. */
@@ -31,8 +31,6 @@ export const COVERAGE_OVERVIEW_MAX_TILES = 16;
 export const COVERAGE_OVERVIEW_POINT_PX = 2.5;
 export const COVERAGE_MAX_SEQUENCES = 6000;
 export const COVERAGE_LINE_WIDTH_PX = 2.5;
-/** Sequences newer than this many days draw at full brightness. */
-export const COVERAGE_RECENT_DAYS = 730;
 
 /** Per-sequence image cones after a sequence is selected. */
 export const SEQUENCE_IMAGES_LIMIT = 2000;
@@ -49,17 +47,6 @@ export const NEAREST_LIMIT = 8;
  */
 export const MAPILLARY_CREDIT_HTML =
   'Street Level: imagery © <a href="https://www.mapillary.com" target="_blank" rel="noopener">Mapillary</a> contributors, CC BY-SA 4.0';
-
-/** Coverage colour key, in the order the panel lists it. */
-export const MAPILLARY_LEGEND = Object.freeze([
-  Object.freeze({
-    key: 'recent',
-    label: `Recent (≤${Math.round(COVERAGE_RECENT_DAYS / 365)} yr)`,
-    color: COLORS.coverage,
-  }),
-  Object.freeze({ key: 'older', label: 'Older', color: COLORS.coverageOld }),
-  Object.freeze({ key: 'pano', label: '360°', color: COLORS.pano }),
-]);
 
 /** Deep link to an image on mapillary.com, as the web app shares them. */
 export function mapillaryImageUrl(imageId) {

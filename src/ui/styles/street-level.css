@@ -139,6 +139,38 @@ button.sl-status:focus-visible {
   gap: 4px;
 }
 
+/* One colour per source: a swatch dot, and the whole chip in that colour
+   while the source is on. `--chip-color` comes from the provider. */
+.sl-chips .data-toggle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sl-chips .data-toggle-chip::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--chip-color, currentColor);
+  opacity: 0.45;
+  flex: none;
+}
+
+.sl-chips .data-toggle-chip.active {
+  color: var(--chip-color, var(--accent));
+  border-color: var(--chip-color, var(--accent));
+  background: color-mix(
+    in srgb,
+    var(--chip-color, var(--accent)) 14%,
+    transparent
+  );
+}
+
+.sl-chips .data-toggle-chip.active::before {
+  opacity: 1;
+}
+
 .sl-chips .data-toggle-chip.chip-error {
   color: #ffb300;
   border-color: rgba(255, 179, 0, 0.55);

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { composeUIState, summarizeCoverage } from './uiState.js';
+import { COLORS } from './policy.js';
 
 const provider = (overrides = {}) => ({
   id: 'mapillary',
@@ -14,7 +15,7 @@ const provider = (overrides = {}) => ({
   count: 10,
   hint: '',
   error: null,
-  legend: [{ key: 'recent', label: 'Recent', color: '#0f0' }],
+  color: '#05cb63',
   ...overrides,
 });
 const base = {
@@ -58,30 +59,37 @@ test('the layer is key-gated only when every switched-on provider lacks its key'
   assert.equal(offOnly.keyRequired, false, 'nothing switched on to gate');
 });
 
-test('the legend lists active providers, prefixed once more than one is registered', () => {
+test('the legend is one swatch per active source, in its colour, then Selected', () => {
   const single = composeUIState({ ...base, providers: [provider()] });
-  assert.deepEqual(
-    single.legend.map((entry) => [entry.key, entry.label]),
-    [
-      ['mapillary:recent', 'Recent'],
-      ['selected', 'Selected'],
-    ],
-  );
+  assert.deepEqual(single.legend, [
+    { key: 'mapillary', label: 'Mapillary', color: '#05cb63' },
+    { key: 'selected', label: 'Selected', color: COLORS.selected },
+  ]);
   const two = composeUIState({
     ...base,
     providers: [
       provider(),
-      provider({
-        id: 'panoramax',
-        name: 'Panoramax',
-        on: false,
-        legend: [{ key: 'coverage', label: 'Coverage', color: '#00f' }],
-      }),
+      provider({ id: 'panoramax', name: 'Panoramax', color: '#a66bff' }),
     ],
   });
   assert.deepEqual(
-    two.legend.map((entry) => entry.label),
-    ['Mapillary Recent', 'Selected'],
+    two.legend.map((entry) => [entry.label, entry.color]),
+    [
+      ['Mapillary', '#05cb63'],
+      ['Panoramax', '#a66bff'],
+      ['Selected', COLORS.selected],
+    ],
+  );
+  const oneOff = composeUIState({
+    ...base,
+    providers: [
+      provider(),
+      provider({ id: 'panoramax', name: 'Panoramax', on: false }),
+    ],
+  });
+  assert.deepEqual(
+    oneOff.legend.map((entry) => entry.key),
+    ['mapillary', 'selected'],
   );
   assert.deepEqual(
     composeUIState({ ...base, providers: [provider({ on: false })] }).legend,

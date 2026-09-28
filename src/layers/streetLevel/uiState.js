@@ -13,7 +13,7 @@ import { COLORS } from './policy.js';
  * @property {number} count
  * @property {string} hint
  * @property {string|null} error
- * @property {Array<{key: string, label: string, color: string}>} legend
+ * @property {string} color   The source's one colour.
  */
 
 /**
@@ -37,9 +37,9 @@ export function summarizeCoverage(providers) {
  * Compose the snapshot the panel renders from the core state and one
  * snapshot per registered provider. Pure, so the merge rules are testable:
  * counts add up across active providers, the layer is key-gated only when
- * every switched-on provider lacks its key, and the legend lists each active
- * provider's colours (prefixed by name once more than one is registered)
- * followed by the shared selection colour.
+ * every switched-on provider lacks its key, and the legend lists one swatch
+ * per active source, in its colour and under its name, followed by the
+ * shared selection colour.
  * @param {{enabled: boolean, filter: object, providers: Array<ProviderSnapshot>, street: object, sequence: object}} input
  */
 export function composeUIState({
@@ -52,24 +52,18 @@ export function composeUIState({
 }) {
   const active = providers.filter((p) => p.on);
   const { keyRequired, ...coverage } = summarizeCoverage(providers);
-  const legend = [];
-  for (const provider of active)
-    for (const entry of provider.legend)
-      legend.push({
-        key: `${provider.id}:${entry.key}`,
-        label:
-          providers.length > 1
-            ? `${provider.name} ${entry.label}`
-            : entry.label,
-        color: entry.color,
-      });
+  const legend = active.map((provider) => ({
+    key: provider.id,
+    label: provider.name,
+    color: provider.color,
+  }));
   if (active.length)
     legend.push({ key: 'selected', label: 'Selected', color: COLORS.selected });
   return {
     enabled,
     keyRequired,
     filter: { ...filter },
-    providers: providers.map((p) => ({ ...p, legend: [...p.legend] })),
+    providers: providers.map((p) => ({ ...p })),
     coverage,
     legend,
     sequence: { ...sequence },
