@@ -48,6 +48,7 @@ export function composeUIState({
   providers,
   street,
   sequence,
+  surface = 'draped',
 }) {
   const active = providers.filter((p) => p.on);
   const { keyRequired, ...coverage } = summarizeCoverage(providers);
@@ -73,5 +74,6 @@ export function composeUIState({
     legend,
     sequence: { ...sequence },
     street: { ...street },
+    surface,
   };
 }

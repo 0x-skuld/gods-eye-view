@@ -120,3 +120,15 @@ test('summarizeCoverage is what getStats reports, without building a snapshot', 
   );
   assert.equal(summarizeCoverage([]).keyRequired, false);
 });
+
+test('the surface mode defaults to draped and passes through', () => {
+  assert.equal(
+    composeUIState({ ...base, providers: [provider()] }).surface,
+    'draped',
+  );
+  assert.equal(
+    composeUIState({ ...base, providers: [provider()], surface: 'terrain' })
+      .surface,
+    'terrain',
+  );
+});

@@ -2786,6 +2786,25 @@ ground-clamped sequence lines (z0–5 overview points from orbit, z11–14
 sequences below 60 km) and the proxy strips the unused `image` point layer
 from z14 tiles in transit (12 MB → ~80 KB).
 
+On Google 3D (`photoreal`) at street zoom the layer switches its surface mode
+from `draped` to `terrain` (`getUIState().surface`; in below 1,400 m above the
+ground, out above 1,800 m, so the mode does not flap). Draped ground polylines
+and clamped billboards land on the top of the photoreal mesh, so on a street
+under trees or an overpass the coverage appears to float at roof height. In
+terrain mode `src/layers/streetLevel/groundCast.js` places lines, cones and the
+position marker on the bare earth from the terrain service
+(`/api/terrain/heights`) plus 2 m, and the mesh hides whatever is behind
+buildings and trees. Heights are sampled on the ground-floor grid (0.001°,
+~111 m), shared with other layers' cache, and interpolated bilinearly; a z14
+tile needs at most a few hundred lookups, sent once per tile and aborted when
+the tile is dropped. A tile is drawn draped first and swapped for its cast
+lines when the heights arrive; a geoid fallback (terrain proxy down) counts as
+unknown and leaves the lines draped. Cones and the marker keep drawing over
+buildings so they stay clickable. Framing or following a photo also checks the
+sampled mesh height against the bare earth: `sampleHeight` can return values
+kilometres underground before the tiles under the photo have loaded, and such
+a sample is ignored.
+
 The panel has no separate ON/OFF or nearest-photo buttons. The header pill is
 the layer switch, and a provider chip is lit only while the layer is on: with
 one provider it is the layer switch too, and with several, darkening the last
@@ -2812,11 +2831,14 @@ Street-level providers implement the contract documented in
 `requiresKeyId`, `pickPrefix`, `colors`, `credit`, `capabilities`, `legend`,
 `externalUrl`, `create`) whose `create(context)` returns an instance with
 `status`, `init`/`activate`/`deactivate`/`destroy`, `refreshCoverage`,
-`setFilter`, `coverageStats`, `handlePick`, optional sequence selection,
+`setFilter`, optional `setSurface`, `coverageStats`, `handlePick`, optional
+sequence selection,
 `nearestImage`, and a viewer adapter (`mount`/`open`/`close`/`unmount`/
 `resize`/`onPose`) that emits a provider-neutral pose. The core routes clicks
 by pick prefix, swaps viewer adapters in the one host, adds and removes each
-provider's Cesium credit, and fans the filter out to every provider. Adding a
+provider's Cesium credit, and fans the filter out to every provider. The
+context also carries `getSurface()` and `groundCaster` (bare-earth heights),
+so a provider can draw on the ground in terrain mode. Adding a
 provider: implement the definition, register it in
 `src/app/layers/streetLevel.js`, add its boolean option to the `street-level`
 group in `src/data/layerState.js` and its modules to

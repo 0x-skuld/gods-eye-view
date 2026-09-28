@@ -40,6 +40,9 @@ export function createState({ services }) {
       renderMode: 'letterbox',
     },
 
+    /** 'terrain' on Google 3D at street zoom (overlays on the bare earth), else 'draped'. */
+    surface: 'draped',
+
     marker: { collection: null, billboard: null },
     clickHandler: null,
   };

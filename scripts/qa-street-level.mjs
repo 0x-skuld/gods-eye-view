@@ -518,6 +518,70 @@ async function main() {
       void stacks;
     });
     await step(
+      'coverage sits on the bare earth on Google 3D and drapes elsewhere',
+      async () => {
+        const surface = () =>
+          page.evaluate(() => {
+            const u = window.__godsEyeView.dataManager.layers
+              .get('street-level')
+              .module.getUIState();
+            return { surface: u.surface, count: u.coverage.count };
+          });
+        const setStack = (id) =>
+          page.evaluate(
+            (stackId) =>
+              window.__godsEyeView.mapStackController.setStack(stackId),
+            id,
+          );
+        const original = await page.evaluate(() =>
+          window.__godsEyeView.mapStackController.getActiveId(),
+        );
+        // FOLLOW left the camera at eye height; look down on the city again.
+        await park();
+        await sleep(1500);
+        await setStack('esri-imagery');
+        await page.waitForFunction(
+          () =>
+            window.__godsEyeView.dataManager.layers
+              .get('street-level')
+              .module.getUIState().surface === 'draped',
+          { timeout: 10_000 },
+        );
+        const coverageLoaded = () =>
+          page.waitForFunction(
+            () => {
+              const u = window.__godsEyeView.dataManager.layers
+                .get('street-level')
+                .module.getUIState();
+              return u.coverage.count > 0 && !u.coverage.loading;
+            },
+            { timeout: 60_000 },
+          );
+        await coverageLoaded();
+        assert.equal((await surface()).surface, 'draped', 'draped on Esri');
+        const photoreal = await page.evaluate(() =>
+          window.__godsEyeView.mapStackController.isStackAvailable('photoreal'),
+        );
+        if (photoreal) {
+          await setStack('photoreal');
+          await page.waitForFunction(
+            () =>
+              window.__godsEyeView.dataManager.layers
+                .get('street-level')
+                .module.getUIState().surface === 'terrain',
+            { timeout: 15_000 },
+          );
+          await coverageLoaded();
+          assert.equal((await surface()).surface, 'terrain');
+        } else {
+          console.log(
+            '  (Google 3D unavailable here: only the draped path ran)',
+          );
+        }
+        await setStack(original);
+      },
+    );
+    await step(
       'EXPAND opens a modal dialog and Esc returns focus to the button',
       async () => {
         await page.click('#sl-viewer-expand');

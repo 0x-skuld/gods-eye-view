@@ -8,6 +8,8 @@
 
 - Street Level: a provider-neutral street-level imagery layer modelled on the iD editor's photo overlay. One panel in the right rail carries a chip per imagery provider, shared 360°/flat and captured-since filters, coverage drawn on the globe from orbit down to a single street, image cones per sequence, and one embedded viewer whose adapter follows the provider of the open image; each active provider credits its imagery on the globe, and share links carry the provider switches and the filter. Mapillary is the first provider (free client token; CC BY-SA 4.0 imagery); Google Street View, KartaView and Panoramax are next. The panel is kept simple: the viewer opens at the top so the photo needs no scrolling, the header pill and the provider chips switch the layer, and SINCE is a slider. FOLLOW (the globe camera following the street-level view) is available on the Google 3D map only.
 
+- Street Level coverage no longer floats over trees and bridges on the Google 3D map. At street zoom, sequence lines, image cones and the position marker are placed on the bare earth from the terrain service (with a 2 m lift) instead of being draped on the top of the photoreal mesh, so buildings and tree canopies hide what is behind them; other maps and higher views keep draped lines. Opening a photo no longer flies the camera underground when the Google tiles under it have not loaded yet.
+
 - CCTV cameras whose bearing is a guess now say so. Packs mark bearings derived
   from a hash of the camera id as `headingConfidence: 'low'`, but nothing read the
   flag, so roughly 70% of a default catalog rendered like surveyed facings. The HUD

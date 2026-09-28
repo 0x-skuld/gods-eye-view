@@ -77,29 +77,59 @@ export function createSequences({ state, source, parts }) {
     state.sequence.images = [];
   }
 
+  /**
+   * Terrain heights for the cones in terrain mode (Google 3D at street zoom),
+   * so they stand on the street rather than on roofs and tree tops. Null when
+   * draped, or when some height is not cached yet; that fetches the heights
+   * and draws the cones again.
+   */
+  function coneHeights(images) {
+    const ground = state.context.groundCaster;
+    if (state.context.getSurface?.() !== 'terrain' || !ground) return null;
+    const heights = images.map((image) =>
+      ground.heightAt(image.lon, image.lat),
+    );
+    if (!heights.includes(null)) return heights;
+    ground
+      .prepare(images.map((image) => [image.lon, image.lat]))
+      .then((ready) => {
+        if (ready && state.sequence.images === images) renderCones(images);
+      });
+    return null;
+  }
+
   function renderCones(images) {
     const collection = state.sequence.collection;
     if (!collection) return;
     collection.removeAll();
+    const heights = coneHeights(images);
     const cone = imageConeGlyph({ size: 32, color: COLORS.image });
     const ring = imageConeGlyph({ size: 32, color: COLORS.pano, pano: true });
-    for (const image of images) {
-      if (!passesImageryFilter(image, state.filter)) continue;
+    images.forEach((image, index) => {
+      if (!passesImageryFilter(image, state.filter)) return;
+      const height = heights?.[index] ?? null;
       collection.add({
         id: `${PICK_PREFIX.image}${image.id}`,
-        position: Cesium.Cartesian3.fromDegrees(image.lon, image.lat),
+        position: Cesium.Cartesian3.fromDegrees(
+          image.lon,
+          image.lat,
+          height ?? 0,
+        ),
         image: image.isPano ? ring : cone,
         imageId: image.isPano ? 'mly-cone-pano' : 'mly-cone',
         width: IMAGE_CONE_SIZE_PX,
         height: IMAGE_CONE_SIZE_PX,
         rotation: -Cesium.Math.toRadians(image.compassAngle),
         alignedAxis: Cesium.Cartesian3.UNIT_Z,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        heightReference:
+          height === null
+            ? Cesium.HeightReference.CLAMP_TO_GROUND
+            : Cesium.HeightReference.NONE,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         scaleByDistance: new Cesium.NearFarScalar(200, 1.1, 6000, 0.35),
       });
-    }
+    });
     requestRender();
   }
 

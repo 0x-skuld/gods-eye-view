@@ -15,10 +15,12 @@
  * @property {(context: ProviderContext) => ProviderInstance} create
  *
  * @typedef {object} ProviderContext   Handed to `create()` once by the core.
- * @property {object} services         Scene services: picking, input, render, sprites, ground.
+ * @property {object} services         Scene services: picking, input, render, sprites, ground, terrain.
  * @property {() => object|null} getViewer   The Cesium viewer once the layer is initialised.
  * @property {() => {pano: string, sinceMs: number|null}} getFilter   The resolved imagery filter.
  * @property {() => boolean} isActive  Layer enabled and this provider switched on.
+ * @property {() => 'draped'|'terrain'} getSurface   'terrain' on Google 3D at street zoom: draw on the bare earth, not the mesh top.
+ * @property {GroundCaster|null} groundCaster   Bare-earth heights for terrain mode (groundCast.js); null without a terrain service.
  * @property {() => void} notify       Ask the core to publish a new UI snapshot.
  * @property {{openImage: (imageId: string) => Promise<void>, reportError: (message: string|null) => void}} actions
  *
@@ -30,6 +32,7 @@
  * @property {(viewer: object) => void} destroy
  * @property {() => void} refreshCoverage
  * @property {(filter: {pano: string, sinceMs: number|null}) => void} setFilter
+ * @property {(mode: 'draped'|'terrain') => void} [setSurface]   Redraw coverage and cones for the new surface mode.
  * @property {() => {count: number, zoom: number|null, kind: string|null, loading: boolean, hint: string, error: string|null, keyRequired: boolean}} coverageStats
  * @property {(pickId: string) => boolean} handlePick   The id carries the provider's own prefix.
  * @property {(sequenceId: string) => Promise<void>} [selectSequence]
@@ -37,6 +40,13 @@
  * @property {() => {selectedId: string|null, images: number, loading: boolean}} [sequenceStats]
  * @property {(point: {lat: number, lon: number}) => Promise<string|null>} nearestImage
  * @property {ViewerAdapter} viewer
+ *
+ * @typedef {object} GroundCaster
+ * @property {(points: Array<[number, number]>, options?: {signal?: AbortSignal}) => Promise<boolean>} prepare   Fetch the heights around [lon, lat] points; true when all are known.
+ * @property {(lines: Array<Array<[number, number]>>, options?: {signal?: AbortSignal}) => Promise<boolean>} prepareLines
+ * @property {(lon: number, lat: number) => number|null} groundAt    Cached bare-earth ellipsoidal height.
+ * @property {(lon: number, lat: number) => number|null} heightAt    groundAt plus the overlay lift.
+ * @property {(coords: Array<[number, number]>) => Array<number>|null} castLine   Densified [lon, lat, height, ...] or null.
  *
  * @typedef {object} ViewerAdapter
  * @property {(host: HTMLElement) => Promise<void>} mount     Idempotent; may lazy-load a library.

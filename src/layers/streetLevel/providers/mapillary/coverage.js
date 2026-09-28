@@ -19,6 +19,8 @@ import {
   PICK_PREFIX,
 } from './policy.js';
 
+/** Draped lines stay at most this long while a tile's cast lines build. */
+const SWAP_MAX_WAIT_MS = 4000;
 /** Old-zoom tiles are kept at most this long after a zoom change. */
 const STALE_TILE_MAX_MS = 6000;
 /**
@@ -47,6 +49,11 @@ function sequenceColor(sequence, { selected = false, now = Date.now() } = {}) {
  * Camera-driven coverage: z0–5 `overview` points from orbit down to 60 km,
  * then z11–14 sequence polylines clamped to terrain and 3D tiles. Decoded
  * tiles are kept so the imagery filter can rebuild without refetching.
+ *
+ * In the core's terrain surface mode (Google 3D at street zoom) a tile's
+ * lines are cast to the bare earth instead: draped lines would land on roofs
+ * and tree tops. A tile is drawn draped first and swapped for its cast lines
+ * once the terrain heights are in, so coverage never waits on the terrain.
  */
 export function createCoverage({ state, source }) {
   const { render } = state.services;
@@ -68,51 +75,156 @@ export function createCoverage({ state, source }) {
     return state.filter;
   }
 
-  /** One or more ground primitives for a tile's sequences, in draw batches. */
+  function terrainMode() {
+    return (
+      state.context.getSurface?.() === 'terrain' &&
+      Boolean(state.context.groundCaster)
+    );
+  }
+
+  function sequenceInstance(sequence, geometry, now) {
+    return new Cesium.GeometryInstance({
+      geometry,
+      id: `${PICK_PREFIX.sequence}${sequence.id}`,
+      attributes: {
+        color: Cesium.ColorGeometryInstanceAttribute.fromColor(
+          sequenceColor(sequence, {
+            now,
+            selected: sequence.id === state.sequence.selectedId,
+          }),
+        ),
+      },
+    });
+  }
+
+  /**
+   * Primitives for a tile's sequences, in draw batches: ground primitives
+   * draped on the globe, plus (in terrain mode) plain polylines at the cast
+   * bare-earth heights for every sequence whose heights are cached.
+   */
   function buildSequencePrimitives(sequences) {
     const now = Date.now();
-    const instances = [];
+    const ground = terrainMode() ? state.context.groundCaster : null;
+    const draped = [];
+    const cast = [];
     for (const sequence of sequences) {
       if (!passesImageryFilter(sequence, filter())) continue;
-      const flat = [];
-      for (const [lon, lat] of sequence.coordinates) flat.push(lon, lat);
+      const flat = ground?.castLine(sequence.coordinates);
       let positions;
       try {
-        positions = Cesium.Cartesian3.fromDegreesArray(flat);
+        positions = flat
+          ? Cesium.Cartesian3.fromDegreesArrayHeights(flat)
+          : Cesium.Cartesian3.fromDegreesArray(sequence.coordinates.flat());
       } catch {
         continue;
       }
       if (positions.length < 2) continue;
-      instances.push(
-        new Cesium.GeometryInstance({
-          geometry: new Cesium.GroundPolylineGeometry({
-            positions,
-            width: COVERAGE_LINE_WIDTH_PX,
-          }),
-          id: `${PICK_PREFIX.sequence}${sequence.id}`,
-          attributes: {
-            color: Cesium.ColorGeometryInstanceAttribute.fromColor(
-              sequenceColor(sequence, {
-                now,
-                selected: sequence.id === state.sequence.selectedId,
-              }),
-            ),
-          },
-        }),
-      );
+      if (flat)
+        cast.push(
+          sequenceInstance(
+            sequence,
+            new Cesium.PolylineGeometry({
+              positions,
+              width: COVERAGE_LINE_WIDTH_PX,
+              vertexFormat: Cesium.PolylineColorAppearance.VERTEX_FORMAT,
+              arcType: Cesium.ArcType.NONE,
+            }),
+            now,
+          ),
+        );
+      else
+        draped.push(
+          sequenceInstance(
+            sequence,
+            new Cesium.GroundPolylineGeometry({
+              positions,
+              width: COVERAGE_LINE_WIDTH_PX,
+            }),
+            now,
+          ),
+        );
     }
     const primitives = [];
-    for (let i = 0; i < instances.length; i += SEQUENCE_PRIMITIVE_BATCH)
-      primitives.push(
-        new Cesium.GroundPolylinePrimitive({
-          geometryInstances: instances.slice(i, i + SEQUENCE_PRIMITIVE_BATCH),
+    for (let i = 0; i < draped.length; i += SEQUENCE_PRIMITIVE_BATCH)
+      primitives.push({
+        onGround: true,
+        primitive: new Cesium.GroundPolylinePrimitive({
+          geometryInstances: draped.slice(i, i + SEQUENCE_PRIMITIVE_BATCH),
           appearance: new Cesium.PolylineColorAppearance(),
           classificationType: Cesium.ClassificationType.BOTH,
           asynchronous: true,
           allowPicking: true,
         }),
+      });
+    for (let i = 0; i < cast.length; i += SEQUENCE_PRIMITIVE_BATCH)
+      primitives.push({
+        onGround: false,
+        primitive: new Cesium.Primitive({
+          geometryInstances: cast.slice(i, i + SEQUENCE_PRIMITIVE_BATCH),
+          appearance: new Cesium.PolylineColorAppearance({ translucent: true }),
+          asynchronous: true,
+          allowPicking: true,
+        }),
+      });
+    return { primitives, count: draped.length + cast.length, draped };
+  }
+
+  /**
+   * Fetch the terrain heights a tile's lines need, then redraw the tile cast.
+   * Runs once per tile entry; unresolved lines stay draped.
+   */
+  function castTile(entry) {
+    if (entry.castRequested || !terrainMode()) return;
+    entry.castRequested = true;
+    entry.castAbort = new AbortController();
+    const { signal } = entry.castAbort;
+    const lines = entry.sequenceList
+      .filter((sequence) => passesImageryFilter(sequence, filter()))
+      .map((sequence) => sequence.coordinates);
+    state.context.groundCaster.prepareLines(lines, { signal }).then(() => {
+      const attached = [...state.coverage.tiles.values()].includes(entry);
+      if (signal.aborted || !attached || !terrainMode()) return;
+      // Keep the draped lines until the cast ones are built, so nothing blinks.
+      const previous = entry.primitives;
+      entry.primitives = [];
+      attachPrimitive(entry);
+      removeWhenReady(entry, previous);
+    });
+  }
+
+  /**
+   * Remove a tile's previous primitives once all its current ones are ready
+   * (or after a few seconds); detaching the tile removes them at once.
+   */
+  function removeWhenReady(entry, old) {
+    const scene = state.viewer?.scene;
+    finishSwap(entry);
+    if (!scene?.postRender) {
+      removePrimitives(old);
+      return;
+    }
+    const fresh = entry.primitives;
+    const started = Date.now();
+    const stop = scene.postRender.addEventListener(() => {
+      const ready = fresh.every(
+        ({ primitive }) => primitive.ready || primitive.isDestroyed?.(),
       );
-    return { primitives, count: instances.length };
+      if (!ready && Date.now() - started < SWAP_MAX_WAIT_MS) {
+        requestRender();
+        return;
+      }
+      finishSwap(entry);
+      requestRender();
+    });
+    entry.swap = { old, stop };
+    requestRender();
+  }
+
+  function finishSwap(entry) {
+    if (!entry.swap) return;
+    entry.swap.stop();
+    removePrimitives(entry.swap.old);
+    entry.swap = null;
   }
 
   function buildOverviewCollection(points) {
@@ -141,10 +253,14 @@ export function createCoverage({ state, source }) {
     const scene = state.viewer?.scene;
     if (!scene) return;
     if (entry.kind === 'sequence') {
-      const { primitives, count } = buildSequencePrimitives(entry.sequenceList);
+      const { primitives, count, draped } = buildSequencePrimitives(
+        entry.sequenceList,
+      );
       entry.primitives = primitives;
       entry.count = count;
-      for (const primitive of primitives) scene.groundPrimitives.add(primitive);
+      for (const { primitive, onGround } of primitives)
+        (onGround ? scene.groundPrimitives : scene.primitives).add(primitive);
+      if (draped.length) castTile(entry);
     } else {
       const { collection, count } = buildOverviewCollection(entry.points);
       entry.primitive = collection;
@@ -153,15 +269,23 @@ export function createCoverage({ state, source }) {
     }
   }
 
-  function detachPrimitive(entry) {
+  function removePrimitives(list) {
     const scene = state.viewer?.scene;
-    for (const primitive of entry.primitives || []) {
+    for (const { primitive, onGround } of list || []) {
       try {
-        scene?.groundPrimitives?.remove(primitive);
+        (onGround ? scene?.groundPrimitives : scene?.primitives)?.remove(
+          primitive,
+        );
       } catch {
         /* already gone */
       }
     }
+  }
+
+  function detachPrimitive(entry) {
+    const scene = state.viewer?.scene;
+    finishSwap(entry);
+    removePrimitives(entry.primitives);
     entry.primitives = [];
     if (entry.primitive) {
       try {
@@ -173,9 +297,16 @@ export function createCoverage({ state, source }) {
     }
   }
 
+  /** Stop a tile's pending terrain lookup (tile dropped or retired). */
+  function cancelCast(entry) {
+    entry.castAbort?.abort();
+    entry.castAbort = null;
+  }
+
   function removeTile(key) {
     const entry = state.coverage.tiles.get(key);
     if (!entry) return;
+    cancelCast(entry);
     detachPrimitive(entry);
     state.coverage.tiles.delete(key);
   }
@@ -254,6 +385,7 @@ export function createCoverage({ state, source }) {
     state.coverage.pending.clear();
     state.coverage.loading = 0;
     for (const [key, entry] of state.coverage.tiles) {
+      cancelCast(entry);
       const previous = state.coverage.stale.get(key);
       if (previous) detachPrimitive(previous);
       state.coverage.stale.set(key, entry);
@@ -350,11 +482,19 @@ export function createCoverage({ state, source }) {
   function rebuild() {
     purgeStale();
     for (const entry of state.coverage.tiles.values()) {
+      cancelCast(entry);
+      entry.castRequested = false;
       detachPrimitive(entry);
       attachPrimitive(entry);
     }
     requestRender();
     notify();
+  }
+
+  /** Redraw loaded tiles draped or cast after the core's surface mode changes. */
+  function setSurface() {
+    if (!state.context.isActive()) return;
+    rebuild();
   }
 
   /** Look a sequence up across loaded tiles. */
@@ -372,7 +512,7 @@ export function createCoverage({ state, source }) {
     for (const entry of state.coverage.tiles.values()) {
       const sequence = entry.sequences.get(id);
       if (!sequence) continue;
-      for (const primitive of entry.primitives || []) {
+      for (const { primitive } of entry.primitives || []) {
         if (!primitive.ready) continue;
         try {
           const attributes =
@@ -402,6 +542,7 @@ export function createCoverage({ state, source }) {
     refresh,
     clear,
     rebuild,
+    setSurface,
     findSequence,
     recolorSequence,
     sequenceCount,

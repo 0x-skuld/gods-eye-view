@@ -9,7 +9,11 @@ import { requiresKeyIdFor, validateProviders } from './registry.js';
 import { normalizeFilter, resolveFilter, sameFilter } from './filter.js';
 import { decodeParams, encodeParams } from './params.js';
 import { composeUIState, summarizeCoverage } from './uiState.js';
-import { viewCentre } from './view.js';
+import { cameraHeightAboveGround, viewCentre } from './view.js';
+import { createGroundCaster, nextSurfaceMode } from './groundCast.js';
+
+/** Above this camera height the ground under the camera is not worth fetching. */
+const SURFACE_WARM_BELOW_M = 6000;
 import {
   FOLLOW_MAP_STACK_ID,
   NEAREST_RADIUS_M,
@@ -35,6 +39,9 @@ export function createStreetLevelLayer({
   const state = createState({ services });
   const parts = {};
   const context = { state, parts };
+  parts.groundCaster = services.terrain?.resolveEllipsoidalGround
+    ? createGroundCaster({ terrain: services.terrain })
+    : null;
   parts.credits = createCredits();
   parts.marker = createMarker(context);
   parts.follow = createCameraFollow(context);
@@ -83,6 +90,10 @@ export function createStreetLevelLayer({
       getViewer: () => state.viewer,
       getFilter: () => resolveFilter(state.filter),
       isActive: () => state.enabled && entry.on,
+      /** Bare-earth heights (see groundCast.js), or null without a terrain service. */
+      groundCaster: parts.groundCaster,
+      /** 'terrain' when overlays should sit on the bare earth, else 'draped'. */
+      getSurface: () => state.surface,
       notify,
       actions: {
         openImage: (imageId) => openImage(entry.def.id, imageId),
@@ -110,6 +121,75 @@ export function createStreetLevelLayer({
     state.street.followAvailable = available;
     if (!available && state.street.follow) parts.follow.setFollow(false);
     notify();
+  }
+
+  /**
+   * Camera height above the bare earth under it, for the surface mode. The
+   * ground comes from the caster's coarse grid; a cold cell is fetched once
+   * and the mode checked again when it lands.
+   */
+  function cameraHeightForSurface() {
+    const carto = state.viewer?.camera?.positionCartographic;
+    if (!carto) return null;
+    const fallback = cameraHeightAboveGround(state.viewer);
+    if (!(fallback < SURFACE_WARM_BELOW_M)) return fallback;
+    const lon = (carto.longitude * 180) / Math.PI;
+    const lat = (carto.latitude * 180) / Math.PI;
+    const ground = parts.groundCaster.heightAt(lon, lat);
+    if (ground !== null) return carto.height - ground;
+    parts.groundCaster.prepare([[lon, lat]]).then((ready) => {
+      if (ready) scheduleSurfaceSync();
+    });
+    return fallback;
+  }
+
+  /**
+   * On Google 3D at street zoom, overlays are cast to the bare earth; draped
+   * lines would land on roofs and trees. Elsewhere they stay draped.
+   */
+  function syncSurface() {
+    const available = Boolean(parts.groundCaster) && state.enabled;
+    const photoreal = mapStack?.getActiveId?.() === FOLLOW_MAP_STACK_ID;
+    const mode = nextSurfaceMode(state.surface, {
+      available,
+      photoreal,
+      heightM: available && photoreal ? cameraHeightForSurface() : null,
+    });
+    if (mode === state.surface) return;
+    state.surface = mode;
+    parts.marker.setSurface(mode);
+    for (const entry of state.providers.values())
+      entry.instance.setSurface?.(mode);
+    notify();
+  }
+
+  let surfaceTimer = null;
+  function scheduleSurfaceSync() {
+    clearTimeout(surfaceTimer);
+    surfaceTimer = setTimeout(syncSurface, 150);
+  }
+
+  let removeSurfaceListeners = null;
+  function watchSurface(viewer) {
+    removeSurfaceListeners?.();
+    const camera = viewer?.camera;
+    if (!camera?.changed || !camera?.moveEnd) {
+      removeSurfaceListeners = null;
+      return;
+    }
+    const removeChanged = camera.changed.addEventListener(scheduleSurfaceSync);
+    const removeEnd = camera.moveEnd.addEventListener(scheduleSurfaceSync);
+    removeSurfaceListeners = () => {
+      removeChanged();
+      removeEnd();
+    };
+  }
+
+  function unwatchSurface() {
+    removeSurfaceListeners?.();
+    removeSurfaceListeners = null;
+    clearTimeout(surfaceTimer);
+    surfaceTimer = null;
   }
 
   const activeEntries = () =>
@@ -213,6 +293,7 @@ export function createStreetLevelLayer({
       providers: providerSnapshots(),
       street,
       sequence: sequenceSnapshot(),
+      surface: state.surface,
     });
   }
 
@@ -247,13 +328,17 @@ export function createStreetLevelLayer({
       parts.marker.setVisible(true);
       parts.selection.install(viewer);
       for (const entry of activeEntries()) activate(entry);
+      watchSurface(viewer);
+      syncSurface();
       notify();
     },
 
     disable() {
       state.enabled = false;
+      unwatchSurface();
       parts.viewerHost.unmount();
       for (const entry of state.providers.values()) entry.instance.deactivate();
+      syncSurface();
       parts.credits.hideAll(state.viewer);
       parts.selection.uninstall();
       parts.marker.setVisible(false);
@@ -300,8 +385,12 @@ export function createStreetLevelLayer({
       unsubscribeMapStack?.();
       mapStack = controller || null;
       unsubscribeMapStack =
-        mapStack?.subscribe?.(() => syncFollowAvailability()) || null;
+        mapStack?.subscribe?.(() => {
+          syncFollowAvailability();
+          syncSurface();
+        }) || null;
       syncFollowAvailability();
+      syncSurface();
     },
 
     /** Share-link and stored state: provider switches plus the filter. */
