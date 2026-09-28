@@ -80,7 +80,7 @@ export class StreetLevelControls {
     });
     for (const button of this.root.querySelectorAll('[data-sl-pano]')) {
       this.listen(button, 'click', () =>
-        this.layer.setCoverageFilter?.({ pano: button.dataset.slPano }),
+        this._setParams({ pano: button.dataset.slPano }),
       );
     }
     // The readout follows the thumb; coverage is rebuilt once, on release.
@@ -92,7 +92,7 @@ export class StreetLevelControls {
       el.sinceRange.setAttribute('aria-valuetext', label);
     });
     this.listen(el.sinceRange, 'change', () =>
-      this.layer.setCoverageFilter?.({ sinceDays: sinceDays() }),
+      this._setParams({ sinceDays: sinceDays() }),
     );
     this.listen(el.followBtn, 'click', () => {
       this.layer.setFollow?.(!(this._state?.street?.follow === true));
@@ -161,6 +161,17 @@ export class StreetLevelControls {
   }
 
   /**
+   * Filter and provider changes go through the data manager as a user params
+   * request, so saved state and share links record them; the layer applies
+   * them through its own `setParams`.
+   */
+  _setParams(params) {
+    if (this.actions.setParams)
+      this.actions.setParams(params, { origin: 'user' });
+    else this.layer.setParams?.(params);
+  }
+
+  /**
    * A provider chip is the layer's switch: lighting one turns the layer on
    * with that provider; darkening the last lit one turns the layer off (the
    * provider stays switched on, so the layer comes back with it).
@@ -169,7 +180,7 @@ export class StreetLevelControls {
     const chip = this._view?.providers.find((entry) => entry.id === providerId);
     if (!chip) return;
     if (!chip.active) {
-      this.layer.setProviderEnabled?.(providerId, true);
+      this._setParams({ [providerId]: true });
       await this._ensureEnabled();
       return;
     }
@@ -177,7 +188,7 @@ export class StreetLevelControls {
       (entry) => entry.id !== providerId && entry.active,
     );
     if (othersLit) {
-      this.layer.setProviderEnabled?.(providerId, false);
+      this._setParams({ [providerId]: false });
       return;
     }
     try {

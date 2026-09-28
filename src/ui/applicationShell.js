@@ -948,6 +948,8 @@ export class StyleManager extends ShellFacade {
           this._dataManager?.setEnabled('street-level', enabled, {
             origin: 'user',
           }),
+        setParams: (params, options) =>
+          this._dataManager?.setLayerParams('street-level', params, options),
         setPanelCollapsed: (collapsed, options) =>
           this.setPanelCollapsed('street-level-panel', collapsed, options),
         dockPanel: () => this._panelChrome.dockPanel('street-level-panel'),

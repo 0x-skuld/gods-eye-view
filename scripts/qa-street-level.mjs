@@ -330,6 +330,15 @@ async function main() {
         const after = (await ui()).coverage.count;
         assert.ok(after <= before, `${after} ≤ ${before}`);
         assert.equal((await ui()).filter.pano, 'pano');
+        // The click is a user params request, so the share link records it
+        // (Street Level's share token is `0`).
+        await page.waitForFunction(
+          () =>
+            /(^|_)0\.p\.p(_|$)/.test(
+              new URLSearchParams(location.hash.slice(1)).get('lo') || '',
+            ),
+          { timeout: 10_000 },
+        );
         await page.click('[data-sl-pano="all"]');
         await sleep(600);
         assert.equal((await ui()).coverage.count, before);
