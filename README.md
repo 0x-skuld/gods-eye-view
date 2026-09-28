@@ -340,7 +340,7 @@ Turn on **Street Level** under DATA LAYERS → Cameras, or open the STREET LEVEL
 
 The panel is also a window: drag its header to lift it out of the rail, and resize it from any edge or corner. A larger window gives the photo the room; only the settings below it scroll. Double-clicking the header, collapsing the window, or pressing SHRINK after EXPAND puts it back in the rail at its default size, so it never stays parked over the globe.
 
-Share links carry the layer's provider switches and filter (`3.m.0` turns Mapillary off, `3.p.p` keeps only panoramas, `3.s.365` shows the last year). Adding a provider means implementing the contract in `src/layers/streetLevel/registry.js` and registering it in `src/app/layers/streetLevel.js`; the chip, credit and share bit follow.
+Share links carry the layer's provider switches and filter (`0.m.0` turns Mapillary off, `0.p.p` keeps only panoramas, `0.s.365` shows the last year). Adding a provider means implementing the contract in `src/layers/streetLevel/registry.js` and registering it in `src/app/layers/streetLevel.js`; the chip, credit and share bit follow.
 
 ## 🎖️ Field Missions
 

@@ -39,6 +39,8 @@
     "doctor": "node scripts/setup-doctor.mjs",
     "format": "node scripts/format.mjs --write",
     "format:check": "node scripts/format.mjs --check",
+    "layer-token:check": "node scripts/check-layer-state-tokens.mjs",
+    "layer-token:next": "node scripts/next-layer-state-token.mjs",
     "opensky:import": "./scripts/opensky-import-client.sh",
     "preview": "vite preview",
     "qa:map-source-tray": "node scripts/qa-map-source-tray.mjs",
