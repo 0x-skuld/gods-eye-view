@@ -66,7 +66,12 @@ export function normalizeTileAddress({ layer, z, x, y }) {
 /** @type {Map<string, {bytes: Buffer, at: number}>} insertion-ordered LRU */
 const _memory = new Map();
 let _memoryBytes = 0;
-/** @type {Map<string, Promise<Buffer>>} */
+/**
+ * Upstream fetches in progress, shared by every request for the same tile.
+ * A flight owns its controller; callers only count as waiters, and the last
+ * waiter to leave cancels it (see `joinFlight`).
+ * @type {Map<string, {controller: AbortController, promise: Promise<Buffer>, waiters: number}>}
+ */
 const _inFlight = new Map();
 
 function memoryGet(key) {
@@ -181,18 +186,64 @@ export async function fetchTile(request, { signal } = {}) {
     memoryPut(address.key, bytes);
     return { bytes, source: 'disk', address };
   }
-  const pending = _inFlight.get(address.key);
-  if (pending) return { bytes: await pending, source: 'inflight', address };
-  const work = fetchUpstream(address, signal)
+  let flight = _inFlight.get(address.key);
+  const joined = Boolean(flight) && !flight.controller.signal.aborted;
+  if (!joined) flight = startFlight(address);
+  const bytes = await joinFlight(flight, signal);
+  return { bytes, source: joined ? 'inflight' : 'upstream', address };
+}
+
+/** Start the one upstream fetch for a tile, owned by the flight itself. */
+function startFlight(address) {
+  const controller = new AbortController();
+  const flight = { controller, waiters: 0, promise: null };
+  flight.promise = fetchUpstream(address, controller.signal)
     .then((raw) => trim(address, raw))
     .then((bytes) => {
       memoryPut(address.key, bytes);
       writeDisk(address, bytes);
       return bytes;
     })
-    .finally(() => _inFlight.delete(address.key));
-  _inFlight.set(address.key, work);
-  return { bytes: await work, source: 'upstream', address };
+    .finally(() => {
+      if (_inFlight.get(address.key) === flight) _inFlight.delete(address.key);
+    });
+  // Every waiter may have left before it settles; nobody awaits it then.
+  flight.promise.catch(() => {});
+  _inFlight.set(address.key, flight);
+  return flight;
+}
+
+/**
+ * Wait on a shared flight as one caller. The caller's own abort rejects it at
+ * once without disturbing the others; the upstream fetch is cancelled only
+ * when the last waiter leaves.
+ * @param {{controller: AbortController, promise: Promise<Buffer>, waiters: number}} flight
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<Buffer>}
+ */
+function joinFlight(flight, signal) {
+  signal?.throwIfAborted();
+  flight.waiters++;
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const leave = () => {
+      if (done) return false;
+      done = true;
+      signal?.removeEventListener('abort', onAbort);
+      flight.waiters--;
+      return true;
+    };
+    const onAbort = () => {
+      if (!leave()) return;
+      if (flight.waiters === 0) flight.controller.abort();
+      reject(signal.reason);
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    flight.promise.then(
+      (bytes) => leave() && resolve(bytes),
+      (error) => leave() && reject(error),
+    );
+  });
 }
 
 /** Test seam: forget every cached tile held in memory. */

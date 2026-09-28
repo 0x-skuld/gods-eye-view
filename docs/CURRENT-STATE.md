@@ -2784,7 +2784,10 @@ Share options: `m` (Mapillary on/off), `p` (a/p/f panorama mode), `s`
 turns amber and the controls stay disabled; with it, coverage draws as
 ground-clamped sequence lines (z0–5 overview points from orbit, z11–14
 sequences below 60 km) and the proxy strips the unused `image` point layer
-from z14 tiles in transit (12 MB → ~80 KB).
+from z14 tiles in transit (12 MB → ~80 KB). Concurrent requests for one tile
+share a single upstream fetch that owns its own abort controller: a request
+that is abandoned leaves at once without cancelling the others, and the fetch
+is cancelled only when its last waiter leaves.
 
 On Google 3D (`photoreal`) at street zoom the layer switches its surface mode
 from `draped` to `terrain` (`getUIState().surface`; in below 1,400 m above the

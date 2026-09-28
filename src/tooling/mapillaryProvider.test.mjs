@@ -202,6 +202,131 @@ test('fetchTile serves from memory after one upstream fetch and strips the image
   }
 });
 
+/**
+ * A deferred upstream for in-flight tests: every fetch waits until released,
+ * and records whether its signal was aborted. Coordinates use z9, which the
+ * app never requests, and their disk files are removed first.
+ */
+async function withDeferredUpstream(tiles, run) {
+  const savedFetch = globalThis.fetch;
+  const savedToken = process.env.MAPILLARY_CLIENT_TOKEN;
+  process.env.MAPILLARY_CLIENT_TOKEN = 'MLY|test|token';
+  _resetTileMemoryForTest();
+  for (const { z, x, y } of tiles)
+    await fsp
+      .rm(
+        path.join(
+          process.cwd(),
+          `.gev-cache/mapillary/tiles/coverage/${z}/${x}-${y}.pbf`,
+        ),
+      )
+      .catch(() => {});
+  const body = (() => {
+    const writer = new PbfWriter();
+    writer.writeMessage(
+      3,
+      (layer, pbf) => {
+        pbf.writeVarintField(15, 2);
+        pbf.writeStringField(1, layer.name);
+      },
+      { name: 'sequence' },
+    );
+    return Buffer.from(writer.finish());
+  })();
+  const upstream = [];
+  globalThis.fetch = (url, { signal } = {}) =>
+    new Promise((resolve, reject) => {
+      const call = { url: String(url), signal, aborted: false };
+      call.release = () =>
+        resolve(
+          new Response(body, {
+            status: 200,
+            headers: { 'content-type': 'application/x-protobuf' },
+          }),
+        );
+      signal?.addEventListener(
+        'abort',
+        () => {
+          call.aborted = true;
+          reject(signal.reason);
+        },
+        { once: true },
+      );
+      upstream.push(call);
+    });
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  try {
+    await run({ upstream, settle, body });
+  } finally {
+    globalThis.fetch = savedFetch;
+    if (savedToken === undefined) delete process.env.MAPILLARY_CLIENT_TOKEN;
+    else process.env.MAPILLARY_CLIENT_TOKEN = savedToken;
+    _resetTileMemoryForTest();
+  }
+}
+
+test('a joined tile request survives the first caller abandoning it', async () => {
+  const tile = { layer: 'coverage', z: 9, x: 1, y: 1 };
+  await withDeferredUpstream([tile], async ({ upstream, settle }) => {
+    const first = new AbortController();
+    const second = new AbortController();
+    const a = fetchTile(tile, { signal: first.signal });
+    await settle();
+    const b = fetchTile(tile, { signal: second.signal });
+    await settle();
+    assert.equal(upstream.length, 1, 'one upstream request for both');
+    first.abort();
+    await assert.rejects(a, { name: 'AbortError' });
+    assert.equal(upstream[0].aborted, false, 'the shared fetch keeps going');
+    upstream[0].release();
+    const joined = await b;
+    assert.equal(joined.source, 'inflight');
+    assert.deepEqual(listTileLayers(joined.bytes), ['sequence']);
+    assert.equal(upstream.length, 1);
+  });
+});
+
+test('a joined caller that aborts leaves at once and the first still gets the tile', async () => {
+  const tile = { layer: 'coverage', z: 9, x: 2, y: 2 };
+  await withDeferredUpstream([tile], async ({ upstream, settle }) => {
+    const first = new AbortController();
+    const second = new AbortController();
+    const a = fetchTile(tile, { signal: first.signal });
+    await settle();
+    const b = fetchTile(tile, { signal: second.signal });
+    await settle();
+    second.abort();
+    await assert.rejects(b, { name: 'AbortError' });
+    assert.equal(upstream[0].aborted, false);
+    upstream[0].release();
+    assert.equal((await a).source, 'upstream');
+  });
+});
+
+test('the upstream tile fetch is cancelled once every waiter has left', async () => {
+  const tile = { layer: 'coverage', z: 9, x: 3, y: 3 };
+  await withDeferredUpstream([tile], async ({ upstream, settle }) => {
+    const first = new AbortController();
+    const second = new AbortController();
+    const a = fetchTile(tile, { signal: first.signal });
+    await settle();
+    const b = fetchTile(tile, { signal: second.signal });
+    await settle();
+    first.abort();
+    await assert.rejects(a, { name: 'AbortError' });
+    assert.equal(upstream[0].aborted, false, 'one waiter is still there');
+    second.abort();
+    await assert.rejects(b, { name: 'AbortError' });
+    assert.equal(upstream[0].aborted, true, 'the last waiter cancels it');
+    // A later request for the same tile starts a fresh fetch.
+    const again = fetchTile(tile);
+    await settle();
+    assert.equal(upstream.length, 2);
+    upstream[1].release();
+    assert.equal((await again).source, 'upstream');
+  });
+});
+
 // ── Tile trimming (relocated from server/providers/mapillary/trim.test.mjs) ──
 /** Build a minimal MVT: layers with a name, a version and one opaque feature. */
 function tile(layers) {
