@@ -222,7 +222,7 @@ Consult the linked official advisory for safety decisions.
 
 Voice and HUD snapshots reuse the existing feedState classifier. Analyst follow-ups retain their original data provenance; current-view results append provenance without replacing legacy fields. HUD context and deterministic telemetry include non-nominal feed state.
 
-Satellite and local infrastructure layers expose on-demand analyst records through their current factory owners. Analyst counts and ranks explicitly cover only bounded examined loaded records (default 2,000 per new layer, core satellite rows before dense extras); omitted records can change nearest/count and satellite distance is ground distance. Existing tools and result fields remain available.
+Analyst records come on demand from each layer's `getAnalystRecords`: flights, military, local ADS-B, vessels, satellites, launches, earthquakes, FIRMS (VIIRS and MODIS, with a `sensor` field), fire perimeters, cyclones, transit, bikeshare, ALPR cameras, mapped installations, datacenters and dams. `analyst_query` counts the whole loaded set (up to 250,000 records per layer; past that `coverage.records` reports `returned`, `total` and `truncated: true` and the result carries `complete: false`). Ranking keeps a top-k and scans in 20,000-row slices that yield to the page and stop when superseded. It refuses unknown fields, operators, units that do not convert (`altitudeM(ft)` converts), wrong-typed values, invalid centres, unknown scope kinds and sort fields with `code` and `allowed`, refuses a follow-up with no previous answer (`NO_RESULT_CONTEXT`) or naming other layers than that answer (`FOLLOW_UP_MISMATCH`), and tells `LAYER_OFF`, `NOT_READY` and `FEED_UNAVAILABLE` apart from a real zero; when only some layers can answer the result is `partial` with `unanswered` ids. The Contacts-window path applies the same filters, ranking and item shape to the panel cohort. A superseded query never replaces follow-up memory. Items carry `lat`/`lon`; the feed window (earthquakes and FIRMS: last 24 h), the precise scope and any caveat sit in `display`, which is on-screen detail rather than something the model recites. "In view" is still a radius around the view centre, not the visible footprint. Satellite distance is ground distance.
 
 Keyless terrain tiles retry when Re:Earth throttles them. The browser fetches
 `terrain.reearth.land/cesium-mesh/ellipsoid/{z}/{x}/{y}.terrain` directly; no
@@ -297,6 +297,45 @@ replacement session; audio meters release failed initialization and reject revok
 frames. Delayed action results and post-capture continuations cannot resume a
 stopped conversation or send output into a replacement. See [voice ownership](VOICE-OWNERSHIP.md).
 
+Voice speech: `src/voice/speech.js` adds `{ say, display, referents?, schedule? }`
+to layer toggles, fly_to_location, frame_overhead, select_nearest_aircraft,
+get_entity_context and annotate_map (analyst_query plugs in through the
+runner's `speechBuilders`). `get_current_view_state` lists enabled layers only.
+The voice card nested in the mic control (`voiceCard.js`) shows captions, plan
+steps and the result. `resultDisplay.js` is the one adapter from a result to
+the card: builder results show as built, and analyst results show a title
+with their scope, window and caveats. Caveats are on the card; the model speaks
+one only when it changes the answer, and always says lower bounds and partial
+answers. `narration.js` speaks one
+code-authored line for the current step of a tool still running at 1.5 s
+(out of band, never after the result). Tools that report steps: layer
+toggles, place lookups, select_nearest_aircraft and annotate_map (finding,
+outlining). Other tools get one "still working" line at 8 s. The
+earcon plays in push-to-talk only. A claimed Space hold while the assistant
+speaks is a barge-in (WebRTC cancel + audio clear), refused while Radio holds
+the speaker (`mayVoiceClaimSpeaker()`). Progress lines stay outside the reply
+lifecycle and Radio handoff. `turn.span` debug records carry generation and
+playback latency, silence, preamble and word-count figures. Caption
+transcription (`OPENAI_REALTIME_TRANSCRIBE_MODEL`, default on) is metered into
+the session cost and cap. The debug log omits transcripts and text unless
+`GEV_VOICE_LOG_CONTENT=1`.
+
+Point and ask: `pointerContext.js` reads what the cursor is on. A Space hold
+is the pointing gesture: its keydown snapshot (released with the key) is sent
+as an inert `pointer_context` item with the target, with reticle and chip.
+Open-mic speech and typed turns count only a pointer that moved on the map in
+the last 5 s and send only the kind (`pointing:"aircraft"`/`"ground"`); the chip appears when a tool
+resolves it. Losing the pointer sends one `target:"none"` item. `deixis.js` resolves `'pointer'` in
+track_entity/fly_to_location queries, get_entity_context scope, analyst_query
+`scope.kind` and annotate_map targets, plus `referent:n` from the latest
+numbered result (`referents.js`, cleared at session end). A new result set (an analyst count) replaces
+the numbered list even when it is empty. A reticle marks the
+point during the turn and the voice card shows "THIS"/"HERE"; both hide in
+Clean-UI and recording. A ground-only pointer lookup at local/city scale sends a ringed 512 px crop in
+the one retained image slot, dropped if the camera moved or a newer capture or
+turn started; screenX/screenY against the crop are mapped back to the canvas. Harness: `qa-voice-routing.mjs --layer deixis`,
+`--layer deixis-live`, `--layer behavior --deixis-only`.
+
 The application shell composes focused state owners for navigation, destination
 lookup/orbit, Cockpit, visual settings, panel layout, aircraft display and layer
 bindings. Keyboard/display subscriptions have a separate lifetime; existing
@@ -363,9 +402,11 @@ Reference feed construction is exported through `sources/reference`; the cable s
 
 Source factories have dedicated `layers/<family>/source` exports. ALPR and earthquake record normalization and CCTV source policy no longer pull rendering into source consumers. Catalog construction and voice feed reads use their focused owners; compatibility entries remain available. Settings filesystem hardening lives under `server/standalone/`. Import-direction checks complement export ownership checks; source behavior, settings policy and rendering are unchanged.
 
-Voice controls bind to a protocol-independent session factory. The default WebRTC adapter preserves the existing Realtime connection, push-to-talk, cost controls and radio handoff. Session subscriptions expose state, transcript, action call/result, interruption and completion events; stopping or replacing a session cancels pending actions. Alternate adapters can use the same controls and action runner.
+Voice controls bind to a protocol-independent session factory. The default WebRTC adapter preserves the existing Realtime connection, push-to-talk, cost controls and radio handoff. Session subscriptions expose state, transcript, action call/progress/result, interruption, completion and turn-metrics events; stopping or replacing a session cancels pending actions. Alternate adapters can use the same controls and action runner.
 
-Voice action argument schemas have one portable owner under `src/voice/actionSchemas.js`. The Realtime provider builds 29 tools, retaining the existing 28 names and argument contracts apart from the three additive analyst-layer enum values using separate description-only metadata. Description customization cannot replace argument types, enum values or required fields.
+Voice action argument schemas have one portable owner under `src/voice/actionSchemas.js`. The Realtime provider builds 30 tools using separate description-only metadata. Description customization cannot replace argument types, enum values or required fields.
+
+`src/voice/layerManifest.js` declares each catalog layer's voice capabilities: spoken aliases, `toggle`, in-view `context`, `track`, and analyst `query` fields with type and unit, or `noQuery` with the reason. The `set_layer_visibility`, `show_data_layers_menu`, `get_entity_context` and `analyst_query` layer enums, the runner's alias table and the analyst field hints are generated from it. `src/voice/layerManifest.test.mjs` fails when a catalog layer is neither listed nor named in `VOICE_OFF_LAYERS` (today only the two scene-driven Bhote Koshi layers). Global Context is listed with `toggle: false`; `set_context_mode` reaches it. `set_panel_open` also opens `weather-panel` and `recent-imagery-panel`.
 
 Portable source exports provide Radio Browser station normalization, CCTV feed types and regional records independently of HTTP middleware. Radio normalization accepts an explicit URL policy; the standalone directory retains its existing HTTPS rules. Tile coordinate validation accepts explicit zoom bounds with unchanged traffic defaults. Cache, request and rendering owners remain unchanged.
 
@@ -408,7 +449,10 @@ clears caches and removes map-stack listeners. Standalone setup supplies the
 existing service clients. HUD summaries, regional brief, cockpit weather, location
 framing and annotation boundaries receive their service instances explicitly.
 Compatibility entrypoints retain defaults for direct callers; normal startup does
-not change global service slots. Analyst follow-up memory belongs to its voice runner.
+not change global service slots. Analyst follow-up memory belongs to its voice
+runner and ends with the voice session: stopping voice invalidates writes still in
+flight and forgets the last answer, the pointer and the numbered list; removing
+voice disposes the runner.
 
 Application startup constructs fresh layer instances from explicit source objects.
 Standalone composition selects the existing providers. Controls, launch orbit
@@ -3849,7 +3893,7 @@ and unreachable upstream (502/504) separately from road geometry.
 - **Reliability**: tool-call dedupe (2.5s window across call/item/args keys); response-create queueing that respects active responses and defers follow-ups when the user starts speaking; per-tool follow-up instructions so the agent confirms only what actually happened (zoom confirms only on `ok=true`).
 - **Aircraft identity honesty:** “What is this aircraft?” reads callsign, operator, registration, type, and route only from the selected contact context. Missing operator, route, or type enrichment is named explicitly rather than silently omitted or inferred from the callsign.
 - **Diagnostics**: every client/server event is posted to `/api/realtime/debug-log` and appended to `.gev-logs/realtime-conversations.jsonl` (gitignored) with secret/image redaction; last 30 errors persist in `localStorage` (`gev-realtime-errors`); `window.__gevVoiceCommands.getDiagnostics()` in the console.
-- **Counting semantics ("near")** — a CONTRACT; new count-bearing tool work inherits it. Three honest numbers exist for one question: the Contacts cohort (250 km around the subject, what the panel shows), `analyst_query`'s count of _currently-loaded_ records for the requested scope, and the layer-wide loaded total in `coverage.layersQueried[].records`. They diverge legitimately — the flights layer loads by viewport, so after a camera dive the loaded set can hold a fraction of the cohort (field case: panel 42, analyst 8). The contract:
+- **Counting semantics ("near")** — a CONTRACT; new count-bearing tool work inherits it. Three honest numbers exist for one question: the Contacts cohort (250 km around the subject, what the panel shows), `analyst_query`'s count of _currently-loaded_ records for the requested scope, and the layer-wide loaded total in `coverage.layersQueried[].total`. They diverge legitimately — the flights layer loads by viewport, so after a camera dive the loaded set can hold a fraction of the cohort (field case: panel 42, analyst 8). The contract:
   1. **Contacts ACTIVE** → "near / nearby / how many aircraft" means the **Contacts window** — the panel's numbers, spoken verbatim. Mechanism: `contactsWindow` (`{centeredOn, radiusKm, flights, military, vessels}`), carried by both `analyst_query` and `get_current_view_state`, derived by `contactsWindowFromSnapshot()` from the same snapshot the panel renders so the two cannot drift. A cohort whose feed cannot answer reports `'unknown'`, never a confident zero.
   2. **Contacts OFF** → "nearby" means **in view**; "near \<place\>" means a radius around that place. A radius query with Contacts active and no explicit centre is centred on the **active contact**, not the camera.
   3. **Every count names its scope in words** — "42 in your window", "8 in view", "about 30 within 250 km of Austin" — never a bare number. `analyst_query` returns `scopeLabel` so this is mechanical. Two different numbers with named scopes are not a contradiction.

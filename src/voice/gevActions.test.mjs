@@ -1,3 +1,4 @@
+import { createReferentRegistry } from './referents.js';
 import { createStandalonePlaceSearch } from '../standalone/placeSearch.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -730,7 +731,9 @@ test('Data Layers voice inventory hides the Context coordinator while current-vi
   const menu = await runner('show_data_layers_menu');
   assert.deepEqual(menu.layers.map(({ id }) => id), ['flights']);
   const current = await runner('get_current_view_state');
-  assert.deepEqual(current.layers.map(({ id }) => id), ['flights', 'military-awareness']);
+  // Enabled layers only; the disabled ones are counted, not listed.
+  assert.deepEqual(current.layers.map(({ id }) => id), ['military-awareness']);
+  assert.equal(current.disabledLayerCount, 1);
   // The Contacts mode's internal id is 'flights'; the tools accept 'contacts'.
   // State output reports the accepted word so the model cannot read its own
   // active context as "off", with the internal id kept for layer reasoning.
@@ -1062,7 +1065,8 @@ test('generic layer visibility exposes lifecycle truth for every manager phase a
     layerId: 'radio',
     enabled: true,
   });
-  assert.deepEqual(missingRadio, {
+  const { say, display, ...missingRadioOutcome } = missingRadio;
+  assert.deepEqual(missingRadioOutcome, {
     ok: false,
     action: 'set_layer_visibility',
     layerId: 'radio',
@@ -1071,6 +1075,9 @@ test('generic layer visibility exposes lifecycle truth for every manager phase a
     lifecycleState: 'disabled',
     lifecycleUncertain: false,
   });
+  // The voice envelope is additive and states the failure plainly.
+  assert.equal(say, "Couldn't turn on radio.");
+  assert.equal(display.title, 'radio');
 });
 
 test('generic voice visibility maps Space Missions to the explicit mission layer', async () => {
@@ -3293,4 +3300,218 @@ test('general satellite pass resolves once, refuses ambiguity, and preserves ISS
   for (const key of ['observer', 'riseIso', 'minutesFromNow', 'durationMin', 'peakElevationDeg', 'riseDirection']) assert.deepEqual(iss[key], general[key]);
   assert.equal(iss.visible, false);
   assert.equal(iss.action, 'next_iss_pass');
+});
+
+function manifestRunner(modules, { enabled = Object.keys(modules) } = {}) {
+  const viewer = {
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+    camera: {
+      moveEnd: { addEventListener() {} },
+      positionCartographic: { height: 300_000, latitude: 0.52, longitude: -1.71 },
+    },
+  };
+  const toggles = [];
+  const runner = createGevActionRunner({
+    viewer,
+    styleManager: {},
+    dataManager: {
+      layers: new Map(Object.entries(modules).map(([id, module]) => [id, { module }])),
+      isEnabled: (id) => enabled.includes(id),
+      getAll: () => Object.entries(modules).map(([id, module]) => ({
+        id, name: id, enabled: enabled.includes(id), stats: module.getStats?.() || {},
+      })),
+      async setEnabled(id, on) { toggles.push([id, on]); return true; },
+    },
+  });
+  return { runner, toggles };
+}
+
+test('analyst_query counts the whole loaded set, not a 2,000-record slice', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const rows = Array.from({ length: 8114 }, (_, i) => ({
+    id: `F${i}`, icao24: `f${i}`, lat: 10 + (i % 50), lon: 20, altitudeM: 1000 + i, onGround: false,
+  }));
+  const flights = {
+    getStats: () => ({ count: rows.length, lastUpdate: Date.now() }),
+    getAnalystRecords: (maxCount = 2000) => rows.slice(0, maxCount),
+  };
+  const { runner } = manifestRunner({ flights });
+  const result = await runner('analyst_query', { layers: ['flights'], scope: { kind: 'anywhere' }, sortBy: 'altitudeM', limit: 1 });
+  assert.equal(result.ok, true);
+  assert.equal(result.count, 8114);
+  assert.deepEqual(result.coverage.records, { returned: 8114, total: 8114, truncated: false });
+  assert.equal(result.items[0].id, 'F8113');
+  assert.equal(typeof result.items[0].lat, 'number', 'items carry lat/lon for a follow-up fly-to');
+  assert.equal(typeof result.items[0].lon, 'number');
+  assert.equal(result.display.scope, 'anywhere in the loaded data');
+  assert.equal(result.truncated, undefined, 'list length is reported as listed, not as data truncation');
+  assert.equal(result.listed, 1);
+});
+
+test('analyst_query refusals carry their code and the allowed values', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const earthquakes = {
+    getStats: () => ({ count: 1, lastUpdate: Date.now() }),
+    getAnalystRecords: () => [{ id: 'q', lat: 0, lon: 0, magnitude: 5, timeMs: Date.now() }],
+  };
+  const transit = { getStats: () => ({ count: 0 }), getAnalystRecords: () => [] };
+  const { runner } = manifestRunner({ earthquakes, transit }, { enabled: ['earthquakes'] });
+  const unknown = await runner('analyst_query', { layers: ['earthquakes'], filters: [{ field: 'time', op: 'gte', value: '2026-09-16' }] });
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.code, 'UNKNOWN_FIELD');
+  assert.ok(unknown.allowed.includes('timeMs') && unknown.allowed.includes('ageHours'));
+  const off = await runner('analyst_query', { layers: ['transit'] });
+  assert.equal(off.code, 'LAYER_OFF');
+  const ok = await runner('analyst_query', { layers: ['earthquakes'], scope: { kind: 'anywhere' } });
+  assert.equal(ok.display.window, 'last 24 h');
+  assert.match(ok.items[0].time, /^\d{4}-\d\d-\d\dT/);
+});
+
+test('spoken layer names from the manifest reach the newer layers', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const stub = () => ({ getStats: () => ({ count: 0 }) });
+  const { runner, toggles } = manifestRunner(
+    { transit: stub(), 'weather-cyclones': stub(), 'military-installations': stub() },
+    { enabled: [] },
+  );
+  for (const phrase of ['buses', 'hurricanes', 'military bases']) {
+    await runner('set_layer_visibility', { layerId: phrase, enabled: true }).catch(() => null);
+  }
+  assert.deepEqual(toggles.map(([id]) => id), ['transit', 'weather-cyclones', 'military-installations']);
+});
+
+test('the Contacts window ranks, filters and formats like any analyst answer', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const harness = awarenessSubjectHarness({
+    subject: { id: 'a1b2c3', label: 'N546PC' },
+    flights: Array.from({ length: 20 }, (_, i) => ({ id: `F${i}`, icao24: `f${i}`, distance: 1000 * (i + 1) })),
+    military: [],
+  });
+  await withAwareness(harness, async (awareness) => {
+    const flights = {
+      id: 'flights',
+      getAnalystRecords: () => Array.from({ length: 20 }, (_, i) => ({
+        id: `F${i}`, icao24: `f${i}`, lat: 30 + i / 100, lon: -97.9, altitudeM: 1000 * i,
+      })),
+    };
+    const viewer = {
+      clock: { onTick: { addEventListener: () => () => {} } },
+      scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+      camera: { moveEnd: { addEventListener() {} }, positionCartographic: { height: 300_000, latitude: 0.52, longitude: -1.71 } },
+    };
+    const runner = createGevActionRunner({
+      viewer,
+      styleManager: {},
+      dataManager: {
+        layers: new Map([['flights', { module: flights }], ['military-awareness', { module: awareness }]]),
+        isEnabled: (id) => id === 'flights',
+        getAll: () => [{ id: 'flights', name: 'Live Flights', enabled: true, stats: { count: 20 } }],
+      },
+    });
+    const farthest = await runner('analyst_query', {
+      layers: ['flights'], scope: { kind: 'radius', km: 250 }, sortBy: 'distance', sortDir: 'desc', limit: 1,
+    });
+    assert.equal(farthest.window.engine, 'contacts-window');
+    assert.equal(farthest.count, 20, 'the unfiltered count is still the panel cohort');
+    assert.equal(farthest.items[0].id, 'F19');
+    assert.equal(farthest.items[0].distanceKm, 20);
+    assert.equal(typeof farthest.items[0].lat, 'number');
+    assert.equal(farthest.listed, 1);
+    assert.match(farthest.display.scope, /Contacts window/);
+    const high = await runner('analyst_query', {
+      layers: ['flights'], scope: { kind: 'radius', km: 250 }, filters: [{ field: 'altitudeM', op: 'gte', value: 15000 }],
+    });
+    assert.equal(high.count, 5);
+  });
+});
+
+test('point-and-ask: the runner resolves pointer and referent targets', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const { viewer, styleManager } = createVoiceNavigationHarness();
+  const tracked = [];
+  const aircraft = {
+    a1b2c3: { icao24: 'a1b2c3', callsign: 'UPS793', latitude: 30.2, longitude: -97.7, altitudeM: 9000 },
+    bbb222: { icao24: 'bbb222', callsign: 'SWA12', latitude: 30.3, longitude: -97.6, altitudeM: 5000 },
+  };
+  let active = null;
+  const referents = createReferentRegistry();
+  const runner = createActionRunner({
+    viewer,
+    styleManager,
+    dataManager: {
+      layers: new Map([['flights', { module: {
+        findByQuery: (q) => aircraft[q] || null,
+        trackById: (id) => { tracked.push(id); return true; },
+      } }]]),
+      isEnabled: () => true,
+      getAll: () => [],
+    },
+    deixis: { pointer: { activeSnapshot: () => active }, referents },
+  });
+
+  const missing = await runner('track_entity', { query: 'pointer' });
+  assert.equal(missing.ok, false);
+  assert.match(missing.error, /Nothing is under the pointer/);
+  assert.equal(tracked.length, 0, 'no pointer, no side effect');
+
+  active = { fresh: true, target: 'entity', entity: { layerId: 'flights', id: 'a1b2c3', label: 'UPS793', kind: 'aircraft' }, lat: 30.2, lon: -97.7 };
+  const followed = await runner('track_entity', { query: 'pointer' });
+  assert.equal(followed.ok, true);
+  assert.deepEqual(tracked, ['a1b2c3'], 'tracks the pointed contact by identity');
+  assert.deepEqual(followed.resolvedFrom, { source: 'pointer', label: 'UPS793', layerId: 'flights' });
+
+  referents.recordResult('frame_overhead', {
+    ok: true,
+    display: { title: '2 aircraft in frame' },
+    referents: [
+      { n: 1, id: 'a1b2c3', label: 'UPS793', layerId: 'flights' },
+      { n: 2, id: 'bbb222', label: 'SWA12', layerId: 'flights' },
+    ],
+  });
+  const second = await runner('track_entity', { query: 'the second one', referent: 2 });
+  assert.equal(second.ok, true);
+  assert.equal(tracked.at(-1), 'bbb222');
+});
+
+test('point-and-ask: only accepted, current results become the referent list', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const { viewer, styleManager } = createVoiceNavigationHarness();
+  const referents = createReferentRegistry();
+  let used = 0;
+  const runner = createActionRunner({
+    viewer,
+    styleManager,
+    dataManager: {
+      layers: new Map([['flights', { module: {
+        findByQuery: () => ({ icao24: 'ccc333', callsign: 'AAL9', latitude: 1, longitude: 2 }),
+        trackById: () => true,
+      } }]]),
+      isEnabled: () => true,
+      getAll: () => [],
+    },
+    // A list-producing result, so the registry has something to record.
+    speechBuilders: {
+      track_entity: (result) => ({
+        say: null,
+        display: { title: 'Tracking' },
+        referents: [{ n: 1, id: 'ccc333', label: result.label, layerId: 'flights' }],
+      }),
+    },
+    deixis: {
+      pointer: { activeSnapshot: () => ({ fresh: true, entity: { layerId: 'flights', id: 'ccc333', label: 'AAL9' }, lat: 1, lon: 2 }) },
+      referents,
+      onPointerUsed: () => used++,
+    },
+  });
+  const aborted = new AbortController();
+  aborted.abort();
+  await runner('track_entity', { query: 'pointer' }, { signal: aborted.signal });
+  assert.equal(referents.get(1), null, 'a cancelled action leaves the registry alone');
+  assert.equal(used, 0, 'nor does it announce the pointer');
+  await runner('track_entity', { query: 'pointer' }, { isCurrent: () => false });
+  assert.equal(referents.get(1), null, 'a superseded action leaves it alone');
+  await runner('track_entity', { query: 'pointer' });
+  assert.equal(referents.get(1)?.id, 'ccc333');
+  assert.equal(used, 1, 'a current pointer resolution announces the chip');
 });
