@@ -1,10 +1,11 @@
 # God's Eye View Current State
 
-## Cyber HUD — September 23, 2026
+## Cyber HUD — September 30, 2026
 
 Display > HUD > Layout includes Cyber, also available through the HUD voice
 action and shared visual state. An explicit first transition into Cyber selects
-FLIR with Ironbow 0.42; restored links and subsequent visual tuning remain
+FLIR with Ironbow 0.42. An explicit switch back to another HUD layout restores
+the visual preset used before Cyber; restored links and scenes remain
 authoritative. The skin uses shared red/slate panel treatments in map and cockpit,
 with compact 200px collapsed controls and wider expanded panels. Other HUD
 layouts retain their existing presentation.
@@ -16,6 +17,20 @@ launchers available. Display, CCTV and Context scroll their contents inside fixe
 headers and decorative frames. The narrow-screen rail remains scrollable to reach
 each panel. Radio retains the shared nested Context player and compact
 header disclosure, without relocating playback controls on theme changes.
+
+Voice help/error popups and Location/Visual Presets pins extend beyond their
+Cyber frames without being clipped: the shapes decorate non-interactive
+pseudo-elements. The lower-left telemetry card leaves room for attribution's
+full logo row. New panels can use the [shared surface contract](panel-surfaces.md)
+for theme tokens, rail input and a fixed header with a bounded scroll body.
+Their existing owners still control disclosure, persistence and placement;
+small-screen rail popup clipping and other integration limits are documented
+in that contract.
+
+On desktop, Cyber raises the left rail so it clears the lower coordinate card.
+`layoutRightPanelRail` reads that rendered top as its measured `baseTop`, which
+keeps the right rail aligned. Cockpit retains its separate rail placement for
+its visor layout.
 
 Sonar has one contact-highlighting method. Native Cesium points, billboards and
 labels are treated in GPU draw commands without replacing their positions,

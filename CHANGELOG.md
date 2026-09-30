@@ -155,6 +155,14 @@
   panel method.
 - On phones the title bar sits 16 px from the top so both Radio broadcast
   waves stay on-screen.
+- Keep Cyber Voice help/error popups and Location/Visual Presets pins clear of
+  their decorative frames. Leave space above attribution for its full logo row.
+  Add shared panel surface hooks for theme styling, rail input and bounded body
+  scrolling without changing panel disclosure or visibility policies.
+- Restore the user's previous visual preset when they explicitly switch from
+  Cyber to another HUD layout, without overriding scene or shared-link state.
+- Move the aligned Cyber side-panel rails upward on desktop so the left stack
+  clears the lower coordinate card; keep Cockpit's independent visor layout.
 - Keep Cyber right-rail panels mutually exclusive and Display, CCTV and Context
   headers and frames fixed during content scrolling. Restore Radio's nested Context placement and compact
   player. Add Cyber Sonar voice controls with settings and effect-state readback.

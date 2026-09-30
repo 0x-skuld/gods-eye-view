@@ -196,6 +196,7 @@ export class VisualSettings {
       releaseRender: services.releaseContinuousRender,
     });
     this.activeStyle = 'normal';
+    this._preCyberStyle = null;
     document.documentElement.dataset.gevStyle = this.activeStyle;
     this._detectionUserOverridden = false;
     this._cockpitVisionMode = 'optical';
@@ -614,6 +615,16 @@ export class VisualSettings {
     const previousVariant = this.hud.getVariant();
     this.hud.setVariant(variantName);
     const nextVariant = this.hud.getVariant();
+    const enteredCyber = previousVariant !== 'cyber' && nextVariant === 'cyber';
+    const leftCyber = previousVariant === 'cyber' && nextVariant !== 'cyber';
+    if (!applyVisualDefaults) {
+      // Scene/share/programmatic state is authoritative even when it reapplies
+      // the current Cyber variant. Do not let an older explicit entry restore
+      // stale local preset memory on the next user-selected exit.
+      this._preCyberStyle = null;
+    } else if (enteredCyber) {
+      this._preCyberStyle = this.activeStyle;
+    }
     if (this._hudLayoutSelect && this._hudLayoutSelect.value !== nextVariant) {
       this._hudLayoutSelect.value = nextVariant;
     }
@@ -623,6 +634,16 @@ export class VisualSettings {
       { explicit: applyVisualDefaults },
     );
     if (visualDefaults) this._applyCyberVisualDefaults(visualDefaults);
+    if (leftCyber) {
+      const restoreStyle = applyVisualDefaults ? this._preCyberStyle : null;
+      this._preCyberStyle = null;
+      if (restoreStyle && restoreStyle !== this.activeStyle) {
+        this.setStyle(restoreStyle, {
+          applyPreset: false,
+          revealParameters: false,
+        });
+      }
+    }
     this._syncCyberSonarControl();
     this._syncShareState();
     this._scheduleAdaptivePanelLayout({ settle: true });
