@@ -32,7 +32,8 @@ checks completely; unsupported keywords are rejected at definition time.
 `run(args, { services, signal })` resolves to `{ summary, data }`: one sentence
 for people and a structured object for programs. A tool may also return `images`,
 each `{ mimeType, data }` with base64 data; the MCP adapter sends them as image
-content.
+content. MCP results carry the summary and the data as JSON text, plus the data
+as `structuredContent`, for clients that read only one of them.
 
 `composeCatalog({ tools, services, replace, interceptors })` builds a catalog:
 

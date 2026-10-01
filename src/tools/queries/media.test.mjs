@@ -97,7 +97,7 @@ test('a snapshot returns the frame as an image with its credit', async () => {
     method: 'tools/call',
     params: { name: 'get_cctv_snapshot', arguments: { camera_id: 'austin-1' } },
   });
-  assert.deepEqual(response.result.content[1], {
+  assert.deepEqual(response.result.content[2], {
     type: 'image',
     data: 'iVBORw0KGgo=',
     mimeType: 'image/png',

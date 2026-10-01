@@ -125,7 +125,10 @@ test('tool results carry text and structured content; failures stay generic', as
     (await request('tools/call', { name: 'count', arguments: { n: 3 } }))
       .result,
     {
-      content: [{ type: 'text', text: '3 things.' }],
+      content: [
+        { type: 'text', text: '3 things.' },
+        { type: 'text', text: '{"n":3}' },
+      ],
       structuredContent: { n: 3 },
       isError: false,
     },
