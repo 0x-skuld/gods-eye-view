@@ -10,6 +10,7 @@ import {
   areaCenter,
   areaContains,
   distanceKm,
+  polygonsTouchArea,
   resolveArea,
   resolvePoint,
 } from '../area.js';
@@ -237,8 +238,9 @@ export const getFirePerimeters = defineTool({
   async run(args, { services, signal }) {
     const area = await resolveArea(args.area, { services, signal });
     const rows = (await services.perimeters.getSnapshot({ signal }))
+      .filter((fire) => polygonsTouchArea(fire.polygons, area))
       .map((fire) => ({ fire, point: polygonCenter(fire.polygons) }))
-      .filter(({ point }) => point && areaContains(area, point))
+      .filter(({ point }) => point)
       .map(({ fire, point }) => ({
         id: fire.stableId,
         name: fire.name,

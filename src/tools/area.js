@@ -296,3 +296,38 @@ export function lineTouchesArea(coords, area) {
   }
   return false;
 }
+
+/** Whether a point lies inside a ring of `[lon, lat]` vertices (ray casting). */
+function ringContains(ring, point) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (
+      yi > point.lat !== yj > point.lat &&
+      point.lon < ((xj - xi) * (point.lat - yi)) / (yj - yi) + xi
+    )
+      inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Whether polygons (each a list of `[lon, lat]` rings, outer ring first)
+ * overlap an area: a vertex inside it, an edge crossing it, or the area's
+ * center inside a polygon and outside its holes.
+ */
+export function polygonsTouchArea(polygons, area) {
+  const center = areaCenter(area);
+  return (polygons || []).some((rings) => {
+    if (!Array.isArray(rings) || !rings.length) return false;
+    const closed = rings.map((ring) =>
+      ring.length && ring[0] !== ring.at(-1) ? [...ring, ring[0]] : ring,
+    );
+    if (closed.some((ring) => lineTouchesArea(ring, area))) return true;
+    return (
+      ringContains(rings[0], center) &&
+      !rings.slice(1).some((hole) => ringContains(hole, center))
+    );
+  });
+}

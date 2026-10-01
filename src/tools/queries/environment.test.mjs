@@ -665,3 +665,32 @@ test('brief sections use a named place at its own point', async () => {
   assert.deepEqual(queries[0], { latitude: 35.6769, longitude: 139.7639 });
   assert.match(result.data.sections.aircraft.summary, /in Tokyo, Japan\.$/);
 });
+
+test('a fire perimeter enclosing the whole area is found', async () => {
+  const perimeters = {
+    getSnapshot: async () => [
+      {
+        stableId: 'big',
+        name: 'Big Fire',
+        acres: 250000,
+        polygons: [
+          [
+            [
+              [-122, 38],
+              [-120, 38],
+              [-120, 40],
+              [-122, 40],
+            ],
+          ],
+        ],
+      },
+    ],
+  };
+  const result = await catalogWith({ perimeters }).call('get_fire_perimeters', {
+    area: { bbox: [-121.2, 38.9, -120.8, 39.1] },
+  });
+  assert.deepEqual(
+    result.data.rows.map((row) => row.id),
+    ['big'],
+  );
+});

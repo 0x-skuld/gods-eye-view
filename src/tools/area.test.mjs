@@ -5,6 +5,7 @@ import {
   areaContains,
   distanceKm,
   lineTouchesArea,
+  polygonsTouchArea,
   resolveArea,
 } from './area.js';
 import { placeFromGeocodeResult } from './places.js';
@@ -223,4 +224,24 @@ test('lines touch an area when a segment crosses it with no vertex inside', asyn
       nearDateline,
     ),
   );
+});
+
+test('polygons touch an area by vertex, crossing edge or enclosing it', async () => {
+  const box = await resolveArea({ bbox: [-1, -1, 1, 1] });
+  const square = (half, x = 0) => [
+    [
+      [x - half, -half],
+      [x + half, -half],
+      [x + half, half],
+      [x - half, half],
+    ],
+  ];
+  assert.ok(polygonsTouchArea([square(5)], box), 'encloses the area');
+  assert.ok(polygonsTouchArea([square(0.5)], box), 'inside the area');
+  assert.ok(polygonsTouchArea([square(1, 1.5)], box), 'overlaps an edge');
+  assert.ok(!polygonsTouchArea([square(0.5, 5)], box), 'elsewhere');
+  const ring = [...square(5), ...square(3)];
+  assert.ok(!polygonsTouchArea([ring], box), 'the area sits in a hole');
+  const circle = await resolveArea({ lat: 0, lon: 0, radius_km: 20 });
+  assert.ok(polygonsTouchArea([square(5)], circle));
 });
