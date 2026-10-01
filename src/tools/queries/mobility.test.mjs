@@ -177,6 +177,8 @@ const vehicles = [
   },
   { id: 'v3', lat: 30.5, lon: -97.6, routeId: '1' },
 ];
+// One minute after v1's fix.
+const clock = { now: () => Date.UTC(2026, 0, 1, 0, 1) };
 const transit = (
   snapshot = { ok: true, status: 200, json: async () => ({ vehicles }) },
 ) => ({
@@ -197,7 +199,7 @@ test('transit vehicles come from nearby feeds and can be limited to a route', as
   const source = transit();
   const catalog = composeCatalog({
     tools: coreTools,
-    services: { transit: source },
+    services: { transit: source, clock },
   });
   const all = await catalog.call('get_transit_vehicles', { area: downtown });
   assert.equal(
@@ -223,6 +225,7 @@ test('transit vehicles come from nearby feeds and can be limited to a route', as
   assert.deepEqual(all.data.feeds, [
     {
       name: 'CapMetro',
+      status: 'current',
       operator: 'Capital Metro',
       attribution: 'Capital Metro',
       license: 'Open data',
@@ -368,5 +371,36 @@ test('traffic reports a missing key, empty areas and areas that are too wide', a
       { area: { bbox: [-100, 30, -95, 35] } },
     ),
     /too large for traffic detail/,
+  );
+});
+
+test('transit marks stale feeds and drops expired positions', async () => {
+  const headers = new Headers({ 'x-gev-cache': 'STALE-ERROR' });
+  const snapshot = (extra) => ({
+    ok: true,
+    status: 200,
+    headers,
+    json: async () => ({
+      vehicles: [
+        vehicles[0],
+        { ...vehicles[0], id: 'old', timestamp: 1767225600 - 3600 },
+      ],
+      ...extra,
+    }),
+  });
+  const result = await composeCatalog({
+    tools: coreTools,
+    services: { transit: transit(snapshot()), clock },
+  }).call('get_transit_vehicles', { area: downtown });
+  assert.deepEqual(
+    result.data.rows.map((row) => row.id),
+    ['v1'],
+  );
+  assert.equal(result.data.expired_positions_dropped, 1);
+  assert.equal(result.data.stale, true);
+  assert.equal(result.data.feeds[0].status, 'stale');
+  assert.equal(
+    result.summary,
+    '1 transit vehicle in 2 km around 30.267, -97.743 (1 feed stale; positions may be out of date).',
   );
 });

@@ -3123,7 +3123,11 @@
       "src/tools/queries/events.js",
       "src/data/bhoteKoshiFloodPath.js",
       "src/tools/functions.js",
-      "src/tools/surfaces.js"
+      "src/tools/surfaces.js",
+      "src/layers/transit/policy.js",
+      "src/data/transitFeeds.js",
+      "src/layers/transit/movement.js",
+      "src/data/contactPlayback.js"
     ],
     "external": ["satellite.js"]
   },

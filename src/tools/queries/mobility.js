@@ -4,6 +4,10 @@ import {
   parseStationInformation,
   parseStationStatus,
 } from '../../sources/gbfsStations.js';
+import {
+  FEED_STALE_AFTER_MS,
+  isStaleVehicleFix,
+} from '../../layers/transit/policy.js';
 import { defineTool, ToolError } from '../catalog.js';
 import {
   AREA_SCHEMA,
@@ -157,6 +161,7 @@ export const getTransitVehicles = defineTool({
         data: { ...capRows([], args.limit), feeds: [] },
       };
     const center = areaCenter(area);
+    const now = services.clock?.now() ?? Date.now();
     const results = await Promise.allSettled(
       feeds.map(async (feed) => {
         const response = await services.transit.requestSnapshot(feed.id, {
@@ -164,7 +169,31 @@ export const getTransitVehicles = defineTool({
         });
         if (!response.ok) throw new Error(`Transit HTTP ${response.status}`);
         const snapshot = await response.json();
-        return (snapshot.vehicles || []).map((vehicle) => ({ feed, vehicle }));
+        // The app's freshness rules: the operator's fetch time ages the
+        // snapshot, and fixes older than the vehicle limit are not shown.
+        const fetchedAt = Number.isFinite(snapshot.fetchedAt)
+          ? Math.min(snapshot.fetchedAt, now)
+          : now;
+        const contacted = Number.parseInt(
+          response.headers?.get?.('x-transit-contact') || '',
+          10,
+        );
+        const answeredAt = Math.max(
+          fetchedAt,
+          Number.isFinite(contacted) ? Math.min(contacted, now) : fetchedAt,
+        );
+        const stale =
+          response.headers?.get?.('x-gev-cache') === 'STALE-ERROR' ||
+          now - answeredAt > FEED_STALE_AFTER_MS;
+        const vehicles = snapshot.vehicles || [];
+        const current = vehicles.filter(
+          (vehicle) => !isStaleVehicleFix(vehicle, now, fetchedAt),
+        );
+        return {
+          stale,
+          expired: vehicles.length - current.length,
+          vehicles: current.map((vehicle) => ({ feed, vehicle })),
+        };
       }),
     );
     signal?.throwIfAborted();
@@ -175,7 +204,9 @@ export const getTransitVehicles = defineTool({
       );
     const wanted = args.route?.trim().toLowerCase();
     const rows = results
-      .flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+      .flatMap((result) =>
+        result.status === 'fulfilled' ? result.value.vehicles : [],
+      )
       .filter(({ vehicle }) => areaContains(area, vehicle))
       .filter(
         ({ vehicle }) =>
@@ -205,15 +236,36 @@ export const getTransitVehicles = defineTool({
     const failed = results.filter(
       (result) => result.status === 'rejected',
     ).length;
+    const answered = results
+      .filter((result) => result.status === 'fulfilled')
+      .map((result) => result.value);
+    const staleFeeds = answered.filter((feed) => feed.stale).length;
+    const expired = answered.reduce((total, feed) => total + feed.expired, 0);
+    const notes = [
+      ...(failed ? [`${countNoun(failed, 'feed')} unavailable`] : []),
+      ...(staleFeeds
+        ? [
+            `${countNoun(staleFeeds, 'feed')} stale; positions may be out of date`,
+          ]
+        : []),
+    ];
     const what = args.route ? ` on route ${args.route}` : '';
     return {
       summary:
         `${countNoun(rows.length, 'transit vehicle')}${what} in ${area.label}` +
-        (failed ? ` (${countNoun(failed, 'feed')} unavailable).` : '.'),
+        (notes.length ? ` (${notes.join('; ')}).` : '.'),
       data: {
         ...capRows(rows, args.limit),
-        feeds: feeds.map((feed) => ({
+        stale: staleFeeds > 0,
+        expired_positions_dropped: expired,
+        feeds: feeds.map((feed, index) => ({
           name: feed.name,
+          status:
+            results[index].status === 'rejected'
+              ? 'unavailable'
+              : results[index].value.stale
+                ? 'stale'
+                : 'current',
           operator: feed.operator ?? null,
           attribution: feed.attribution ?? null,
           license: feed.license ?? null,
