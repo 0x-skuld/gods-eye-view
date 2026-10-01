@@ -75,7 +75,11 @@ export async function resolveArea(area, { services, signal } = {}) {
       'invalid_arguments',
       `No place matched "${area.place}"; try a more specific name or a bbox`,
     );
-  return { label: place.name || area.place, ...place.bounds };
+  return {
+    label: place.name || area.place,
+    ...place.bounds,
+    ...(place.point ? { point: place.point } : {}),
+  };
 }
 
 function circleArea(lat, lon, radiusKm) {
@@ -151,9 +155,13 @@ export function distanceKm(a, b) {
   return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-/** The center of a resolved area, handling boxes across the antimeridian. */
+/**
+ * The center of a resolved area: a radius area's center, a named place's own
+ * point, or the middle of a box (handling boxes across the antimeridian).
+ */
 export function areaCenter(area) {
   if (area.center) return { lat: area.center.lat, lon: area.center.lon };
+  if (area.point) return { lat: area.point.lat, lon: area.point.lon };
   const width =
     area.west <= area.east
       ? area.east - area.west

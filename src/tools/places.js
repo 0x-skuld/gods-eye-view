@@ -13,7 +13,11 @@ import { ToolError } from './catalog.js';
 
 const POINT_RADIUS_DEGREES = 0.25;
 
-/** Resolve place names to `{ name, bounds: { west, south, east, north } }` or null. */
+/**
+ * Resolve place names to `{ name, bounds: { west, south, east, north }, point }`
+ * or null. `point` is the place's own location, which can lie far from the
+ * middle of its bounds (a region with remote islands, for example).
+ */
 export function createGeocodePlaceService({
   fetchImpl = (...args) => globalThis.fetch(...args),
 } = {}) {
@@ -54,7 +58,11 @@ export function placeFromGeocodeResult(result) {
           east: Math.min(180, location.lng + POINT_RADIUS_DEGREES),
           north: Math.min(90, location.lat + POINT_RADIUS_DEGREES),
         };
-  return { name: result.formatted_address || null, bounds };
+  return {
+    name: result.formatted_address || null,
+    bounds,
+    point: { lat: location.lat, lon: location.lng },
+  };
 }
 
 /** Search points of interest; `configured` is false when the server has no search key. */
