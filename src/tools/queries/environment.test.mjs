@@ -263,10 +263,14 @@ test('terrain heights are returned in request order', async () => {
 
 test('military installations need a bounded area and are nearest first', async () => {
   const requested = [];
+  const options = [];
+  let saturated = false;
   const installations = {
-    async getMappedSites(box) {
+    async getMappedSites(box, { signal, ...rest } = {}) {
       requested.push(box);
+      options.push(rest);
       return {
+        saturated,
         source: 'OpenStreetMap',
         records: [
           {
@@ -302,7 +306,18 @@ test('military installations need a bounded area and are nearest first', async (
     ['osm:2', 'osm:1'],
   );
   assert.equal(result.data.source, 'OpenStreetMap');
+  assert.equal(result.data.complete, true);
   assert.ok(requested[0].north - requested[0].south < 1);
+  assert.deepEqual(options[0], { exact: true, thinned: false });
+  saturated = true;
+  const partial = await catalog.call('find_military_installations', {
+    area: { lat: 32.7, lon: -117.2, radius_km: 20 },
+  });
+  assert.equal(partial.data.complete, false);
+  assert.match(
+    partial.summary,
+    /\(partial: the source returned only some sites\)\.$/,
+  );
   await assert.rejects(
     catalog.call('find_military_installations', {
       area: { bbox: [-130, 20, -100, 50] },

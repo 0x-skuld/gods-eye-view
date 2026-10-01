@@ -355,8 +355,12 @@ export const findMilitaryInstallations = defineTool({
       );
     const center = areaCenter(area);
     const result = await services.installations.getMappedSites(area, {
+      exact: true,
+      thinned: false,
       signal,
     });
+    // A saturated source returned only part of the mapped sites.
+    const complete = !result.saturated;
     const rows = (result.records || [])
       .map((site) => ({
         site,
@@ -374,8 +378,14 @@ export const findMilitaryInstallations = defineTool({
       }))
       .sort((a, b) => a.distance_km - b.distance_km);
     return {
-      summary: `${countNoun(rows.length, 'mapped military installation')} in ${area.label}.`,
-      data: { ...capRows(rows, args.limit), source: result.source ?? null },
+      summary:
+        `${countNoun(rows.length, 'mapped military installation')} in ${area.label}` +
+        (complete ? '.' : ' (partial: the source returned only some sites).'),
+      data: {
+        ...capRows(rows, args.limit),
+        complete,
+        source: result.source ?? null,
+      },
     };
   },
 });
