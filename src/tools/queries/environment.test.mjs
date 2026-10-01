@@ -453,3 +453,81 @@ test('the HUD caption summarizes the brief through the summary service', async (
     (error) => error instanceof ToolError && error.code === 'unavailable',
   );
 });
+
+test('military awareness gathers contacts around a point and marks failures', async () => {
+  const contact = (id, latitude, longitude) => ({
+    id,
+    reference: id,
+    latitude,
+    longitude,
+    callsign: 'RCH123',
+    baroAltitudeM: 9000,
+    onGround: false,
+    positionTimeMs: Date.UTC(2026, 0, 1),
+  });
+  const military = {
+    getSnapshot: async () => ({
+      records: [contact('ae1234', 32.8, -117.1), contact('ae9999', 40, -100)],
+      complete: true,
+      source: 'Military feed',
+      freshness: 'current',
+    }),
+  };
+  const aircraft = {
+    getSnapshot: async () => {
+      throw new Error('upstream down');
+    },
+  };
+  const installations = {
+    getMappedSites: async () => ({
+      source: 'OpenStreetMap',
+      records: [
+        {
+          id: 'osm:1',
+          kind: 'installation',
+          class: 'base',
+          name: 'Naval Base Point Loma',
+          latitude: 32.6941,
+          longitude: -117.2494,
+        },
+      ],
+    }),
+  };
+  const catalog = catalogWith({ military, aircraft, installations });
+  const result = await catalog.call('military_awareness', {
+    location: { lat: 32.7, lon: -117.2 },
+    radius_km: 100,
+  });
+  assert.equal(
+    result.summary,
+    'Military awareness within 100 km of 32.7000, -117.2000: ' +
+      '1 military aircraft in 100 km around 32.700, -117.200. ' +
+      '1 mapped military installation in 100 km around 32.700, -117.200.',
+  );
+  assert.deepEqual(Object.keys(result.data.sections), [
+    'military_aircraft',
+    'aircraft',
+    'installations',
+  ]);
+  assert.deepEqual(
+    result.data.sections.military_aircraft.data.rows.map((row) => row.id),
+    ['ae1234'],
+  );
+  assert.deepEqual(result.data.sections.aircraft, {
+    unavailable: true,
+    reason: 'unavailable right now',
+  });
+  assert.equal(result.data.radius_km, 100);
+  assert.equal(
+    (await catalog.call('military_awareness', { location: { lat: 0, lon: 0 } }))
+      .data.radius_km,
+    250,
+  );
+  await assert.rejects(
+    catalog.call('military_awareness', {
+      location: { lat: 0, lon: 0 },
+      radius_km: 500,
+    }),
+    /radius_km/,
+  );
+});

@@ -53,7 +53,7 @@ relative `/api/...` paths through an injected `fetchImpl`, so the same tool
 code runs wherever an application routes those paths.
 The `weather`, `regional`, `terrain`, `summary` and `features` services are the
 application request services from `gods-eye-view/application/requests`.
-`situation_brief` runs each section whose services are supplied and marks the
+`situation_brief` and `military_awareness` run each section whose services are supplied and mark the
 others unavailable. `app` is `{ baseUrl }`, the address links open. The `bikeshare` service is `{ systems, getStations }`: the system registry and
 the GBFS source. `createGeocodePlaceService` resolves place names through `/api/geocode`;
 `createPlaceSearchService` searches `/api/google/*` and reports when no search key
@@ -140,5 +140,6 @@ public feeds the sources already use.
 | `find_military_installations` | `installations` | OpenStreetMap military sites in an area of at most 10° per side |
 | `get_map_features` | `features` | Administrative areas, named places or monuments at a location (needs Overpass) |
 | `situation_brief` | `weather` | Weather, earthquakes, fires, aircraft, ships and cyclones for an area, by section |
+| `military_awareness` | `military` | Military and other aircraft, ships and military installations within 250 km of a point, by section |
 | `get_hud_caption` | `weather`, `summary` | The app's heads-up display caption for an area |
 | `open_in_gods_eye_view` | `app` | A share link looking straight down on an area, with chosen layers on |

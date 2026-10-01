@@ -17,7 +17,7 @@ stations, transit vehicles, road traffic flow, weather, weather map images
 (radar, satellite, lightning), wind, the most recent satellite image of an
 area, submarine cables, datacenters and dams, regional briefs, tropical cyclones, fire
 perimeters, terrain height, military installations and map features, plus a
-combined situation brief, the app's heads-up display caption, and a link that
+combined situation brief, military awareness around a point, the app's heads-up display caption, and a link that
 opens the app over an area. Tools reuse the layers' portable source factories, take a
 shared `area` argument (place name, bounding box, or point and radius) and cap
 lists at 25 rows by default. The app does not import the tools, so its runtime
