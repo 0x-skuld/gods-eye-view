@@ -80,7 +80,14 @@ export function createMcpServer({
           signal,
         });
         return {
-          content: [{ type: 'text', text: result.summary }],
+          content: [
+            { type: 'text', text: result.summary },
+            ...(result.images || []).map((item) => ({
+              type: 'image',
+              data: item.data,
+              mimeType: item.mimeType,
+            })),
+          ],
           structuredContent: result.data,
           isError: false,
         };

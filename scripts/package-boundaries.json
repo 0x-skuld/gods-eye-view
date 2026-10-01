@@ -3088,6 +3088,7 @@
       "src/tools/queries/hazards.js",
       "src/tools/queries/space.js",
       "src/tools/queries/aviation.js",
+      "src/tools/queries/media.js",
       "src/sources/tle.js",
       "src/data/satellitePass.js"
     ],

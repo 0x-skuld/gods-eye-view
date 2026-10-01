@@ -3,9 +3,11 @@
  * at a running God's Eye View server's `/api` routes.
  */
 
+import { createCctvSource } from '../../src/layers/cctv/source.js';
 import { createUsgsEarthquakeSource } from '../../src/layers/earthquakes/source.js';
 import { createFirmsSource } from '../../src/layers/firms/source.js';
 import { createLaunchSource } from '../../src/layers/launches/source.js';
+import { createRadioSource } from '../../src/layers/radio/source.js';
 import { createSatelliteSource } from '../../src/layers/satellites/source.js';
 import {
   createAdsbLolSource,
@@ -42,6 +44,8 @@ export function createLocalToolServices(options = {}) {
     aircraft: createOpenSkySource({ fetchImpl }),
     military: createAdsbLolSource({ fetchImpl }),
     satellites: createSatelliteSource({ fetchImpl }),
+    cctv: createCctvSource({ fetchImpl }),
+    radio: createRadioSource({ fetchImpl }),
     places: createGeocodePlaceService({ fetchImpl }),
   };
 }

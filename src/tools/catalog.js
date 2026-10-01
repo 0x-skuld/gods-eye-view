@@ -61,7 +61,8 @@ export function fromSourceError(error) {
  * Validate and freeze a tool definition.
  *
  * `run(args, { services, signal })` resolves to `{ summary, data }`: a short
- * sentence for people and a structured object for programs.
+ * sentence for people and a structured object for programs. It may add
+ * `images`, each `{ mimeType, data }` with base64 data.
  */
 export function defineTool({
   name,
@@ -146,6 +147,16 @@ export function composeCatalog({
     }
     if (!result || typeof result.summary !== 'string' || !result.data)
       throw new TypeError(`${tool.name} returned no summary or data`);
+    if (
+      result.images !== undefined &&
+      (!Array.isArray(result.images) ||
+        !result.images.every(
+          (item) =>
+            typeof item?.mimeType === 'string' &&
+            typeof item?.data === 'string',
+        ))
+    )
+      throw new TypeError(`${tool.name} returned malformed images`);
     return result;
   };
   const chain = interceptors.reduceRight(

@@ -78,6 +78,9 @@ test('the stdio server answers newline-delimited requests using only its data so
       'get_aircraft_info',
       'next_satellite_pass',
       'satellites_overhead',
+      'find_cctv_cameras',
+      'get_cctv_snapshot',
+      'find_radio_stations',
     ],
   );
   assert.equal(

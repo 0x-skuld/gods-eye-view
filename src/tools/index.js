@@ -11,6 +11,11 @@ import {
 } from './queries/aviation.js';
 import { getActiveFires, getEarthquakes } from './queries/hazards.js';
 import {
+  findCctvCameras,
+  findRadioStations,
+  getCctvSnapshot,
+} from './queries/media.js';
+import {
   getRecentLaunches,
   nextSatellitePass,
   satellitesOverhead,
@@ -43,4 +48,7 @@ export const coreTools = Object.freeze([
   getAircraftInfo,
   nextSatellitePass,
   satellitesOverhead,
+  findCctvCameras,
+  getCctvSnapshot,
+  findRadioStations,
 ]);

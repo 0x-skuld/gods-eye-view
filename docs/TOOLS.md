@@ -25,7 +25,9 @@ validates and freezes a tool. `kind` is `query` (answers from data, read-only)
 or `action`. `inputSchema` uses a JSON Schema subset that `src/tools/schema.js`
 checks completely; unsupported keywords are rejected at definition time.
 `run(args, { services, signal })` resolves to `{ summary, data }`: one sentence
-for people and a structured object for programs.
+for people and a structured object for programs. A tool may also return `images`,
+each `{ mimeType, data }` with base64 data; the MCP adapter sends them as image
+content.
 
 `composeCatalog({ tools, services, replace, interceptors })` builds a catalog:
 
@@ -93,3 +95,6 @@ public feeds the sources already use.
 | `get_aircraft_info`   | `aircraft`    | Aircraft type and registration, and flight route, from adsbdb  |
 | `next_satellite_pass` | `satellites` | Next pass over a point (default the ISS), with naked-eye visibility |
 | `satellites_overhead` | `satellites` | Satellites in a CelesTrak group above a point now, highest first |
+| `find_cctv_cameras` | `cctv` | Public cameras in an area, nearest first |
+| `get_cctv_snapshot` | `cctv` | The current image from one camera, returned as image content |
+| `find_radio_stations` | `radio` | Radio Browser stations by area and/or search terms, with stream URLs |
