@@ -52,7 +52,7 @@ code runs wherever an application routes those paths.
 The `weather`, `regional`, `terrain`, `summary` and `features` services are the
 application request services from `gods-eye-view/application/requests`.
 `situation_brief` runs each section whose services are supplied and marks the
-others unavailable. The `bikeshare` service is `{ systems, getStations }`: the system registry and
+others unavailable. `app` is `{ baseUrl }`, the address links open. The `bikeshare` service is `{ systems, getStations }`: the system registry and
 the GBFS source. `createGeocodePlaceService` resolves place names through `/api/geocode`;
 `createPlaceSearchService` searches `/api/google/*` and reports when no search key
 is configured; `createRouteService` plans routes through `/api/route`.
@@ -122,3 +122,4 @@ public feeds the sources already use.
 | `get_map_features` | `features` | Administrative areas, named places or monuments at a location (needs Overpass) |
 | `situation_brief` | `weather` | Weather, earthquakes, fires, aircraft, ships and cyclones for an area, by section |
 | `get_hud_caption` | `weather`, `summary` | The app's heads-up display caption for an area |
+| `open_in_gods_eye_view` | `app` | A share link looking straight down on an area |

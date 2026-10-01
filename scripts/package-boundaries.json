@@ -3097,6 +3097,7 @@
       "src/tools/queries/environment.js",
       "src/tools/queries/brief.js",
       "src/tools/queries/maritime.js",
+      "src/tools/queries/share.js",
       "src/sources/gbfsStations.js",
       "src/sources/tle.js",
       "src/data/satellitePass.js"

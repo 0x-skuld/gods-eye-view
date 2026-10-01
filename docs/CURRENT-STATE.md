@@ -13,7 +13,8 @@ pass over a point, and those overhead now), public cameras (including a
 camera's current image), radio stations, place search, routing, bike-share
 stations, transit vehicles, road traffic flow, weather, regional briefs, tropical cyclones, fire
 perimeters, terrain height, military installations and map features, plus a
-combined situation brief and the app's heads-up display caption. Tools reuse the layers' portable source factories, take a
+combined situation brief, the app's heads-up display caption, and a link that
+opens the app over an area. Tools reuse the layers' portable source factories, take a
 shared `area` argument (place name, bounding box, or point and radius) and cap
 lists at 25 rows by default. The app does not import the tools, so its runtime
 behavior is unchanged. See [tools and the MCP server](TOOLS.md).

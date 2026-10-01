@@ -31,6 +31,7 @@ import {
   getTransitVehicles,
 } from './queries/mobility.js';
 import { placesNearby, planRoute, searchPlaces } from './queries/places.js';
+import { openInGodsEyeView } from './queries/share.js';
 import {
   findCctvCameras,
   findRadioStations,
@@ -95,4 +96,5 @@ export const coreTools = Object.freeze([
   getMapFeatures,
   situationBrief,
   getHudCaption,
+  openInGodsEyeView,
 ]);

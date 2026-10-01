@@ -52,6 +52,7 @@ export function createLocalToolServices(options = {}) {
   const fetchImpl = createApiFetch(options);
   const requests = createApplicationRequestServices({ fetchImpl });
   return {
+    app: { baseUrl: options.apiBase ?? DEFAULT_API_BASE },
     earthquakes: createUsgsEarthquakeSource({ fetchImpl }),
     fires: createFirmsSource({ fetchImpl }),
     launches: createLaunchSource({ fetchImpl }),
