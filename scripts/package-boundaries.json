@@ -2095,7 +2095,7 @@
       "src/layers/streetLevel/selection.js",
       "src/layers/streetLevel/providers/mapillary/viewer.js",
       "src/layers/streetLevel/providers/mapillary/source.js",
-      "src/app/layers/streetLevel.js"
+      "src/app/layers/streetLevel.js",
       "src/layers/alpr/tileRecords.js",
       "src/sources/capability.js",
       "src/sources/openFreeMap.js",
@@ -2605,7 +2605,7 @@
       "src/layers/streetLevel/selection.js",
       "src/layers/streetLevel/providers/mapillary/viewer.js",
       "src/layers/streetLevel/providers/mapillary/source.js",
-      "src/app/layers/streetLevel.js"
+      "src/app/layers/streetLevel.js",
       "src/layers/alpr/tileRecords.js",
       "src/sources/capability.js",
       "src/sources/openFreeMap.js",

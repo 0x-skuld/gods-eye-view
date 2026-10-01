@@ -905,7 +905,7 @@
   "src/layers/streetLevel/providers/mapillary/decode.test.mjs",
   "src/ui/panelDock.test.mjs",
   "src/layers/streetLevel/viewerHost.test.mjs",
-  "src/layers/streetLevel/index.test.mjs"
+  "src/layers/streetLevel/index.test.mjs",
   "scripts/qa-overpass-offload.mjs",
   "src/overpassOffload.test.mjs",
   "src/sources/openFreeMap.test.mjs",
