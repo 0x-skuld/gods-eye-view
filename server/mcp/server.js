@@ -1,7 +1,11 @@
 /** The local MCP server: Core's tools over services backed by a running app. */
 
 import { readFileSync } from 'node:fs';
-import { composeCatalog, coreTools } from '../../src/tools/index.js';
+import {
+  composeCatalog,
+  coreTools,
+  toolsForSurface,
+} from '../../src/tools/index.js';
 import { createMcpServer } from '../../src/tools/mcp/index.js';
 import { DEFAULT_API_BASE, createLocalToolServices } from './services.js';
 
@@ -20,7 +24,7 @@ export function createLocalMcpServer({
   );
   return createMcpServer({
     catalog: composeCatalog({
-      tools: coreTools,
+      tools: toolsForSurface(coreTools, 'mcp'),
       services: createLocalToolServices({ apiBase, fetchImpl }),
     }),
     name: 'gods-eye-view',

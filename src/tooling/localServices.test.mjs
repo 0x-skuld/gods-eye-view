@@ -221,6 +221,8 @@ test('Realtime sessions carry supplied tools, and the standalone voice adds the 
   assert.ok(names.includes('get_weather'));
   assert.ok(names.includes('military_awareness'));
   assert.ok(!names.includes('open_in_gods_eye_view'));
+  assert.ok(!names.includes('aircraft_in_area'));
+  assert.ok(!names.includes('get_weather_map'));
   // The action of the same name answers satellite passes.
   assert.equal(
     tools.findLast((tool) => tool.name === 'next_satellite_pass'),

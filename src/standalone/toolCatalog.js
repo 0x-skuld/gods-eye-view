@@ -6,14 +6,18 @@ export function loadToolCatalog() {
   pending ??= Promise.all([
     import('../tools/index.js'),
     import('../tools/services.js'),
-  ]).then(([{ composeCatalog, coreTools }, { createToolServices }]) =>
-    composeCatalog({
-      tools: coreTools,
-      services: createToolServices({
-        fetchImpl: (...args) => globalThis.fetch(...args),
-        appUrl: globalThis.location.origin,
+  ]).then(
+    ([
+      { composeCatalog, coreTools, toolsForSurface },
+      { createToolServices },
+    ]) =>
+      composeCatalog({
+        tools: toolsForSurface(coreTools, 'voice'),
+        services: createToolServices({
+          fetchImpl: (...args) => globalThis.fetch(...args),
+          appUrl: globalThis.location.origin,
+        }),
       }),
-    }),
   );
   pending.catch(() => {
     pending = null;

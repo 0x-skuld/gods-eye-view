@@ -1,0 +1,56 @@
+/**
+ * Which surfaces offer each tool. A tool is on every surface unless this
+ * table turns it off; edit an entry to turn a tool on or off for MCP, voice,
+ * or both. Applications can pass overrides when they compose a surface.
+ */
+
+export const SURFACES = Object.freeze(['mcp', 'voice']);
+
+const voiceOff = Object.freeze({ voice: false });
+
+export const TOOL_SURFACES = Object.freeze({
+  // Voice runs inside the app, so a link to it adds nothing.
+  open_in_gods_eye_view: voiceOff,
+  // Voice has an app action of the same name.
+  next_satellite_pass: voiceOff,
+  // Voice receives text only, so tools that answer with an image are off.
+  get_weather_map: voiceOff,
+  get_recent_imagery: voiceOff,
+  get_cctv_snapshot: voiceOff,
+  // Voice shows the HUD caption in the app itself.
+  get_hud_caption: voiceOff,
+  // Voice answers these from the loaded layers with analyst_query.
+  aircraft_in_area: voiceOff,
+  vessels_in_area: voiceOff,
+  find_aircraft: voiceOff,
+  find_vessel: voiceOff,
+  get_earthquakes: voiceOff,
+  get_active_fires: voiceOff,
+  find_infrastructure: voiceOff,
+  satellites_overhead: voiceOff,
+});
+
+/**
+ * The tools a surface offers, in their original order. `overrides` uses the
+ * table's shape and wins over it, such as `{ get_weather_map: { voice: true } }`.
+ * Unknown tool names or surfaces throw, so a typo cannot silently do nothing.
+ */
+export function toolsForSurface(tools, surface, overrides = {}) {
+  if (!SURFACES.includes(surface))
+    throw new TypeError(`Unknown tool surface: ${surface}`);
+  const names = new Set(tools.map((tool) => tool.name));
+  for (const table of [TOOL_SURFACES, overrides]) {
+    for (const [name, entry] of Object.entries(table)) {
+      if (!names.has(name)) throw new TypeError(`Unknown tool: ${name}`);
+      for (const key of Object.keys(entry)) {
+        if (!SURFACES.includes(key))
+          throw new TypeError(`Unknown tool surface for ${name}: ${key}`);
+      }
+    }
+  }
+  return tools.filter(
+    (tool) =>
+      (overrides[tool.name]?.[surface] ??
+        TOOL_SURFACES[tool.name]?.[surface]) !== false,
+  );
+}

@@ -3122,7 +3122,8 @@
       "src/tools/queries/infrastructure.js",
       "src/tools/queries/events.js",
       "src/data/bhoteKoshiFloodPath.js",
-      "src/tools/functions.js"
+      "src/tools/functions.js",
+      "src/tools/surfaces.js"
     ],
     "external": ["satellite.js"]
   },
