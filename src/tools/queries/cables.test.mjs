@@ -72,6 +72,21 @@ test('cables are found by area and name, with landing points and attribution', a
     catalog.call('find_submarine_cables', {}),
     /area, a name or both/,
   );
+  // Areas a cable crosses between vertices, including at the antimeridian.
+  const atlantic = await catalog.call('find_submarine_cables', {
+    area: { bbox: [-30, 40, -20, 43] },
+  });
+  assert.deepEqual(
+    atlantic.data.rows.map((row) => row.id),
+    ['marea'],
+  );
+  const pacific = await catalog.call('find_submarine_cables', {
+    area: { bbox: [179, 34, -179, 35.5] },
+  });
+  assert.deepEqual(
+    pacific.data.rows.map((row) => row.id),
+    ['unity'],
+  );
 });
 
 test('the local fetch serves bundled data files and nothing outside them', async () => {

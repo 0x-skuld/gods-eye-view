@@ -1,7 +1,12 @@
 /** Submarine cables and their landing points. */
 
 import { defineTool, ToolError } from '../catalog.js';
-import { AREA_SCHEMA, areaContains, resolveArea } from '../area.js';
+import {
+  AREA_SCHEMA,
+  areaContains,
+  lineTouchesArea,
+  resolveArea,
+} from '../area.js';
 import { LIMIT_SCHEMA, capRows, countNoun } from '../results.js';
 
 const ATTRIBUTION = '© TeleGeography — submarinecablemap.com (CC BY-NC-SA 3.0)';
@@ -58,9 +63,7 @@ export const findSubmarineCables = defineTool({
           return false;
         return (
           !area ||
-          cableLines(feature).some((line) =>
-            line.some(([lon, lat]) => areaContains(area, { lat, lon })),
-          )
+          cableLines(feature).some((line) => lineTouchesArea(line, area))
         );
       })
       .map((feature) => ({

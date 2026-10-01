@@ -195,3 +195,104 @@ export function areaContains(area, point) {
     ? distanceKm(area.center, point) <= area.center.radiusKm
     : true;
 }
+
+/** Whether a straight lon/lat segment meets a plain box (Liang–Barsky). */
+function segmentMeetsBox(a, b, west, south, east, north) {
+  const dx = b.lon - a.lon;
+  const dy = b.lat - a.lat;
+  let low = 0;
+  let high = 1;
+  for (const [p, q] of [
+    [-dx, a.lon - west],
+    [dx, east - a.lon],
+    [-dy, a.lat - south],
+    [dy, north - a.lat],
+  ]) {
+    if (p === 0) {
+      if (q < 0) return false;
+    } else {
+      const t = q / p;
+      if (p < 0) low = Math.max(low, t);
+      else high = Math.min(high, t);
+      if (low > high) return false;
+    }
+  }
+  return true;
+}
+
+/** Whether a segment meets an area's bounding box, across the antimeridian too. */
+function segmentMeetsBounds(a, b, area) {
+  // A segment longer than half the globe in longitude crosses the antimeridian.
+  const end =
+    Math.abs(b.lon - a.lon) > 180
+      ? { lat: b.lat, lon: b.lon + (b.lon < a.lon ? 360 : -360) }
+      : b;
+  const boxes =
+    area.west <= area.east
+      ? [[area.west, area.east]]
+      : [
+          [area.west, 180],
+          [-180, area.east],
+        ];
+  return boxes.some(([west, east]) =>
+    [-360, 0, 360].some((shift) =>
+      segmentMeetsBox(
+        a,
+        end,
+        west + shift,
+        area.south,
+        east + shift,
+        area.north,
+      ),
+    ),
+  );
+}
+
+/** Closest great-circle distance in km from `point` to the segment a–b. */
+function segmentDistanceKm(point, a, b) {
+  const toRad = Math.PI / 180;
+  const bearing = (from, to) => {
+    const lat1 = from.lat * toRad;
+    const lat2 = to.lat * toRad;
+    const dLon = (to.lon - from.lon) * toRad;
+    return Math.atan2(
+      Math.sin(dLon) * Math.cos(lat2),
+      Math.cos(lat1) * Math.sin(lat2) -
+        Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon),
+    );
+  };
+  const toPoint = distanceKm(a, point) / EARTH_RADIUS_KM;
+  const length = distanceKm(a, b) / EARTH_RADIUS_KM;
+  const angle = bearing(a, point) - bearing(a, b);
+  if (length === 0 || Math.cos(angle) <= 0) return distanceKm(a, point);
+  const cross = Math.asin(Math.sin(toPoint) * Math.sin(angle));
+  const along = Math.acos(
+    Math.min(1, Math.cos(toPoint) / Math.max(1e-12, Math.cos(cross))),
+  );
+  if (along >= length) return distanceKm(b, point);
+  return Math.abs(cross) * EARTH_RADIUS_KM;
+}
+
+/**
+ * Whether a line of `[lon, lat]` vertices passes through an area, including
+ * segments that cross it with no vertex inside.
+ */
+export function lineTouchesArea(coords, area) {
+  const points = coords
+    .map(([lon, lat]) => ({ lat, lon }))
+    .filter(
+      (point) => Number.isFinite(point.lat) && Number.isFinite(point.lon),
+    );
+  if (points.some((point) => areaContains(area, point))) return true;
+  for (let index = 1; index < points.length; index += 1) {
+    const a = points[index - 1];
+    const b = points[index];
+    if (!segmentMeetsBounds(a, b, area)) continue;
+    if (
+      !area.center ||
+      segmentDistanceKm(area.center, a, b) <= area.center.radiusKm
+    )
+      return true;
+  }
+  return false;
+}
