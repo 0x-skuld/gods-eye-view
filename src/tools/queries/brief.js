@@ -1,5 +1,6 @@
 /** Composite queries that combine other tools' answers for one area. */
 
+import { feedProvenanceEnvelope } from '../../data/layerSnapshot.js';
 import { defineTool, ToolError } from '../catalog.js';
 import {
   AREA_SCHEMA,
@@ -82,6 +83,15 @@ const AWARENESS_SECTIONS = [
     args: (area) => ({ area: area.argument, limit: AWARENESS_LIMIT }),
   },
 ];
+
+/** A section's feed state for the caption, from what its result reported. */
+function sectionFeedState(section) {
+  if (section.unavailable) return 'unavailable';
+  const data = section.data || {};
+  return data.freshness === 'stale' || data.stale === true
+    ? 'stale'
+    : 'nominal';
+}
 
 /** The resolved area, plus the argument sections receive in its place. */
 function sectionArea(resolved) {
@@ -179,16 +189,16 @@ export const getHudCaption = defineTool({
   requires: ['weather', 'summary'],
   async run(args, context) {
     const { area, center, brief, lines } = await buildBrief(args, context);
-    // The app's caption context: place labels and the layers that answered,
-    // with their feed state.
-    const answered = SECTIONS.filter(
-      ({ key }) => brief[key] && !brief[key].unavailable,
+    // The app's caption context: place labels and each section as a layer
+    // with the feed state its result reported, failures included.
+    const layers = SECTIONS.filter(({ key }) => brief[key]).map(
+      ({ key, label }) => ({
+        id: key,
+        name: label,
+        enabled: true,
+        feedState: sectionFeedState(brief[key]),
+      }),
     );
-    const layers = answered.map(({ key, label }) => ({
-      id: key,
-      name: label,
-      feedState: 'nominal',
-    }));
     const response = await context.services.summary.summarize(
       {
         placeLabels: [area.label],
@@ -196,11 +206,12 @@ export const getHudCaption = defineTool({
         center,
         observations: lines,
         enabledLayerLabels: layers.map((layer) => layer.name),
-        enabledLayers: layers,
-        feedProvenance: {
-          overall: layers.length ? 'nominal' : null,
-          layers,
-        },
+        enabledLayers: layers.map(({ id, name, feedState }) => ({
+          id,
+          name,
+          feedState,
+        })),
+        feedProvenance: feedProvenanceEnvelope(layers),
       },
       { signal: context.signal },
     );

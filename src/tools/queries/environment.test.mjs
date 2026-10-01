@@ -601,3 +601,44 @@ test('composites reach their sections through the catalog', async () => {
     ['get_weather', 'situation_brief'],
   ]);
 });
+
+test('the HUD caption context carries each section feed state', async () => {
+  const sent = [];
+  const summary = {
+    async summarize(context) {
+      sent.push(context);
+      return {
+        ok: true,
+        status: 200,
+        data: { summary: 'Austin aircraft STALE' },
+      };
+    },
+  };
+  const aircraft = {
+    getSnapshot: async () => ({
+      records: [],
+      complete: true,
+      source: 'Test feed',
+      freshness: 'stale',
+    }),
+  };
+  const cyclones = {
+    getSnapshot: async () => {
+      throw new Error('upstream down');
+    },
+  };
+  await catalogWith({ weather, summary, places, aircraft, cyclones }).call(
+    'get_hud_caption',
+    { area: { place: 'Austin' } },
+  );
+  assert.deepEqual(
+    sent[0].enabledLayers.map((layer) => [layer.id, layer.feedState]),
+    [
+      ['weather', 'nominal'],
+      ['aircraft', 'stale'],
+      ['cyclones', 'unavailable'],
+    ],
+  );
+  assert.equal(sent[0].feedProvenance.overall, 'unavailable');
+  assert.match(sent[0].feedProvenance.note, /Aircraft is STALE/);
+});
