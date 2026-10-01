@@ -135,4 +135,4 @@ public feeds the sources already use.
 | `get_map_features` | `features` | Administrative areas, named places or monuments at a location (needs Overpass) |
 | `situation_brief` | `weather` | Weather, earthquakes, fires, aircraft, ships and cyclones for an area, by section |
 | `get_hud_caption` | `weather`, `summary` | The app's heads-up display caption for an area |
-| `open_in_gods_eye_view` | `app` | A share link looking straight down on an area |
+| `open_in_gods_eye_view` | `app` | A share link looking straight down on an area, with chosen layers on |

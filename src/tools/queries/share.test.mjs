@@ -53,3 +53,28 @@ test('altitude is bounded for tiny and planet-sized areas', async () => {
     (error) => error.code === 'unavailable',
   );
 });
+
+test('links turn on the requested layers with the app share-link codec', async () => {
+  const { decodeLayerStateParams } = await import('../../data/layerState.js');
+  const catalog = composeCatalog({
+    tools: coreTools,
+    services: { app: { baseUrl: 'http://localhost:4173/' } },
+  });
+  const result = await catalog.call('open_in_gods_eye_view', {
+    area: { lat: 30.27, lon: -97.74, radius_km: 10 },
+    layers: ['earthquakes', 'flights', 'flights'],
+  });
+  assert.deepEqual(result.data.layers, ['earthquakes', 'flights']);
+  const params = new URLSearchParams(new URL(result.data.url).hash.slice(1));
+  assert.deepEqual(decodeLayerStateParams(params).enabledLayerIds.sort(), [
+    'earthquakes',
+    'flights',
+  ]);
+  await assert.rejects(
+    catalog.call('open_in_gods_eye_view', {
+      area: { lat: 0, lon: 0, radius_km: 1 },
+      layers: ['not-a-layer'],
+    }),
+    /must be one of/,
+  );
+});
