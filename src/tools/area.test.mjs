@@ -117,3 +117,33 @@ test('a named place centers on its own point, not the middle of its bounds', asy
   const box = await resolveArea({ bbox: [0, 0, 10, 10] });
   assert.deepEqual(areaCenter(box), { lat: 5, lon: 5 });
 });
+
+test('radius areas include every point within the radius, near the poles too', async () => {
+  const polar = await resolveArea({ lat: 80, lon: 0, radius_km: 1500 });
+  const across = { lat: 89, lon: 180 };
+  assert.ok(distanceKm({ lat: 80, lon: 0 }, across) < 1500);
+  assert.ok(areaContains(polar, across));
+  assert.equal(polar.west, -180);
+  assert.equal(polar.east, 180);
+  assert.equal(polar.north, 90);
+  // Away from the poles, sample the circle's edge and check each point is kept.
+  const center = { lat: 60, lon: 20 };
+  const wide = await resolveArea({ ...center, radius_km: 2000 });
+  assert.ok(wide.east - wide.west < 360);
+  for (let bearing = 0; bearing < 360; bearing += 5) {
+    const d = 1999 / 6371.0088;
+    const b = (bearing * Math.PI) / 180;
+    const lat1 = (center.lat * Math.PI) / 180;
+    const lat2 = Math.asin(
+      Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(b),
+    );
+    const lon2 =
+      (center.lon * Math.PI) / 180 +
+      Math.atan2(
+        Math.sin(b) * Math.sin(d) * Math.cos(lat1),
+        Math.cos(d) - Math.sin(lat1) * Math.sin(lat2),
+      );
+    const point = { lat: (lat2 * 180) / Math.PI, lon: (lon2 * 180) / Math.PI };
+    assert.ok(areaContains(wide, point), `bearing ${bearing}`);
+  }
+});

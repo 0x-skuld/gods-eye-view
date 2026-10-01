@@ -82,10 +82,18 @@ export async function resolveArea(area, { services, signal } = {}) {
   };
 }
 
+/**
+ * The bounding box of a spherical cap. When the cap reaches a pole it spans
+ * every longitude; otherwise the longitude span is the exact tangent bound,
+ * asin(sin(d) / cos(lat)) for angular radius d.
+ */
 function circleArea(lat, lon, radiusKm) {
-  const latSpan = (radiusKm / EARTH_RADIUS_KM) * (180 / Math.PI);
-  const cosLat = Math.cos((lat * Math.PI) / 180);
-  const lonSpan = cosLat < 1e-6 ? 180 : Math.min(180, latSpan / cosLat);
+  const angular = radiusKm / EARTH_RADIUS_KM;
+  const latSpan = angular * (180 / Math.PI);
+  const reachesPole = lat + latSpan >= 90 || lat - latSpan <= -90;
+  const ratio = Math.sin(angular) / Math.cos((lat * Math.PI) / 180);
+  const lonSpan =
+    reachesPole || ratio >= 1 ? 180 : Math.asin(ratio) * (180 / Math.PI);
   const wrap = (value) => ((((value + 180) % 360) + 360) % 360) - 180;
   return {
     label: `${radiusKm} km around ${lat.toFixed(3)}, ${lon.toFixed(3)}`,
