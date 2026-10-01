@@ -3111,7 +3111,8 @@
       "src/layers/wind/inspection.js",
       "src/layers/wind/model.js",
       "src/layers/wind/fields.js",
-      "src/tools/queries/imagery.js"
+      "src/tools/queries/imagery.js",
+      "src/tools/queries/cables.js"
     ],
     "external": ["satellite.js"]
   },
@@ -3181,7 +3182,8 @@
       "src/layers/wind/source.js",
       "src/sources/windBody.js",
       "src/layers/recentImagery/catalog.js",
-      "src/layers/recentImagery/model.js"
+      "src/layers/recentImagery/model.js",
+      "src/layers/submarineCables/bundledSource.js"
     ],
     "external": ["@mapbox/vector-tile", "pbf"]
   }
