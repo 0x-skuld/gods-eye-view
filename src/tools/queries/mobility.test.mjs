@@ -428,3 +428,56 @@ test('bike share names the systems it did not search', async () => {
     /more not searched: .*; use a smaller area\)\.$/,
   );
 });
+
+test('traffic counts only roads inside a radius area and reports missing tiles', async () => {
+  const flow = (segments, partial = false) => ({
+    getStatus: async () => ({ hasKey: true }),
+    fetchFlowDetail: async () => ({ segments, partial }),
+  });
+  const call = (traffic, area) =>
+    composeCatalog({ tools: coreTools, services: { traffic } }).call(
+      'get_traffic_flow',
+      { area },
+    );
+  const circle = { lat: 0, lon: 0, radius_km: 10 };
+  // In the circle's bounding box, but about 12.6 km from its center.
+  const corner = [
+    {
+      coords: [
+        [0.08, 0.08],
+        [0.085, 0.085],
+      ],
+      closure: true,
+      trafficLevel: 1,
+    },
+  ];
+  const outside = await call(flow(corner), circle);
+  assert.equal(outside.data.closed_km, 0);
+  assert.equal(outside.data.measured_km, 0);
+  // A 20 km road through the center keeps the 20 km inside the circle.
+  const across = [
+    {
+      coords: [
+        [-0.2, 0],
+        [0.2, 0],
+      ],
+      trafficLevel: 1,
+    },
+  ];
+  const crossing = await call(flow(across), circle);
+  assert.ok(Math.abs(crossing.data.measured_km - 20) < 0.2);
+  // A road cutting the circle with both ends outside it.
+  const chord = [
+    {
+      coords: [
+        [-0.2, 0.05],
+        [0.2, 0.05],
+      ],
+      trafficLevel: 1,
+    },
+  ];
+  assert.ok((await call(flow(chord), circle)).data.measured_km > 10);
+  const partial = await call(flow(across, true), circle);
+  assert.equal(partial.data.partial, true);
+  assert.match(partial.summary, /Some map tiles did not load/);
+});

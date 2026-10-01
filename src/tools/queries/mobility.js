@@ -310,6 +310,55 @@ function lineKm(coords) {
   return total;
 }
 
+/**
+ * The parts of a `[lon, lat]` line inside an area. Box areas keep the whole
+ * line (tiles are already clipped to the box); radius areas cut each segment
+ * where it crosses the circle, by bisection.
+ */
+function insideParts(coords, area) {
+  if (!area.center) return [coords];
+  const inside = ([lon, lat]) => areaContains(area, { lat, lon });
+  // Where the segment from-to crosses the circle, on its inside, found by
+  // bisection. One end must be inside and the other outside.
+  const edge = (from, to) => {
+    let a = from;
+    let b = to;
+    for (let step = 0; step < 20; step += 1) {
+      const middle = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      if (inside(middle) === inside(from)) a = middle;
+      else b = middle;
+    }
+    return inside(from) ? a : b;
+  };
+  const parts = [];
+  let current = inside(coords[0]) ? [coords[0]] : null;
+  for (let index = 1; index < coords.length; index += 1) {
+    const from = coords[index - 1];
+    const to = coords[index];
+    const fromIn = inside(from);
+    const toIn = inside(to);
+    if (fromIn && toIn) current.push(to);
+    else if (fromIn) {
+      current.push(edge(from, to));
+      parts.push(current);
+      current = null;
+    } else if (toIn) current = [edge(from, to), to];
+    else {
+      // Both ends outside: the segment may still cut across the circle.
+      const middle = Array.from({ length: 15 }, (_, step) => {
+        const t = (step + 1) / 16;
+        return [
+          from[0] + (to[0] - from[0]) * t,
+          from[1] + (to[1] - from[1]) * t,
+        ];
+      }).find(inside);
+      if (middle) parts.push([edge(middle, from), edge(middle, to)]);
+    }
+  }
+  if (current) parts.push(current);
+  return parts.filter((part) => part.length > 1);
+}
+
 async function readFlow(traffic, area, signal) {
   const box = {
     west: area.west,
@@ -319,7 +368,12 @@ async function readFlow(traffic, area, signal) {
   };
   for (const zoom of FLOW_ZOOMS) {
     try {
-      return await traffic.fetchFlowForBounds(box, { zoom, signal });
+      if (traffic.fetchFlowDetail)
+        return await traffic.fetchFlowDetail(box, { zoom, signal });
+      return {
+        segments: await traffic.fetchFlowForBounds(box, { zoom, signal }),
+        partial: false,
+      };
     } catch (error) {
       if (error?.code !== 'TILE_VIEW_TOO_WIDE') throw error;
     }
@@ -357,9 +411,19 @@ export const getTrafficFlow = defineTool({
         'unavailable',
         'Live traffic needs a TomTom key configured for this server',
       );
-    const segments = (await readFlow(services.traffic, area, signal)).filter(
-      (segment) => Array.isArray(segment.coords) && segment.coords.length > 1,
-    );
+    const flow = await readFlow(services.traffic, area, signal);
+    // Tiles cover the area's box; a radius area keeps only the parts of each
+    // road inside its circle.
+    const segments = flow.segments
+      .filter(
+        (segment) => Array.isArray(segment.coords) && segment.coords.length > 1,
+      )
+      .flatMap((segment) =>
+        insideParts(segment.coords, area).map((coords) => ({
+          ...segment,
+          coords,
+        })),
+      );
     const categories = new Map();
     let measuredKm = 0;
     let weighted = 0;
@@ -398,13 +462,18 @@ export const getTrafficFlow = defineTool({
       }))
       .sort((a, b) => b.road_km - a.road_km);
     return {
-      summary: segments.length
-        ? `Traffic in ${area.label}: ${speedPct ?? 'unknown'}% of free-flow speed on average; ` +
-          `${round(congestedKm, 1)} km congested of ${round(measuredKm, 1)} km measured` +
-          (closedKm > 0 ? `; ${round(closedKm, 1)} km closed.` : '.')
-        : `No live traffic is reported in ${area.label}.`,
+      summary:
+        (segments.length
+          ? `Traffic in ${area.label}: ${speedPct ?? 'unknown'}% of free-flow speed on average; ` +
+            `${round(congestedKm, 1)} km congested of ${round(measuredKm, 1)} km measured` +
+            (closedKm > 0 ? `; ${round(closedKm, 1)} km closed.` : '.')
+          : `No live traffic is reported in ${area.label}.`) +
+        (flow.partial
+          ? ' Some map tiles did not load, so these figures are partial.'
+          : ''),
       data: {
         area: area.label,
+        partial: flow.partial,
         speed_pct_of_free_flow: speedPct,
         measured_km: round(measuredKm, 1),
         congested_km: round(congestedKm, 1),
