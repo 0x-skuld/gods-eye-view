@@ -46,7 +46,8 @@
     "test:track": "node scripts/track-regression.mjs",
     "qa:map-source-tray": "node scripts/qa-map-source-tray.mjs",
     "check:boundaries": "node scripts/check-import-directions.mjs && node scripts/check-package-boundaries.mjs",
-    "qa:transit": "node scripts/qa-transit.mjs"
+    "qa:transit": "node scripts/qa-transit.mjs",
+    "mcp": "node server/mcp/stdio.js"
   },
   "dependencies": {
     "@jtarrio/signals": "^0.10.0",
@@ -250,6 +251,8 @@
     "./layers/transit/standalone": "./src/data/transit.js",
     "./layers/transit/source": "./src/layers/transit/source.js",
     "./sources/transit-service": "./src/sources/transitService.js",
-    "./sources/map-features": "./src/sources/overpassFeatures.js"
+    "./sources/map-features": "./src/sources/overpassFeatures.js",
+    "./tools": "./src/tools/index.js",
+    "./tools/mcp": "./src/tools/mcp/index.js"
   }
 }

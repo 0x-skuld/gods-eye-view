@@ -1,5 +1,11 @@
 # Changelog
 
+- Add tools for language-model clients and a local MCP server. `npm run mcp`
+  serves earthquake, active-fire and recent-launch queries over stdio to
+  clients such as Claude Code, reading from a running app. Tools are defined
+  once in `gods-eye-view/tools`, reuse the layers' source factories, and are
+  exposed through the protocol adapter in `gods-eye-view/tools/mcp`.
+
 - Public Overpass instances are no longer used by default. Street Traffic
   roads come from TomTom flow tiles, OpenFreeMap vector tiles, or both, chosen
   on the layer row (TomTom / OSM / Hybrid) or with `?trafficRoads=`. With a

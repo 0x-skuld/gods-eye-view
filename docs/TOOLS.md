@@ -1,0 +1,89 @@
+# Tools and the MCP server
+
+Tools answer questions from God's Eye View data for language-model clients.
+They are defined once and exposed through adapters; the Model Context Protocol
+(MCP) is the first.
+
+## Layers
+
+| Owner                | Responsibility                                                                                    |
+| -------------------- | ------------------------------------------------------------------------------------------------- |
+| `src/tools/`         | Tool definitions, catalog composition, argument validation, shared `area` and result helpers      |
+| `src/tools/queries/` | Queries, one file per domain, reading only portable source contracts                              |
+| `src/tools/mcp/`     | MCP protocol (JSON-RPC) and a stateless HTTP transport; knows the catalog interface, not queries |
+| `server/mcp/`        | Node composition: points the sources at a running app's `/api` routes and serves stdio           |
+
+Dependencies point downward only. `gods-eye-view/tools` and
+`gods-eye-view/tools/mcp` are portable exports: they reach no application,
+rendering, Node, Cesium or browser-global code, which
+`npm run check:boundaries` enforces. Nothing in the application imports them.
+
+## Definitions and composition
+
+`defineTool({ name, kind, title, description, inputSchema, requires, run })`
+validates and freezes a tool. `kind` is `query` (answers from data, read-only)
+or `action`. `inputSchema` uses a JSON Schema subset that `src/tools/schema.js`
+checks completely; unsupported keywords are rejected at definition time.
+`run(args, { services, signal })` resolves to `{ summary, data }`: one sentence
+for people and a structured object for programs.
+
+`composeCatalog({ tools, services, replace, interceptors })` builds a catalog:
+
+- **Tools**: an application adds its own tools to `coreTools`. Reusing a name
+  fails unless the name is listed in `replace`.
+- **Services**: each tool names the services it reads in `requires`. Tools
+  whose services are not supplied are left out.
+- **Interceptors**: `(call, next) => next(call)` functions wrap every call,
+  outermost first. They can observe, reject or change a call.
+
+Expected failures throw `ToolError` with one of `invalid_arguments`,
+`unavailable`, `unsupported`, `malformed` or `retry_later`. Other errors are
+reported to clients without details.
+
+## Services
+
+Services are the portable source factories the layers already use, such as
+`createUsgsEarthquakeSource`, `createFirmsSource` and `createLaunchSource`,
+plus a `places` service with `resolve(name, { signal })`. Sources request
+relative `/api/...` paths through an injected `fetchImpl`, so the same tool
+code runs wherever an application routes those paths.
+`createGeocodePlaceService` resolves place names through `/api/geocode`.
+
+## The `area` argument
+
+Location-scoped tools take `area` as exactly one of a `place` name, a `bbox`
+(`[west, south, east, north]`, crossing the antimeridian when west exceeds
+east), or `lat`, `lon` and `radius_km`. Lists default to 25 rows, at most 200,
+and report `total`, `returned` and `truncated`.
+
+## MCP
+
+`createMcpServer({ catalog, name, version, instructions, descriptions, decorate })`
+implements `initialize`, `ping`, `tools/list` and `tools/call` for protocol
+revisions 2025-11-25, 2025-06-18 and 2025-03-26. `descriptions` overrides a
+tool's title or description for this surface; `decorate(definition, tool)`
+merges extra fields into each listed definition. `createMcpHttpHandler(server)`
+returns a `Request`-to-`Response` handler for stateless Streamable HTTP: one
+JSON-RPC message per POST, answered with JSON. The host owns routing and any
+access control in front of it.
+
+## Running locally
+
+Start the app (`npm run dev` or `npm run preview`), then register the stdio
+server with an MCP client, for example Claude Code:
+
+```bash
+claude mcp add gods-eye-view -- npm --prefix /path/to/gods-eye-view run --silent mcp
+```
+
+`npm run mcp -- --api-base http://localhost:4173` selects another server. The
+local server makes no requests other than to the app's `/api` routes and the
+public feeds the sources already use.
+
+## Tools
+
+| Tool                  | Reads         | Returns                                                       |
+| --------------------- | ------------- | ------------------------------------------------------------- |
+| `get_earthquakes`     | `earthquakes` | USGS M2.5+ events in the last 24 hours, strongest first        |
+| `get_active_fires`    | `fires`       | NASA FIRMS detections in an area, highest radiative power first |
+| `get_recent_launches` | `launches`    | Launch Library 2 launches in the last 30 days, newest first    |

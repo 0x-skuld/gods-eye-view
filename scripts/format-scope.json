@@ -864,5 +864,10 @@
   "src/layers/traffic/motion.test.mjs",
   "scripts/qa-journey-recorder.mjs",
   "scripts/qa-alpr-journey.mjs",
-  "scripts/qa-context-arrivals.mjs"
+  "scripts/qa-context-arrivals.mjs",
+  "src/tools/catalog.test.mjs",
+  "src/tools/area.test.mjs",
+  "src/tools/queries/queries.test.mjs",
+  "src/tools/mcp/mcp.test.mjs",
+  "src/tools/localServer.test.mjs"
 ]

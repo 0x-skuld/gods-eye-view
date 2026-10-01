@@ -3072,5 +3072,30 @@
       "src/layers/perimeters/source.js"
     ],
     "external": []
+  },
+  "tools": {
+    "exports": ["./tools"],
+    "modules": [
+      "src/tools/index.js",
+      "src/tools/catalog.js",
+      "src/tools/schema.js",
+      "src/tools/area.js",
+      "src/tools/results.js",
+      "src/tools/places.js",
+      "src/tools/queries/hazards.js",
+      "src/tools/queries/space.js"
+    ],
+    "external": []
+  },
+  "tools-mcp": {
+    "exports": ["./tools/mcp"],
+    "modules": [
+      "src/tools/mcp/index.js",
+      "src/tools/mcp/protocol.js",
+      "src/tools/mcp/http.js",
+      "src/tools/catalog.js",
+      "src/tools/schema.js"
+    ],
+    "external": []
   }
 }
