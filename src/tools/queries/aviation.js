@@ -118,10 +118,17 @@ export const aircraftInArea = defineTool({
       .map((record) => aircraftRow(record, center))
       .sort((a, b) => a.distance_km - b.distance_km);
     const kind = args.military ? 'military aircraft' : 'aircraft';
+    // A regional fallback feed covers only part of the world around the
+    // area's center; say so rather than imply a worldwide answer.
+    const regional = /regional/i.test(snapshot.coverage || '');
+    const notes = [
+      ...(regional ? [`regional feed: ${snapshot.coverage}`] : []),
+      ...(snapshot.freshness === 'stale' ? ['data may be stale'] : []),
+    ];
     return {
       summary:
         `${rows.length} ${kind} in ${area.label}` +
-        (snapshot.freshness === 'stale' ? ' (data may be stale).' : '.'),
+        (notes.length ? ` (${notes.join('; ')}).` : '.'),
       data: { ...capRows(rows, args.limit), ...snapshotInfo(snapshot) },
     };
   },

@@ -25,7 +25,12 @@ export const getRecentLaunches = defineTool({
   },
   requires: ['launches'],
   async run(args, { services, signal }) {
-    const payload = await services.launches.getLaunches({ signal });
+    const { payload, stale } = services.launches.getLaunchSnapshot
+      ? await services.launches.getLaunchSnapshot({ signal })
+      : {
+          payload: await services.launches.getLaunches({ signal }),
+          stale: false,
+        };
     const launches = Array.isArray(payload) ? payload : payload.results;
     if (!Array.isArray(launches))
       throw new ToolError('malformed', 'The launch feed returned no launches');
@@ -49,8 +54,10 @@ export const getRecentLaunches = defineTool({
       .sort((a, b) => String(b.time).localeCompare(String(a.time)));
     const result = capRows(rows, args.limit);
     return {
-      summary: `${countNoun(rows.length, 'launch', 'launches')} in the last 30 days${rows[0] ? `; latest ${rows[0].name}` : ''}.`,
-      data: result,
+      summary:
+        `${countNoun(rows.length, 'launch', 'launches')} in the last 30 days${rows[0] ? `; latest ${rows[0].name}` : ''}` +
+        (stale ? ' (data may be stale).' : '.'),
+      data: { ...result, stale },
     };
   },
 });
@@ -103,7 +110,7 @@ async function readCatalog(services, group, signal) {
       'unavailable',
       `The ${group} satellite catalog is unavailable (HTTP ${result.status})`,
     );
-  return parseTleText(result.text).flatMap((entry) => {
+  const entries = parseTleText(result.text).flatMap((entry) => {
     try {
       return [
         {
@@ -116,6 +123,9 @@ async function readCatalog(services, group, signal) {
       return [];
     }
   });
+  // The proxy serves its last copy when CelesTrak is down; old orbital
+  // elements make predictions drift.
+  return { entries, stale: result.stale === true };
 }
 
 function matchSatellite(entries, wanted) {
@@ -164,7 +174,8 @@ export const nextSatellitePass = defineTool({
   async run(args, { services, signal }) {
     const point = await resolvePoint(args.location, { services, signal });
     const group = args.group ?? 'stations';
-    const entries = await readCatalog(services, group, signal);
+    const { entries, stale } = await readCatalog(services, group, signal);
+    const staleNote = stale ? ' (orbit data may be stale)' : '';
     const satellite = matchSatellite(entries, args.satellite);
     if (!satellite)
       throw new ToolError(
@@ -184,8 +195,9 @@ export const nextSatellitePass = defineTool({
     const name = satellite.name;
     if (!pass)
       return {
-        summary: `${name} has no ${args.visible_only ? 'visible ' : ''}pass over ${point.label} in the next ${hours} hours.`,
+        summary: `${name} has no ${args.visible_only ? 'visible ' : ''}pass over ${point.label} in the next ${hours} hours${staleNote}.`,
         data: {
+          stale,
           location: point,
           satellite: name,
           norad: satellite.norad,
@@ -196,8 +208,9 @@ export const nextSatellitePass = defineTool({
       summary:
         `${name} next rises over ${point.label} at ${isoTime(pass.riseMs)} in the ${compass(pass.riseAzDeg)}, ` +
         `peaking at ${Math.round(pass.maxElevDeg)}°` +
-        `${pass.visible ? '; visible to the naked eye' : ''}.`,
+        `${pass.visible ? '; visible to the naked eye' : ''}${staleNote}.`,
       data: {
+        stale,
         location: point,
         satellite: name,
         norad: satellite.norad,
@@ -238,7 +251,8 @@ export const satellitesOverhead = defineTool({
     const group = args.group ?? 'stations';
     const minimum = args.min_elevation_deg ?? 10;
     const at = nowMs(services);
-    const rows = (await readCatalog(services, group, signal))
+    const { entries, stale } = await readCatalog(services, group, signal);
+    const rows = entries
       .flatMap((entry) => {
         const look = lookAnglesAt(entry.satrec, at, point.lat, point.lon);
         return look && look.elevDeg >= minimum
@@ -255,9 +269,12 @@ export const satellitesOverhead = defineTool({
       })
       .sort((a, b) => b.elevation_deg - a.elevation_deg);
     return {
-      summary: `${countNoun(rows.length, 'satellite')} from the ${group} group ${rows.length === 1 ? 'is' : 'are'} at least ${minimum}° above ${point.label} at ${isoTime(at)}.`,
+      summary:
+        `${countNoun(rows.length, 'satellite')} from the ${group} group ${rows.length === 1 ? 'is' : 'are'} at least ${minimum}° above ${point.label} at ${isoTime(at)}` +
+        (stale ? ' (orbit data may be stale).' : '.'),
       data: {
         ...capRows(rows, args.limit),
+        stale,
         location: point,
         group,
         at: isoTime(at),

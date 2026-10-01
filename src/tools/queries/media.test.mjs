@@ -185,7 +185,12 @@ test('radio stations match area and every search term', async () => {
   const jazz = await catalog.call('find_radio_stations', {
     query: 'jazz norwegian',
   });
-  assert.equal(jazz.summary, '1 radio station matching "jazz norwegian".');
+  assert.equal(
+    jazz.summary,
+    '1 radio station matching "jazz norwegian" (from a directory of 3 popular stations).',
+  );
+  assert.equal(jazz.data.directory_size, 3);
+  assert.equal(jazz.data.stale, false);
   assert.equal(jazz.data.rows[0].distance_km, undefined);
   const classicalTexas = await catalog.call('find_radio_stations', {
     query: 'classical texas',
@@ -219,4 +224,25 @@ test('malformed image results are a programming error', async () => {
     composeCatalog({ tools: [bad] }).call('bad_image'),
     /malformed images/,
   );
+});
+
+test('a stale or degraded radio directory is reported', async () => {
+  const catalog = composeCatalog({
+    tools: coreTools,
+    services: {
+      radio: {
+        getDirectory: async () => ({
+          stations: [],
+          stale: true,
+          degraded: true,
+        }),
+      },
+    },
+  });
+  const result = await catalog.call('find_radio_stations', { query: 'jazz' });
+  assert.match(
+    result.summary,
+    /the directory may be stale; the directory is incomplete right now\)\.$/,
+  );
+  assert.equal(result.data.degraded, true);
 });

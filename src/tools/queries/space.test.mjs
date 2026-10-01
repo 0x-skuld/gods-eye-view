@@ -150,3 +150,49 @@ test('satellites overhead are those above the elevation, highest first', async (
     /^0 satellites from the stations group are at least 90° above/,
   );
 });
+
+test('stale orbit and launch data are reported', async () => {
+  const stale = {
+    readGroup: async () => ({ ok: true, status: 200, text: TLE, stale: true }),
+  };
+  const catalog = composeCatalog({
+    tools: coreTools,
+    services: {
+      satellites: stale,
+      clock: CLOCK,
+      launches: {
+        getLaunchSnapshot: async () => ({ payload: [], stale: true }),
+      },
+    },
+  });
+  const overhead = await catalog.call('satellites_overhead', {
+    location: { lat: 0, lon: 0 },
+  });
+  assert.equal(overhead.data.stale, true);
+  assert.match(overhead.summary, /\(orbit data may be stale\)\.$/);
+  const launches = await catalog.call('get_recent_launches', {});
+  assert.equal(launches.data.stale, true);
+  assert.match(launches.summary, /\(data may be stale\)\.$/);
+});
+
+test('satellite and launch sources read the proxies stale markers', async () => {
+  const { createSatelliteSource } =
+    await import('../../layers/satellites/source.js');
+  const { createLaunchSource } =
+    await import('../../layers/launches/source.js');
+  const satellites = createSatelliteSource({
+    fetchImpl: async () =>
+      new Response(TLE, { headers: { 'x-tle-cache': 'STALE-ERROR' } }),
+  });
+  assert.equal((await satellites.readGroup('stations')).stale, true);
+  const launches = createLaunchSource({
+    fetchImpl: async () =>
+      Response.json([], { headers: { 'X-GEV-Cache': 'STALE-ERROR' } }),
+  });
+  assert.deepEqual(await launches.getLaunchSnapshot(), {
+    payload: [],
+    stale: true,
+  });
+  const { getLaunches } = launches;
+  assert.deepEqual(await getLaunches(), []);
+});

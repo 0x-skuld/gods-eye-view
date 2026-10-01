@@ -116,7 +116,8 @@ export const findRadioStations = defineTool({
   name: 'find_radio_stations',
   title: 'Radio stations',
   description:
-    'Internet radio stations from the Radio Browser directory, by area and/or ' +
+    'Internet radio stations from a directory of popular Radio Browser ' +
+    'stations, not every station, by area and/or ' +
     'a search term matched against name, tags, language and country. Each ' +
     "result includes the broadcaster's public stream URL.",
   inputSchema: {
@@ -186,9 +187,20 @@ export const findRadioStations = defineTool({
     if (center) rows.sort((a, b) => a.distance_km - b.distance_km);
     const where = area ? ` in ${area.label}` : '';
     const what = args.query ? ` matching "${args.query}"` : '';
+    // The directory is a selection of popular stations, not every station.
+    const notes = [
+      `from a directory of ${directory.stations.length} popular stations`,
+      ...(directory.stale ? ['the directory may be stale'] : []),
+      ...(directory.degraded ? ['the directory is incomplete right now'] : []),
+    ];
     return {
-      summary: `${countNoun(rows.length, 'radio station')}${what}${where}.`,
-      data: capRows(rows, args.limit),
+      summary: `${countNoun(rows.length, 'radio station')}${what}${where} (${notes.join('; ')}).`,
+      data: {
+        ...capRows(rows, args.limit),
+        directory_size: directory.stations.length,
+        stale: directory.stale === true,
+        degraded: directory.degraded === true,
+      },
     };
   },
 });

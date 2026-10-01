@@ -77,12 +77,21 @@ export const findAlprCameras = defineTool({
         distance_km: round(distanceKm(center, point), 2),
       }))
       .sort((a, b) => a.distance_km - b.distance_km);
+    const notes = [
+      ...(result.saturated
+        ? ['partial: some cameras were not loaded; use a smaller area']
+        : []),
+      ...(result.stale ? ['data may be stale'] : []),
+    ];
     return {
       summary:
         `${countNoun(rows.length, 'license plate reader camera')} mapped in ${area.label}` +
-        (result.stale ? ' (data may be stale).' : '.'),
+        (notes.length ? ` (${notes.join('; ')}).` : '.'),
       data: {
         ...capRows(rows, args.limit),
+        // Some tiles failed, or a dense area was trimmed to the source limit.
+        complete: !result.saturated,
+        stale: result.stale === true,
         source: services.alpr.label ?? null,
         attribution: services.alpr.attribution ?? null,
       },

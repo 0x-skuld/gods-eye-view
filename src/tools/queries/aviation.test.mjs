@@ -337,3 +337,17 @@ test('aircraft searches keep the feeds that answered and name the others', async
       error.code === 'unavailable' && error.message === 'OpenSky HTTP 503',
   );
 });
+
+test('a regional fallback feed is named in the answer', async () => {
+  const regional = feed([record('abc123', 37.6, -122.3)], {
+    source: 'adsb.lol',
+    coverage: '250nm regional fallback',
+  });
+  const result = await composeCatalog({
+    tools: coreTools,
+    services: { aircraft: regional },
+  }).call('aircraft_in_area', {
+    area: { lat: 37.6, lon: -122.3, radius_km: 20 },
+  });
+  assert.match(result.summary, /\(regional feed: 250nm regional fallback\)\.$/);
+});

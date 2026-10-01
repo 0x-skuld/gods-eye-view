@@ -95,3 +95,21 @@ test('coverage, size and zoom limits are reported', async () => {
     /smaller, city-sized area/,
   );
 });
+
+test('a saturated camera fetch is reported as partial', async () => {
+  const catalog = composeCatalog({
+    tools: coreTools,
+    services: {
+      alpr: alpr({
+        records: [camera('alpr:1', 30.3, -97.7)],
+        stale: false,
+        saturated: true,
+      }),
+    },
+  });
+  const result = await catalog.call('find_alpr_cameras', {
+    area: { lat: 30.3, lon: -97.7, radius_km: 5 },
+  });
+  assert.equal(result.data.complete, false);
+  assert.match(result.summary, /partial: some cameras were not loaded/);
+});
