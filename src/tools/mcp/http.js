@@ -25,9 +25,8 @@ export function createMcpHttpHandler(server) {
     const declared = Number(request.headers.get('content-length'));
     if (declared > MAX_BODY_BYTES)
       return json(413, { error: 'Request too large' });
-    const text = await request.text();
-    if (new TextEncoder().encode(text).length > MAX_BODY_BYTES)
-      return json(413, { error: 'Request too large' });
+    const text = await readCapped(request, MAX_BODY_BYTES);
+    if (text === null) return json(413, { error: 'Request too large' });
     let message;
     try {
       message = JSON.parse(text);
@@ -37,6 +36,35 @@ export function createMcpHttpHandler(server) {
     const response = await server.handle(message, { signal: request.signal });
     return response ? json(200, response) : new Response(null, { status: 202 });
   };
+}
+
+/**
+ * Read a request body as text, stopping as soon as it passes `limit` bytes,
+ * so a body without a Content-Length cannot be buffered without bound.
+ * Returns null when the body is too large.
+ */
+async function readCapped(request, limit) {
+  if (!request.body) return '';
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
 }
 
 function json(status, body) {

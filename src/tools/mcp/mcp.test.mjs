@@ -176,6 +176,26 @@ test('the HTTP transport accepts one JSON message per POST', async () => {
   );
   assert.equal((await post({}, { 'Content-Type': 'text/plain' })).status, 415);
   assert.equal((await post('x'.repeat(1024 * 1024 + 1))).status, 413);
+  // A streamed body without Content-Length stops being read past the limit.
+  let produced = 0;
+  const chunk = new Uint8Array(64 * 1024).fill(32);
+  const body = new ReadableStream({
+    pull(controller) {
+      if (produced >= 8 * 1024 * 1024) return controller.close();
+      produced += chunk.byteLength;
+      controller.enqueue(chunk);
+    },
+  });
+  const streamed = await handle(
+    new Request('http://localhost/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      duplex: 'half',
+    }),
+  );
+  assert.equal(streamed.status, 413);
+  assert.ok(produced <= 1024 * 1024 + 4 * chunk.byteLength, `read ${produced}`);
   const get = await handle(new Request('http://localhost/mcp'));
   assert.equal(get.status, 405);
   assert.equal(get.headers.get('allow'), 'POST');
