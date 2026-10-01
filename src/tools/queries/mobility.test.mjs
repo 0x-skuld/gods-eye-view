@@ -481,3 +481,18 @@ test('traffic counts only roads inside a radius area and reports missing tiles',
   assert.equal(partial.data.partial, true);
   assert.match(partial.summary, /Some map tiles did not load/);
 });
+
+test('a whole-world bike-share search names every system it skipped', async () => {
+  const empty = { data: { stations: [] } };
+  const result = await composeCatalog({
+    tools: coreTools,
+    services: {
+      bikeshare: {
+        systems: GBFS_CITY_REGISTRY,
+        getStations: async () => empty,
+      },
+    },
+  }).call('get_bike_share', { area: { bbox: [-180, -90, 180, 90] } });
+  const named = [...result.data.systems, ...result.data.systems_not_searched];
+  assert.equal(named.length, GBFS_CITY_REGISTRY.length);
+});

@@ -142,14 +142,38 @@ export async function resolvePoint(point, { services, signal } = {}) {
 export function areaRadiusKm(area) {
   if (area.center) return area.center.radiusKm;
   const center = areaCenter(area);
-  return Math.max(
-    ...[
-      { lat: area.north, lon: area.west },
-      { lat: area.north, lon: area.east },
-      { lat: area.south, lon: area.west },
-      { lat: area.south, lon: area.east },
-    ].map((corner) => distanceKm(center, corner)),
-  );
+  // A box holding the point opposite its center reaches half the globe.
+  const antipode = {
+    lat: -center.lat,
+    lon: center.lon > 0 ? center.lon - 180 : center.lon + 180,
+  };
+  if (areaContains(area, antipode)) return Math.PI * EARTH_RADIUS_KM;
+  // Otherwise the farthest point is on the boundary: sample each edge, and
+  // include where each parallel edge comes nearest the antipode's longitude.
+  const width =
+    area.west <= area.east
+      ? area.east - area.west
+      : 360 - (area.west - area.east);
+  const lonAt = (t) => area.west + width * t;
+  const steps = 64;
+  const points = [];
+  for (let step = 0; step <= steps; step += 1) {
+    const t = step / steps;
+    const lat = area.south + (area.north - area.south) * t;
+    points.push(
+      { lat, lon: area.west },
+      { lat, lon: area.east },
+      { lat: area.north, lon: lonAt(t) },
+      { lat: area.south, lon: lonAt(t) },
+    );
+  }
+  const offset = (((antipode.lon - area.west) % 360) + 360) % 360;
+  if (offset <= width)
+    points.push(
+      { lat: area.north, lon: antipode.lon },
+      { lat: area.south, lon: antipode.lon },
+    );
+  return Math.max(...points.map((point) => distanceKm(center, point)));
 }
 
 /** Great-circle distance in kilometers. */

@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   areaCenter,
   areaContains,
+  areaRadiusKm,
   distanceKm,
   lineTouchesArea,
   polygonsTouchArea,
@@ -244,4 +245,20 @@ test('polygons touch an area by vertex, crossing edge or enclosing it', async ()
   assert.ok(!polygonsTouchArea([ring], box), 'the area sits in a hole');
   const circle = await resolveArea({ lat: 0, lon: 0, radius_km: 20 });
   assert.ok(polygonsTouchArea([square(5)], circle));
+});
+
+test('a box radius reaches every point of the box, however large', async () => {
+  const world = await resolveArea({ bbox: [-180, -90, 180, 90] });
+  assert.ok(Math.abs(areaRadiusKm(world) - Math.PI * 6371.0088) < 1);
+  const wide = await resolveArea({ bbox: [-60, -70, 100, 60] });
+  const radius = areaRadiusKm(wide);
+  const center = areaCenter(wide);
+  for (let lat = -70; lat <= 60; lat += 2.5)
+    for (let lon = -60; lon <= 100; lon += 2.5)
+      assert.ok(
+        distanceKm(center, { lat, lon }) <= radius + 0.5,
+        `${lat},${lon}`,
+      );
+  const small = await resolveArea({ bbox: [-97.94, 30.1, -97.56, 30.52] });
+  assert.ok(areaRadiusKm(small) < 30);
 });
