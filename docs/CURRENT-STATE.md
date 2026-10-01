@@ -11,7 +11,7 @@ area, by identifier, tracks, and type and route lookups), ships (in an area,
 by identifier, and tracks), satellites (next
 pass over a point, and those overhead now), public cameras (including a
 camera's current image), radio stations, place search, routing, bike-share
-stations, transit vehicles, weather, regional briefs, tropical cyclones, fire
+stations, transit vehicles, road traffic flow, weather, regional briefs, tropical cyclones, fire
 perimeters, terrain height, military installations and map features, plus a
 combined situation brief and the app's heads-up display caption. Tools reuse the layers' portable source factories, take a
 shared `area` argument (place name, bounding box, or point and radius) and cap

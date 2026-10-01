@@ -260,3 +260,113 @@ test('transit reports uncovered areas and unavailable feeds', async () => {
     (error) => error.code === 'unavailable',
   );
 });
+
+test('traffic flow aggregates speed, congestion and closures by road length', async () => {
+  // Two 0.01° segments along the equator (about 1.11 km each) and one closure.
+  const segments = [
+    {
+      coords: [
+        [0, 0],
+        [0.01, 0],
+      ],
+      trafficLevel: 1,
+      roadCategory: 'motorway',
+      closure: false,
+    },
+    {
+      coords: [
+        [0, 0.001],
+        [0.01, 0.001],
+      ],
+      trafficLevel: 0.25,
+      roadCategory: 'street',
+      closure: false,
+    },
+    {
+      coords: [
+        [0, 0.002],
+        [0.005, 0.002],
+      ],
+      trafficLevel: 0,
+      roadCategory: 'street',
+      closure: true,
+    },
+    { coords: [[0, 0]], trafficLevel: 1 },
+  ];
+  const zooms = [];
+  const traffic = {
+    getStatus: async () => ({ hasKey: true }),
+    async fetchFlowForBounds(box, { zoom }) {
+      zooms.push(zoom);
+      if (zoom > 10)
+        throw Object.assign(new Error('Zoom in'), {
+          code: 'TILE_VIEW_TOO_WIDE',
+        });
+      return segments;
+    },
+  };
+  const catalog = composeCatalog({ tools: coreTools, services: { traffic } });
+  const result = await catalog.call('get_traffic_flow', {
+    area: { bbox: [-0.1, -0.1, 0.1, 0.1] },
+  });
+  assert.deepEqual(zooms, [12, 11, 10]);
+  assert.equal(
+    result.summary,
+    'Traffic in the requested box: 50% of free-flow speed on average; 1.7 km congested of 2.8 km measured; 0.6 km closed.',
+  );
+  assert.equal(result.data.speed_pct_of_free_flow, 50);
+  assert.deepEqual(result.data.by_category, [
+    {
+      category: 'street',
+      road_km: 1.7,
+      speed_pct_of_free_flow: 17,
+      congested_km: 1.7,
+    },
+    {
+      category: 'motorway',
+      road_km: 1.1,
+      speed_pct_of_free_flow: 100,
+      congested_km: 0,
+    },
+  ]);
+});
+
+test('traffic reports a missing key, empty areas and areas that are too wide', async () => {
+  const keyless = {
+    getStatus: async () => ({ hasKey: false }),
+    fetchFlowForBounds: async () => [],
+  };
+  await assert.rejects(
+    composeCatalog({ tools: coreTools, services: { traffic: keyless } }).call(
+      'get_traffic_flow',
+      { area: downtown },
+    ),
+    (error) => error.code === 'unavailable' && /TomTom key/.test(error.message),
+  );
+  const quiet = {
+    getStatus: async () => ({ hasKey: true }),
+    fetchFlowForBounds: async () => [],
+  };
+  assert.equal(
+    (
+      await composeCatalog({
+        tools: coreTools,
+        services: { traffic: quiet },
+      }).call('get_traffic_flow', { area: downtown })
+    ).summary,
+    'No live traffic is reported in 2 km around 30.267, -97.743.',
+  );
+  const wide = {
+    getStatus: async () => ({ hasKey: true }),
+    fetchFlowForBounds: async () => {
+      throw Object.assign(new Error('Zoom in'), { code: 'TILE_VIEW_TOO_WIDE' });
+    },
+  };
+  await assert.rejects(
+    composeCatalog({ tools: coreTools, services: { traffic: wide } }).call(
+      'get_traffic_flow',
+      { area: { bbox: [-100, 30, -95, 35] } },
+    ),
+    /too large for traffic detail/,
+  );
+});

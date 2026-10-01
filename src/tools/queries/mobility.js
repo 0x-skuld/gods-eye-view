@@ -222,3 +222,123 @@ export const getTransitVehicles = defineTool({
     };
   },
 });
+
+const FLOW_ZOOMS = [12, 11, 10, 9];
+const CONGESTED_LEVEL = 0.5;
+
+/** Length in kilometers of a `[lon, lat]` line. */
+function lineKm(coords) {
+  let total = 0;
+  for (let index = 1; index < coords.length; index += 1)
+    total += distanceKm(
+      { lat: coords[index - 1][1], lon: coords[index - 1][0] },
+      { lat: coords[index][1], lon: coords[index][0] },
+    );
+  return total;
+}
+
+async function readFlow(traffic, area, signal) {
+  const box = {
+    west: area.west,
+    south: area.south,
+    east: area.east,
+    north: area.north,
+  };
+  for (const zoom of FLOW_ZOOMS) {
+    try {
+      return await traffic.fetchFlowForBounds(box, { zoom, signal });
+    } catch (error) {
+      if (error?.code !== 'TILE_VIEW_TOO_WIDE') throw error;
+    }
+  }
+  throw new ToolError(
+    'invalid_arguments',
+    'The area is too large for traffic detail; use a city-sized area',
+  );
+}
+
+export const getTrafficFlow = defineTool({
+  name: 'get_traffic_flow',
+  title: 'Traffic flow',
+  description:
+    'Live road traffic in a city-sized area from TomTom: average speed as a ' +
+    'share of free-flow speed, congested and closed road length, and a ' +
+    'breakdown by road category.',
+  inputSchema: {
+    type: 'object',
+    properties: { area: AREA_SCHEMA },
+    required: ['area'],
+    additionalProperties: false,
+  },
+  requires: ['traffic'],
+  async run(args, { services, signal }) {
+    const area = await resolveArea(args.area, { services, signal });
+    if (area.west > area.east)
+      throw new ToolError(
+        'invalid_arguments',
+        'The area must not cross the antimeridian',
+      );
+    const status = await services.traffic.getStatus({ signal });
+    if (!status.hasKey)
+      throw new ToolError(
+        'unavailable',
+        'Live traffic needs a TomTom key configured for this server',
+      );
+    const segments = (await readFlow(services.traffic, area, signal)).filter(
+      (segment) => Array.isArray(segment.coords) && segment.coords.length > 1,
+    );
+    const categories = new Map();
+    let measuredKm = 0;
+    let weighted = 0;
+    let congestedKm = 0;
+    let closedKm = 0;
+    for (const segment of segments) {
+      const km = lineKm(segment.coords);
+      const key = segment.roadCategory || 'other';
+      const entry = categories.get(key) || {
+        km: 0,
+        weighted: 0,
+        congestedKm: 0,
+      };
+      entry.km += km;
+      if (segment.closure) closedKm += km;
+      if (Number.isFinite(segment.trafficLevel)) {
+        measuredKm += km;
+        weighted += segment.trafficLevel * km;
+        entry.weighted += segment.trafficLevel * km;
+        if (segment.trafficLevel < CONGESTED_LEVEL) {
+          congestedKm += km;
+          entry.congestedKm += km;
+        }
+      }
+      categories.set(key, entry);
+    }
+    const percent = (part, whole) =>
+      whole > 0 ? Math.round((part / whole) * 100) : null;
+    const speedPct = percent(weighted, measuredKm);
+    const byCategory = [...categories.entries()]
+      .map(([category, entry]) => ({
+        category,
+        road_km: round(entry.km, 1),
+        speed_pct_of_free_flow: percent(entry.weighted, entry.km),
+        congested_km: round(entry.congestedKm, 1),
+      }))
+      .sort((a, b) => b.road_km - a.road_km);
+    return {
+      summary: segments.length
+        ? `Traffic in ${area.label}: ${speedPct ?? 'unknown'}% of free-flow speed on average; ` +
+          `${round(congestedKm, 1)} km congested of ${round(measuredKm, 1)} km measured` +
+          (closedKm > 0 ? `; ${round(closedKm, 1)} km closed.` : '.')
+        : `No live traffic is reported in ${area.label}.`,
+      data: {
+        area: area.label,
+        speed_pct_of_free_flow: speedPct,
+        measured_km: round(measuredKm, 1),
+        congested_km: round(congestedKm, 1),
+        closed_km: round(closedKm, 1),
+        congested_below_pct: CONGESTED_LEVEL * 100,
+        by_category: byCategory,
+      },
+    };
+  },
+});

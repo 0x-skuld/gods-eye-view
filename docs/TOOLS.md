@@ -112,6 +112,7 @@ public feeds the sources already use.
 | `plan_route` | `routing` | Walking, driving or cycling route over OpenStreetMap, with a simplified path |
 | `get_bike_share` | `bikeshare` | Live GBFS stations in an area, with bikes and docks available |
 | `get_transit_vehicles` | `transit` | Live GTFS-Realtime vehicle positions in an area, optionally one route |
+| `get_traffic_flow` | `traffic` | TomTom flow in a city-sized area: speed vs free flow, congested and closed road |
 | `get_weather` | `weather` | Current conditions at a place or point |
 | `get_regional_brief` | `regional` | What and where a location is, its weather and recent headlines |
 | `get_cyclones` | `cyclones` | Active NHC/CPHC tropical cyclones, optionally in an area |
