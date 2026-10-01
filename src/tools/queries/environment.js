@@ -104,9 +104,18 @@ export const getWeather = defineTool({
       signal,
     });
     const row = weatherRow(payload?.weather);
+    // The proxy answers from its cache, marked stale, when a refresh fails.
+    const stale = payload?.status === 'stale';
     return {
-      summary: `Weather at ${point.label}: ${describeWeather(row)}.`,
-      data: { location: point, weather: row },
+      summary:
+        `Weather at ${point.label}: ${describeWeather(row)}` +
+        (stale ? ' (data may be stale).' : '.'),
+      data: {
+        location: point,
+        weather: row,
+        stale,
+        retrieved_at: payload?.retrievedAt ?? null,
+      },
     };
   },
 });

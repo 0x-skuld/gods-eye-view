@@ -694,3 +694,51 @@ test('a fire perimeter enclosing the whole area is found', async () => {
     ['big'],
   );
 });
+
+test('stale weather and partial fire data reach answers and the HUD caption', async () => {
+  const sent = [];
+  const summary = {
+    async summarize(context) {
+      sent.push(context);
+      return { ok: true, status: 200, data: { summary: 'Austin STALE' } };
+    },
+  };
+  const staleWeather = {
+    getConditions: async () => ({ status: 'stale', weather: conditions }),
+  };
+  const fires = {
+    getSnapshot: async () => ({
+      stale: false,
+      fetchedAt: Date.UTC(2026, 0, 1),
+      sources: [
+        { source: 'VIIRS_NOAA20_NRT', ok: true },
+        { source: 'VIIRS_SNPP_NRT', ok: false },
+      ],
+      fires: [],
+    }),
+  };
+  const catalog = catalogWith({
+    weather: staleWeather,
+    summary,
+    places,
+    fires,
+  });
+  const weatherResult = await catalog.call('get_weather', {
+    location: { place: 'Austin' },
+  });
+  assert.equal(weatherResult.data.stale, true);
+  assert.match(weatherResult.summary, /\(data may be stale\)\.$/);
+  const fireResult = await catalog.call('get_active_fires', {
+    area: { place: 'Austin' },
+  });
+  assert.deepEqual(fireResult.data.missing_sources, ['VIIRS_SNPP_NRT']);
+  assert.match(fireResult.summary, /\(no data from VIIRS_SNPP_NRT\)\.$/);
+  await catalog.call('get_hud_caption', { area: { place: 'Austin' } });
+  assert.deepEqual(
+    sent[0].enabledLayers.map((layer) => [layer.id, layer.feedState]),
+    [
+      ['weather', 'stale'],
+      ['fires', 'degraded'],
+    ],
+  );
+});

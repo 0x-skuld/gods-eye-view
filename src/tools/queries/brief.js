@@ -90,9 +90,11 @@ const AWARENESS_SECTIONS = [
 function sectionFeedState(section) {
   if (section.unavailable) return 'unavailable';
   const data = section.data || {};
-  return data.freshness === 'stale' || data.stale === true
-    ? 'stale'
-    : 'nominal';
+  if (data.freshness === 'stale' || data.stale === true) return 'stale';
+  // Answered, but some of the feeds or satellites behind it did not.
+  if (data.missing_sources?.length || data.unavailable_feeds?.length)
+    return 'degraded';
+  return 'nominal';
 }
 
 /**

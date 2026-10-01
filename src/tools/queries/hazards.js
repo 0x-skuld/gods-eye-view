@@ -78,9 +78,24 @@ export const getActiveFires = defineTool({
       .filter((fire) => areaContains(area, fire))
       .sort((a, b) => (b.frp ?? 0) - (a.frp ?? 0));
     const result = capRows(fires, args.limit);
+    // The proxy serves its last good snapshot when a refresh fails, and marks
+    // satellites whose download failed.
+    const stale = snapshot.stale === true;
+    const missing = (snapshot.sources || [])
+      .filter((source) => source?.ok === false)
+      .map((source) => source.source);
+    const notes = [
+      ...(stale ? ['data may be stale'] : []),
+      ...(missing.length ? [`no data from ${missing.join(', ')}`] : []),
+    ];
     return {
-      summary: `${countNoun(fires.length, 'fire detection')} in ${area.label} in the last 24 hours.`,
+      summary:
+        `${countNoun(fires.length, 'fire detection')} in ${area.label} in the last 24 hours` +
+        (notes.length ? ` (${notes.join('; ')}).` : '.'),
       data: {
+        stale,
+        missing_sources: missing,
+        fetched_at: isoTime(snapshot.fetchedAt),
         ...result,
         rows: result.rows.map((fire) => ({
           lat: fire.lat,
