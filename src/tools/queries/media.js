@@ -17,12 +17,22 @@ const round = (value, digits) =>
   Number.isFinite(value) ? Number(value.toFixed(digits)) : null;
 const text = (value) => (typeof value === 'string' && value ? value : null);
 
-async function readCameras(services, signal) {
+async function readCatalog(services, signal) {
   const payload = await services.cctv.getCatalog({ signal });
-  return payload.sources.filter(
-    (camera) =>
-      camera?.id && Number.isFinite(camera.lat) && Number.isFinite(camera.lon),
-  );
+  return {
+    cameras: payload.sources.filter(
+      (camera) =>
+        camera?.id &&
+        Number.isFinite(camera.lat) &&
+        Number.isFinite(camera.lon),
+    ),
+    // Regional packs the catalog serves only part of, nearest their centers.
+    trimmed: Array.isArray(payload.trimmedPacks) ? payload.trimmedPacks : [],
+  };
+}
+
+async function readCameras(services, signal) {
+  return (await readCatalog(services, signal)).cameras;
 }
 
 export const findCctvCameras = defineTool({
@@ -41,8 +51,13 @@ export const findCctvCameras = defineTool({
   async run(args, { services, signal }) {
     const area = await resolveArea(args.area, { services, signal });
     const center = areaCenter(area);
-    const rows = (await readCameras(services, signal))
-      .filter((camera) => areaContains(area, camera))
+    const catalog = await readCatalog(services, signal);
+    const found = catalog.cameras.filter((camera) =>
+      areaContains(area, camera),
+    );
+    const packs = new Set(found.map((camera) => camera.pack).filter(Boolean));
+    const trimmed = catalog.trimmed.filter((entry) => packs.has(entry.pack));
+    const rows = found
       .map((camera) => ({
         id: camera.id,
         name: text(camera.name),
@@ -57,8 +72,21 @@ export const findCctvCameras = defineTool({
       }))
       .sort((a, b) => a.distance_km - b.distance_km);
     return {
-      summary: `${countNoun(rows.length, 'public camera')} in ${area.label}.`,
-      data: capRows(rows, args.limit),
+      summary:
+        `${countNoun(rows.length, 'public camera')} in ${area.label}` +
+        (trimmed.length
+          ? ` (the catalog serves only some cameras here: ${trimmed
+              .map(
+                (entry) =>
+                  `${entry.served} of ${entry.available} from ${entry.pack}`,
+              )
+              .join(', ')}).`
+          : '.'),
+      data: {
+        ...capRows(rows, args.limit),
+        complete: trimmed.length === 0,
+        catalog_trimmed: trimmed,
+      },
     };
   },
 });

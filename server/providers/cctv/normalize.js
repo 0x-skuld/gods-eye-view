@@ -470,7 +470,10 @@ export function prioritizeSources(cameras, maxCount, anchors) {
     return a.idx - b.idx;
   });
 
-  return scored.slice(0, cap).map((entry) => entry.camera);
+  const kept = scored.slice(0, cap).map((entry) => entry.camera);
+  // How many cameras the pack offered before trimming, for coverage reports.
+  Object.defineProperty(kept, 'available', { value: list.length });
+  return kept;
 }
 
 /**

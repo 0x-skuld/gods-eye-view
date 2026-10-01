@@ -128,10 +128,30 @@ test('the catalog applies the fair cap to configured packs end to end', async ()
       sources.slice(0, 3).map((s) => s.id),
       ['env-0', 'env-1', 'env-2'],
     );
+    assert.equal(sources[0].pack, 'env');
+    assert.deepEqual(getSources.trimmedPacks(), [
+      { pack: 'env', available: 12, served: 9 },
+    ]);
   } finally {
     for (const key of Object.keys(process.env)) {
       if (!(key in saved)) delete process.env[key];
     }
     Object.assign(process.env, saved);
   }
+});
+
+test('a pack trimmed to its nearest cameras reports how many it offered', async () => {
+  const { prioritizeSources } =
+    await import('../../server/providers/cctv/normalize.js');
+  const cameras = Array.from({ length: 5 }, (_, i) => ({
+    id: `c${i}`,
+    lat: i,
+    lon: 0,
+  }));
+  const kept = prioritizeSources(cameras, 2, [{ lat: 0, lon: 0 }]);
+  assert.deepEqual(
+    kept.map((camera) => camera.id),
+    ['c0', 'c1'],
+  );
+  assert.equal(kept.available, 5);
 });
