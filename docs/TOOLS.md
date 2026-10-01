@@ -49,7 +49,10 @@ Services are the portable source factories the layers already use, such as
 plus a `places` service with `resolve(name, { signal })`. Sources request
 relative `/api/...` paths through an injected `fetchImpl`, so the same tool
 code runs wherever an application routes those paths.
-The `bikeshare` service is `{ systems, getStations }`: the system registry and
+The `weather`, `regional`, `terrain`, `summary` and `features` services are the
+application request services from `gods-eye-view/application/requests`.
+`situation_brief` runs each section whose services are supplied and marks the
+others unavailable. The `bikeshare` service is `{ systems, getStations }`: the system registry and
 the GBFS source. `createGeocodePlaceService` resolves place names through `/api/geocode`;
 `createPlaceSearchService` searches `/api/google/*` and reports when no search key
 is configured; `createRouteService` plans routes through `/api/route`.
@@ -106,3 +109,12 @@ public feeds the sources already use.
 | `plan_route` | `routing` | Walking, driving or cycling route over OpenStreetMap, with a simplified path |
 | `get_bike_share` | `bikeshare` | Live GBFS stations in an area, with bikes and docks available |
 | `get_transit_vehicles` | `transit` | Live GTFS-Realtime vehicle positions in an area, optionally one route |
+| `get_weather` | `weather` | Current conditions at a place or point |
+| `get_regional_brief` | `regional` | What and where a location is, its weather and recent headlines |
+| `get_cyclones` | `cyclones` | Active NHC/CPHC tropical cyclones, optionally in an area |
+| `get_fire_perimeters` | `perimeters` | Mapped WFIGS wildfire perimeters in an area, largest first |
+| `get_terrain_height` | `terrain` | Ground, geoid and ellipsoid heights at up to 20 points |
+| `find_military_installations` | `installations` | OpenStreetMap military sites in an area of at most 10° per side |
+| `get_map_features` | `features` | Administrative areas, named places or monuments at a location (needs Overpass) |
+| `situation_brief` | `weather` | Weather, earthquakes, fires, aircraft and cyclones for an area, by section |
+| `get_hud_caption` | `weather`, `summary` | The app's heads-up display caption for an area |

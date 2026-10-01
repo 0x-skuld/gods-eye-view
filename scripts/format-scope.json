@@ -875,5 +875,6 @@
   "src/tools/queries/media.test.mjs",
   "src/tools/queries/places.test.mjs",
   "src/layers/transit/source.test.mjs",
-  "src/tools/queries/mobility.test.mjs"
+  "src/tools/queries/mobility.test.mjs",
+  "src/tools/queries/environment.test.mjs"
 ]

@@ -2,7 +2,9 @@
 
 - Add tools for language-model clients and a local MCP server. `npm run mcp`
   serves earthquake, active-fire, launch, aircraft, satellite, camera, radio,
-  place, routing, bike-share and transit queries over stdio to clients such as Claude Code, reading
+  place, routing, bike-share, transit, weather, cyclone, fire-perimeter,
+  terrain, installation and map-feature queries, plus a situation brief, over
+  stdio to clients such as Claude Code, reading
   from a running app. Tools are defined
   once in `gods-eye-view/tools`, reuse the layers' source factories, and are
   exposed through the protocol adapter in `gods-eye-view/tools/mcp`.

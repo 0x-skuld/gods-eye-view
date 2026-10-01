@@ -4,6 +4,7 @@ import { PassThrough } from 'node:stream';
 import { createLocalMcpServer } from '../../server/mcp/server.js';
 import { createApiFetch } from '../../server/mcp/services.js';
 import { parseArgs, serveStdio } from '../../server/mcp/stdio.js';
+import { coreTools } from './index.js';
 
 const usgs = {
   type: 'FeatureCollection',
@@ -66,27 +67,10 @@ test('the stdio server answers newline-delimited requests using only its data so
   assert.equal(responses.length, 4);
   assert.equal(byId.get(1).result.serverInfo.name, 'gods-eye-view');
   assert.equal(byId.get(null).error.code, -32700);
+  // Every Core tool's services are composed locally.
   assert.deepEqual(
     byId.get(2).result.tools.map((tool) => tool.name),
-    [
-      'get_earthquakes',
-      'get_active_fires',
-      'get_recent_launches',
-      'aircraft_in_area',
-      'find_aircraft',
-      'get_aircraft_track',
-      'get_aircraft_info',
-      'next_satellite_pass',
-      'satellites_overhead',
-      'find_cctv_cameras',
-      'get_cctv_snapshot',
-      'find_radio_stations',
-      'search_places',
-      'places_nearby',
-      'plan_route',
-      'get_bike_share',
-      'get_transit_vehicles',
-    ],
+    coreTools.map((tool) => tool.name),
   );
   assert.equal(
     byId.get(3).result.content[0].text,

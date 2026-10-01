@@ -9,6 +9,16 @@ import {
   getAircraftInfo,
   getAircraftTrack,
 } from './queries/aviation.js';
+import { getHudCaption, situationBrief } from './queries/brief.js';
+import {
+  findMilitaryInstallations,
+  getCyclones,
+  getFirePerimeters,
+  getMapFeatures,
+  getRegionalBrief,
+  getTerrainHeight,
+  getWeather,
+} from './queries/environment.js';
 import { getActiveFires, getEarthquakes } from './queries/hazards.js';
 import { getBikeShare, getTransitVehicles } from './queries/mobility.js';
 import { placesNearby, planRoute, searchPlaces } from './queries/places.js';
@@ -63,4 +73,13 @@ export const coreTools = Object.freeze([
   planRoute,
   getBikeShare,
   getTransitVehicles,
+  getWeather,
+  getRegionalBrief,
+  getCyclones,
+  getFirePerimeters,
+  getTerrainHeight,
+  findMilitaryInstallations,
+  getMapFeatures,
+  situationBrief,
+  getHudCaption,
 ]);
