@@ -84,6 +84,8 @@ test('the stdio server answers newline-delimited requests using only its data so
       'search_places',
       'places_nearby',
       'plan_route',
+      'get_bike_share',
+      'get_transit_vehicles',
     ],
   );
   assert.equal(

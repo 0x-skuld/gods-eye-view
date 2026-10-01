@@ -3093,6 +3093,8 @@
       "src/tools/queries/aviation.js",
       "src/tools/queries/media.js",
       "src/tools/queries/places.js",
+      "src/tools/queries/mobility.js",
+      "src/sources/gbfsStations.js",
       "src/sources/tle.js",
       "src/data/satellitePass.js"
     ],

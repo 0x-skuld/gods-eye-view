@@ -10,6 +10,7 @@ import {
   getAircraftTrack,
 } from './queries/aviation.js';
 import { getActiveFires, getEarthquakes } from './queries/hazards.js';
+import { getBikeShare, getTransitVehicles } from './queries/mobility.js';
 import { placesNearby, planRoute, searchPlaces } from './queries/places.js';
 import {
   findCctvCameras,
@@ -60,4 +61,6 @@ export const coreTools = Object.freeze([
   searchPlaces,
   placesNearby,
   planRoute,
+  getBikeShare,
+  getTransitVehicles,
 ]);

@@ -3,12 +3,15 @@
  * at a running God's Eye View server's `/api` routes.
  */
 
+import { GBFS_CITY_REGISTRY } from '../../src/layers/bikeshare/registry.js';
+import { createBikeshareSource } from '../../src/layers/bikeshare/source.js';
 import { createCctvSource } from '../../src/layers/cctv/source.js';
 import { createUsgsEarthquakeSource } from '../../src/layers/earthquakes/source.js';
 import { createFirmsSource } from '../../src/layers/firms/source.js';
 import { createLaunchSource } from '../../src/layers/launches/source.js';
 import { createRadioSource } from '../../src/layers/radio/source.js';
 import { createSatelliteSource } from '../../src/layers/satellites/source.js';
+import { createTransitSource } from '../../src/layers/transit/source.js';
 import {
   createAdsbLolSource,
   createOpenSkySource,
@@ -52,6 +55,11 @@ export function createLocalToolServices(options = {}) {
     radio: createRadioSource({ fetchImpl }),
     placeSearch: createPlaceSearchService({ fetchImpl }),
     routing: createRouteService({ fetchImpl }),
+    bikeshare: {
+      systems: GBFS_CITY_REGISTRY,
+      getStations: createBikeshareSource({ fetchImpl }).getStations,
+    },
+    transit: createTransitSource({ fetchImpl }),
     places: createGeocodePlaceService({ fetchImpl }),
   };
 }

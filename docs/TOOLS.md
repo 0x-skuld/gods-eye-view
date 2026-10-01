@@ -49,7 +49,8 @@ Services are the portable source factories the layers already use, such as
 plus a `places` service with `resolve(name, { signal })`. Sources request
 relative `/api/...` paths through an injected `fetchImpl`, so the same tool
 code runs wherever an application routes those paths.
-`createGeocodePlaceService` resolves place names through `/api/geocode`;
+The `bikeshare` service is `{ systems, getStations }`: the system registry and
+the GBFS source. `createGeocodePlaceService` resolves place names through `/api/geocode`;
 `createPlaceSearchService` searches `/api/google/*` and reports when no search key
 is configured; `createRouteService` plans routes through `/api/route`.
 
@@ -103,3 +104,5 @@ public feeds the sources already use.
 | `search_places` | `placeSearch` | Points of interest matching a query within an area (Google Places) |
 | `places_nearby` | `placeSearch` | Notable places around a point (Google Places) |
 | `plan_route` | `routing` | Walking, driving or cycling route over OpenStreetMap, with a simplified path |
+| `get_bike_share` | `bikeshare` | Live GBFS stations in an area, with bikes and docks available |
+| `get_transit_vehicles` | `transit` | Live GTFS-Realtime vehicle positions in an area, optionally one route |
