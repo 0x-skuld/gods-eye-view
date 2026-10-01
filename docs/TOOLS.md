@@ -1,8 +1,8 @@
 # Tools and the MCP server
 
 Tools answer questions from God's Eye View data for language-model clients.
-They are defined once and exposed through adapters; the Model Context Protocol
-(MCP) is the first.
+They are defined once and exposed through adapters: the Model Context Protocol
+(MCP) and function calling, which voice uses.
 
 ## Layers
 
@@ -11,13 +11,17 @@ They are defined once and exposed through adapters; the Model Context Protocol
 | `src/tools/`         | Tool definitions, catalog composition, argument validation, shared `area` and result helpers      |
 | `src/tools/queries/` | Queries, one file per domain, reading only portable source contracts                              |
 | `src/tools/mcp/`     | MCP protocol (JSON-RPC) and a stateless HTTP transport; knows the catalog interface, not queries |
+| `src/tools/functions.js` | Function-calling adapter: tool records and results for function-calling clients |
 | `src/tools/services.js` | The default services: the layers' source factories and request services, given a resolving fetch |
 | `server/mcp/`        | Node composition: points the sources at a running app's `/api` routes; serves stdio and `/mcp`  |
+| `server/standalone/voiceTools.js`, `src/standalone/toolCatalog.js` | Standalone voice composition: the session's tool list and the browser catalog |
 
 Dependencies point downward only. `gods-eye-view/tools` and
 `gods-eye-view/tools/mcp` are portable exports: they reach no application,
 rendering, Node, Cesium or browser-global code, which
-`npm run check:boundaries` enforces. Nothing in the application imports them.
+`npm run check:boundaries` enforces. In the application, only voice reaches
+them: `withToolCatalog` in `src/voice/gevRealtime.js` imports the
+function-calling adapter, and the standalone entry supplies the catalog.
 
 ## Definitions and composition
 
@@ -76,6 +80,27 @@ merges extra fields into each listed definition. `createMcpHttpHandler(server)`
 returns a `Request`-to-`Response` handler for stateless Streamable HTTP: one
 JSON-RPC message per POST, answered with JSON. The host owns routing and any
 access control in front of it.
+
+## Voice
+
+Voice offers the catalog's queries next to its app actions.
+`toFunctionTools(tools, { exclude })` turns tools into
+`{ type: 'function', name, description, parameters }` records, and
+`toFunctionOutput(name, result)` turns a result into
+`{ ok, tool, summary, data }`, counting images in `images_omitted` instead of
+sending them.
+
+The voice session token endpoint takes its tool list as `realtime.tools`.
+`realtimeSessionTools(additional)` appends function tools to the app actions,
+skipping names an action already uses, so `next_satellite_pass` stays the
+action. The standalone server supplies every core query except
+`open_in_gods_eye_view`, since voice runs inside the app.
+
+In the browser, `initGevVoiceCommands({ toolCatalog })` takes a function that
+resolves a catalog. App action names go to the action runner; other names the
+catalog has go to `catalog.call` with the call's abort signal. The standalone
+entry composes the catalog with `createToolServices` over the page's fetch and
+loads it the first time voice calls a query.
 
 ## Running locally
 

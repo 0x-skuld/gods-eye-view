@@ -9,7 +9,11 @@
   stdio to clients such as Claude Code, reading
   from a running app. Tools are defined
   once in `gods-eye-view/tools`, reuse the layers' source factories, and are
-  exposed through the protocol adapter in `gods-eye-view/tools/mcp`.
+  exposed through the protocol adapter in `gods-eye-view/tools/mcp`. The
+  catalog also covers weather maps, wind, recent imagery, submarine cables,
+  license plate reader cameras, datacenters and dams, the Bhote Koshi flood,
+  military awareness and links that open the app over an area with layers on.
+  Voice offers the same queries next to its app actions.
 
 - Public Overpass instances are no longer used by default. Street Traffic
   roads come from TomTom flow tiles, OpenFreeMap vector tiles, or both, chosen

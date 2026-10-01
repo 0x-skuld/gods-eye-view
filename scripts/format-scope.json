@@ -885,5 +885,6 @@
   "src/tools/queries/cables.test.mjs",
   "src/tools/queries/surveillance.test.mjs",
   "src/tools/queries/infrastructure.test.mjs",
-  "src/tools/queries/events.test.mjs"
+  "src/tools/queries/events.test.mjs",
+  "src/tools/functions.test.mjs"
 ]

@@ -1,6 +1,7 @@
 import { createAssetDirectorySource } from '../director/packs/source.js';
 import { createApplicationTools } from '../app/tools.js';
 import { startStandaloneChrome } from './startupChrome.js';
+import { loadToolCatalog } from './toolCatalog.js';
 export function createStandaloneTools(options) {
   return createApplicationTools({
     startChrome: startStandaloneChrome,
@@ -12,5 +13,6 @@ export function createStandaloneTools(options) {
       },
     },
     ...options,
+    voice: { toolCatalog: loadToolCatalog, ...options?.voice },
   });
 }

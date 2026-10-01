@@ -2036,7 +2036,9 @@
       "src/data/local_data/osm_military_names/names.json",
       "src/layers/installations/namedMarkers.js",
       "src/data/infrastructureOverlayEntry.js",
-      "src/sources/infrastructureData.js"
+      "src/sources/infrastructureData.js",
+      "src/tools/functions.js",
+      "src/voice/actionSchemas.js"
     ],
     "external": [
       "hls.js",
@@ -3119,7 +3121,8 @@
       "src/tools/queries/surveillance.js",
       "src/tools/queries/infrastructure.js",
       "src/tools/queries/events.js",
-      "src/data/bhoteKoshiFloodPath.js"
+      "src/data/bhoteKoshiFloodPath.js",
+      "src/tools/functions.js"
     ],
     "external": ["satellite.js"]
   },

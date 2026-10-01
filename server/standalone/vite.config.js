@@ -4,6 +4,7 @@ import { createBrowserViteConfig } from '../../build/vite.js';
 import { localProviderPlugins } from '../providers/local.js';
 import { localMcpPlugin } from '../mcp/plugin.js';
 import { apiNotFoundPlugin } from './api-not-found.js';
+import { standaloneVoiceTools } from './voiceTools.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -14,7 +15,11 @@ export default defineConfig(({ command, mode }) => {
     if (process.env[key] === undefined) process.env[key] = value;
   }
   return createBrowserViteConfig({
-    plugins: [...localProviderPlugins(), localMcpPlugin(), apiNotFoundPlugin()],
+    plugins: [
+      ...localProviderPlugins({ realtime: { tools: standaloneVoiceTools() } }),
+      localMcpPlugin(),
+      apiNotFoundPlugin(),
+    ],
     googleApiKey: process.env.GOOGLE_MAPS_API_KEY,
     cesiumToken: process.env.CESIUM_ION_TOKEN,
     host: process.env.HOST,

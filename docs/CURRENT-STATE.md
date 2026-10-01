@@ -20,8 +20,9 @@ perimeters, terrain height, military installations and map features, plus a
 combined situation brief, military awareness around a point, the app's heads-up display caption, and a link that
 opens the app over an area. Tools reuse the layers' portable source factories, take a
 shared `area` argument (place name, bounding box, or point and radius) and cap
-lists at 25 rows by default. The app does not import the tools, so its runtime
-behavior is unchanged. See [tools and the MCP server](TOOLS.md).
+lists at 25 rows by default. Voice offers the same queries next to its app
+actions: the session lists them, and the browser runs them through the same
+catalog, loaded on first use. See [tools and the MCP server](TOOLS.md).
 
 ## Cyber HUD — September 23, 2026
 

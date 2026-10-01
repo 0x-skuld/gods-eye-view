@@ -67,6 +67,7 @@ export {
   distanceKm,
 } from './area.js';
 export { LIMIT_SCHEMA, DEFAULT_LIMIT, MAX_LIMIT, capRows } from './results.js';
+export { toFunctionOutput, toFunctionTools } from './functions.js';
 export {
   createGeocodePlaceService,
   createPlaceSearchService,
