@@ -3110,7 +3110,8 @@
       "src/tools/queries/atmosphere.js",
       "src/layers/wind/inspection.js",
       "src/layers/wind/model.js",
-      "src/layers/wind/fields.js"
+      "src/layers/wind/fields.js",
+      "src/tools/queries/imagery.js"
     ],
     "external": ["satellite.js"]
   },
@@ -3178,7 +3179,9 @@
       "src/tools/schema.js",
       "src/layers/weather/source.js",
       "src/layers/wind/source.js",
-      "src/sources/windBody.js"
+      "src/sources/windBody.js",
+      "src/layers/recentImagery/catalog.js",
+      "src/layers/recentImagery/model.js"
     ],
     "external": ["@mapbox/vector-tile", "pbf"]
   }

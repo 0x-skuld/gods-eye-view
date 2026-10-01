@@ -14,7 +14,8 @@ by identifier, and tracks), satellites (next
 pass over a point, and those overhead now), public cameras (including a
 camera's current image), radio stations, place search, routing, bike-share
 stations, transit vehicles, road traffic flow, weather, weather map images
-(radar, satellite, lightning), wind, regional briefs, tropical cyclones, fire
+(radar, satellite, lightning), wind, the most recent satellite image of an
+area, regional briefs, tropical cyclones, fire
 perimeters, terrain height, military installations and map features, plus a
 combined situation brief, the app's heads-up display caption, and a link that
 opens the app over an area. Tools reuse the layers' portable source factories, take a
