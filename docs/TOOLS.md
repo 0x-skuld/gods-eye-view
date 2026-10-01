@@ -127,6 +127,8 @@ public feeds the sources already use.
 | `get_transit_vehicles` | `transit` | Live GTFS-Realtime vehicle positions in an area, optionally one route |
 | `get_traffic_flow` | `traffic` | TomTom flow in a city-sized area: speed vs free flow, congested and closed road |
 | `get_weather` | `weather` | Current conditions at a place or point |
+| `get_weather_map` | `weatherMaps` | The latest NOAA radar, satellite or lightning map image over an area |
+| `get_wind` | `wind` | GFS or IFS model wind 10 m above ground at a location |
 | `get_regional_brief` | `regional` | What and where a location is, its weather and recent headlines |
 | `get_cyclones` | `cyclones` | Active NHC/CPHC tropical cyclones, optionally in an area |
 | `get_fire_perimeters` | `perimeters` | Mapped WFIGS wildfire perimeters in an area, largest first |

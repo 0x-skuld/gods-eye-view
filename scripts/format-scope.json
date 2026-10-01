@@ -879,5 +879,6 @@
   "src/tools/queries/environment.test.mjs",
   "src/tools/queries/maritime.test.mjs",
   "src/tools/queries/share.test.mjs",
-  "src/tools/localRoute.test.mjs"
+  "src/tools/localRoute.test.mjs",
+  "src/tools/queries/atmosphere.test.mjs"
 ]

@@ -19,6 +19,8 @@ import { createRadioSource } from '../layers/radio/source.js';
 import { createSatelliteSource } from '../layers/satellites/source.js';
 import { createTrafficSource } from '../layers/traffic/source.js';
 import { createTransitSource } from '../layers/transit/source.js';
+import { createWeatherSource } from '../layers/weather/source.js';
+import { createWindSource } from '../layers/wind/source.js';
 import { createApplicationRequestServices } from '../services/requests.js';
 import {
   createAdsbLolSource,
@@ -59,6 +61,8 @@ export function createToolServices({ fetchImpl, appUrl }) {
     transit: createTransitSource({ fetchImpl }),
     traffic: createTrafficSource({ fetchImpl, tileFetchImpl: fetchImpl }),
     weather: requests.weather,
+    weatherMaps: createWeatherSource({ fetchImpl }),
+    wind: createWindSource({ fetchImpl }),
     regional: requests.regional,
     terrain: requests.terrain,
     summary: requests.summary,
