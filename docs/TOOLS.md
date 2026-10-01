@@ -11,6 +11,7 @@ They are defined once and exposed through adapters; the Model Context Protocol
 | `src/tools/`         | Tool definitions, catalog composition, argument validation, shared `area` and result helpers      |
 | `src/tools/queries/` | Queries, one file per domain, reading only portable source contracts                              |
 | `src/tools/mcp/`     | MCP protocol (JSON-RPC) and a stateless HTTP transport; knows the catalog interface, not queries |
+| `src/tools/services.js` | The default services: the layers' source factories and request services, given a resolving fetch |
 | `server/mcp/`        | Node composition: points the sources at a running app's `/api` routes; serves stdio and `/mcp`  |
 
 Dependencies point downward only. `gods-eye-view/tools` and
@@ -44,7 +45,8 @@ reported to clients without details.
 
 ## Services
 
-Services are the portable source factories the layers already use, such as
+`gods-eye-view/tools/services` builds the default set with
+`createToolServices({ fetchImpl, appUrl })`. Services are the portable source factories the layers already use, such as
 `createUsgsEarthquakeSource`, `createFirmsSource` and `createLaunchSource`,
 plus a `places` service with `resolve(name, { signal })`. Sources request
 relative `/api/...` paths through an injected `fetchImpl`, so the same tool

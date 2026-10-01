@@ -39,6 +39,7 @@ const portableExport = (key) =>
     './director',
     './tools',
     './tools/mcp',
+    './tools/services',
     './voice/action-schemas',
     './voice/session',
     './data/lifecycle',
