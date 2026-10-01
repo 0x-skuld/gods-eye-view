@@ -18,6 +18,7 @@ import { createTransitSource } from '../../src/layers/transit/source.js';
 import { createApplicationRequestServices } from '../../src/services/requests.js';
 import {
   createAdsbLolSource,
+  createAisStreamSource,
   createOpenSkySource,
 } from '../../src/sources/live/standalone.js';
 import {
@@ -55,6 +56,10 @@ export function createLocalToolServices(options = {}) {
     launches: createLaunchSource({ fetchImpl }),
     aircraft: createOpenSkySource({ fetchImpl }),
     military: createAdsbLolSource({ fetchImpl }),
+    vessels: createAisStreamSource({
+      fetchImpl,
+      origin: () => new URL(options.apiBase ?? DEFAULT_API_BASE).origin,
+    }),
     satellites: createSatelliteSource({ fetchImpl }),
     cctv: createCctvSource({ fetchImpl }),
     radio: createRadioSource({ fetchImpl }),

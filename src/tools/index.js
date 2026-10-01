@@ -20,6 +20,11 @@ import {
   getWeather,
 } from './queries/environment.js';
 import { getActiveFires, getEarthquakes } from './queries/hazards.js';
+import {
+  findVessel,
+  getVesselTrack,
+  vesselsInArea,
+} from './queries/maritime.js';
 import { getBikeShare, getTransitVehicles } from './queries/mobility.js';
 import { placesNearby, planRoute, searchPlaces } from './queries/places.js';
 import {
@@ -63,6 +68,9 @@ export const coreTools = Object.freeze([
   findAircraft,
   getAircraftTrack,
   getAircraftInfo,
+  vesselsInArea,
+  findVessel,
+  getVesselTrack,
   nextSatellitePass,
   satellitesOverhead,
   findCctvCameras,

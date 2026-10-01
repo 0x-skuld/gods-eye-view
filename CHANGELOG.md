@@ -1,7 +1,7 @@
 # Changelog
 
 - Add tools for language-model clients and a local MCP server. `npm run mcp`
-  serves earthquake, active-fire, launch, aircraft, satellite, camera, radio,
+  serves earthquake, active-fire, launch, aircraft, ship, satellite, camera, radio,
   place, routing, bike-share, transit, weather, cyclone, fire-perimeter,
   terrain, installation and map-feature queries, plus a situation brief, over
   stdio to clients such as Claude Code, reading
