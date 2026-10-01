@@ -92,7 +92,11 @@ export const findCctvCameras = defineTool({
       .sort((a, b) => a.distance_km - b.distance_km);
     return {
       summary:
-        `${countNoun(rows.length, 'public camera')} in ${area.label}` +
+        (rows.length || trimmed.length
+          ? `${countNoun(rows.length, 'public camera')} in ${area.label}`
+          : // The catalog covers selected regions; an empty answer elsewhere
+            // means it has no cameras there, not that none exist.
+            `The camera catalog has no cameras in ${area.label}`) +
         (trimmed.length
           ? ` (the catalog serves only some cameras here: ${trimmed
               .map(

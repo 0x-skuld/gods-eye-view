@@ -321,4 +321,8 @@ test('an area the catalog trimmed away entirely is not reported complete', async
     area: { lat: 40.7, lon: -74, radius_km: 3 },
   });
   assert.equal(elsewhere.data.complete, true);
+  assert.equal(
+    elsewhere.summary,
+    'The camera catalog has no cameras in 3 km around 40.700, -74.000.',
+  );
 });
