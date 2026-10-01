@@ -119,6 +119,7 @@ public feeds the sources already use.
 | `satellites_overhead` | `satellites` | Satellites in a CelesTrak group above a point now, highest first |
 | `find_cctv_cameras` | `cctv` | Public cameras in an area, nearest first |
 | `get_cctv_snapshot` | `cctv` | The current image from one camera, returned as image content |
+| `find_alpr_cameras` | `alpr` | OpenStreetMap-mapped license plate readers in a US/Canadian area up to 3° |
 | `find_radio_stations` | `radio` | Radio Browser stations by area and/or search terms, with stream URLs |
 | `search_places` | `placeSearch` | Points of interest matching a query within an area (Google Places) |
 | `places_nearby` | `placeSearch` | Notable places around a point (Google Places) |

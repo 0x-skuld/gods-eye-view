@@ -12,7 +12,7 @@ Queries cover earthquakes, active fires, recent launches, aircraft (in an
 area, by identifier, tracks, and type and route lookups), ships (in an area,
 by identifier, and tracks), satellites (next
 pass over a point, and those overhead now), public cameras (including a
-camera's current image), radio stations, place search, routing, bike-share
+camera's current image), license plate reader cameras, radio stations, place search, routing, bike-share
 stations, transit vehicles, road traffic flow, weather, weather map images
 (radar, satellite, lightning), wind, the most recent satellite image of an
 area, submarine cables, regional briefs, tropical cyclones, fire

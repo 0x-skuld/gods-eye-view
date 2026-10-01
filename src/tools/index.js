@@ -35,6 +35,7 @@ import {
 } from './queries/mobility.js';
 import { placesNearby, planRoute, searchPlaces } from './queries/places.js';
 import { openInGodsEyeView } from './queries/share.js';
+import { findAlprCameras } from './queries/surveillance.js';
 import {
   findCctvCameras,
   findRadioStations,
@@ -83,6 +84,7 @@ export const coreTools = Object.freeze([
   satellitesOverhead,
   findCctvCameras,
   getCctvSnapshot,
+  findAlprCameras,
   findRadioStations,
   searchPlaces,
   placesNearby,

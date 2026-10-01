@@ -6,6 +6,7 @@
  * address the app is served from.
  */
 
+import { createAlprTileSource } from '../layers/alpr/source.js';
 import { GBFS_CITY_REGISTRY } from '../layers/bikeshare/registry.js';
 import { createBikeshareSource } from '../layers/bikeshare/source.js';
 import { createCctvSource } from '../layers/cctv/source.js';
@@ -68,6 +69,7 @@ export function createToolServices({ fetchImpl, appUrl }) {
     wind: createWindSource({ fetchImpl }),
     imagery: createImageryService({ fetchImpl }),
     cables: createBundledCableSource({ fetchImpl }),
+    alpr: createAlprTileSource({ tileFetchImpl: fetchImpl }),
     regional: requests.regional,
     terrain: requests.terrain,
     summary: requests.summary,

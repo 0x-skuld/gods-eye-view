@@ -882,5 +882,6 @@
   "src/tools/localRoute.test.mjs",
   "src/tools/queries/atmosphere.test.mjs",
   "src/tools/queries/imagery.test.mjs",
-  "src/tools/queries/cables.test.mjs"
+  "src/tools/queries/cables.test.mjs",
+  "src/tools/queries/surveillance.test.mjs"
 ]
