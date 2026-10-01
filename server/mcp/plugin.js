@@ -64,6 +64,12 @@ export function localMcpPlugin({ createServer = createLocalMcpServer } = {}) {
         );
         return;
       }
+      // A client that disconnects before its answer cancels the tool call.
+      const disconnect = new AbortController();
+      const onClose = () => {
+        if (!res.writableFinished) disconnect.abort();
+      };
+      res.on('close', onClose);
       try {
         const body = req.method === 'POST' ? await readBody(req) : undefined;
         const request = new Request(`http://${host}/mcp`, {
@@ -72,11 +78,13 @@ export function localMcpPlugin({ createServer = createLocalMcpServer } = {}) {
             value === undefined ? [] : [[name, String(value)]],
           ),
           body,
+          signal: disconnect.signal,
         });
         const response = await handlerFor(`http://${host}`)(request);
         res.writeHead(response.status, Object.fromEntries(response.headers));
         res.end(Buffer.from(await response.arrayBuffer()));
       } catch (error) {
+        if (disconnect.signal.aborted) return;
         if (res.headersSent) return res.destroy();
         res.writeHead(error?.status === 413 ? 413 : 400, {
           'Content-Type': 'application/json',
@@ -87,6 +95,8 @@ export function localMcpPlugin({ createServer = createLocalMcpServer } = {}) {
             error: error?.status === 413 ? 'Request too large' : 'Bad request',
           }),
         );
+      } finally {
+        res.off('close', onClose);
       }
     });
   };

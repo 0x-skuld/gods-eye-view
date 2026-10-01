@@ -121,3 +121,46 @@ test('the /mcp route answers local MCP requests and refuses others', async (t) =
     405,
   );
 });
+
+test('a client that disconnects cancels its tool call', async (t) => {
+  let middleware;
+  let seen;
+  const started = Promise.withResolvers();
+  const aborted = Promise.withResolvers();
+  const plugin = localMcpPlugin({
+    createServer: () => ({
+      handle: (message, { signal }) => {
+        seen = signal;
+        signal.addEventListener('abort', () => aborted.resolve(), {
+          once: true,
+        });
+        started.resolve();
+        return new Promise(() => {});
+      },
+    }),
+  });
+  plugin.configureServer({
+    middlewares: { use: (path, handler) => (middleware = handler) },
+  });
+  const http = createServer((req, res) => middleware(req, res));
+  await new Promise((resolve) => http.listen(0, '127.0.0.1', resolve));
+  t.after(() => http.close());
+  const { port } = http.address();
+  const request = httpRequest({
+    host: '127.0.0.1',
+    port,
+    path: '/mcp',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Host: `localhost:${port}`,
+    },
+  });
+  request.on('error', () => {});
+  request.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call' }));
+  await started.promise;
+  assert.equal(seen.aborted, false);
+  request.destroy();
+  await aborted.promise;
+  assert.equal(seen.aborted, true);
+});
