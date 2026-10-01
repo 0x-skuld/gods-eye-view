@@ -43,6 +43,21 @@ as `structuredContent`, for clients that read only one of them.
   whose services are not supplied are left out.
 - **Interceptors**: `(call, next) => next(call)` functions wrap every call,
   outermost first. They can observe, reject or change a call.
+- **Composite tools**: `run` receives `tools`, with `has(name)` and
+  `call(name, args)`, to call other tools through the same catalog, so
+  replaced tools and interceptors apply. Interceptors see such calls with
+  `parent`, the calling tool's name.
+
+### Surfaces
+
+`src/tools/surfaces.js` lists which tools MCP and voice offer. A tool is on
+both unless `TOOL_SURFACES` turns it off; edit an entry to turn a tool on or
+off for one surface. `catalogForSurface(catalog, surface, overrides)` is the
+view a surface exposes: it lists and calls only the tools it offers, while
+composite tools still reach the whole catalog. `toolsForSurface` gives the
+same selection as a list of definitions, such as for the voice session's tool
+list. Voice leaves out tools that answer with images, link to the app, or
+repeat what its app actions answer.
 
 Expected failures throw `ToolError` with one of `invalid_arguments`,
 `unavailable`, `unsupported`, `malformed` or `retry_later`. Other errors are

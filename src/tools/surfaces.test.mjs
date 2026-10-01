@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { TOOL_SURFACES, coreTools, toolsForSurface } from './index.js';
+import {
+  TOOL_SURFACES,
+  catalogForSurface,
+  composeCatalog,
+  coreTools,
+  defineTool,
+  toolsForSurface,
+} from './index.js';
 
 const names = (tools) => tools.map((tool) => tool.name);
 
@@ -31,6 +38,46 @@ test('overrides turn a tool on or off for one surface', () => {
       toolsForSurface(coreTools, 'mcp', { get_weather: { mcp: false } }),
     ).includes('get_weather'),
   );
+});
+
+test('every table entry names a core tool and a known surface', () => {
+  const names = new Set(coreTools.map((tool) => tool.name));
+  for (const [name, entry] of Object.entries(TOOL_SURFACES)) {
+    assert.ok(names.has(name), name);
+    assert.deepEqual(Object.keys(entry), ['voice']);
+  }
+});
+
+test('a surface view hides tools from clients but not from composites', async () => {
+  const leaf = defineTool({
+    name: 'leaf',
+    title: 'Leaf',
+    description: 'A hidden building block.',
+    inputSchema: { type: 'object', properties: {} },
+    run: async () => ({ summary: 'leaf', data: {} }),
+  });
+  const outer = defineTool({
+    name: 'outer',
+    title: 'Outer',
+    description: 'Calls leaf.',
+    inputSchema: { type: 'object', properties: {} },
+    run: async (args, { tools }) => tools.call('leaf', {}),
+  });
+  const view = catalogForSurface(
+    composeCatalog({ tools: [leaf, outer] }),
+    'voice',
+    { leaf: { voice: false } },
+  );
+  assert.deepEqual(
+    view.list().map((tool) => tool.name),
+    ['outer'],
+  );
+  assert.equal(view.get('leaf'), undefined);
+  await assert.rejects(
+    view.call('leaf', {}),
+    (error) => error.code === 'unsupported',
+  );
+  assert.equal((await view.call('outer', {})).summary, 'leaf');
 });
 
 test('unknown surfaces and tool names are rejected', () => {

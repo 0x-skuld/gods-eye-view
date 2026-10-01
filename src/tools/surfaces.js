@@ -4,6 +4,8 @@
  * or both. Applications can pass overrides when they compose a surface.
  */
 
+import { ToolError } from './catalog.js';
+
 export const SURFACES = Object.freeze(['mcp', 'voice']);
 
 const voiceOff = Object.freeze({ voice: false });
@@ -33,19 +35,18 @@ export const TOOL_SURFACES = Object.freeze({
 /**
  * The tools a surface offers, in their original order. `overrides` uses the
  * table's shape and wins over it, such as `{ get_weather_map: { voice: true } }`.
- * Unknown tool names or surfaces throw, so a typo cannot silently do nothing.
+ * An override naming an unknown tool or surface throws, so a typo cannot
+ * silently do nothing.
  */
 export function toolsForSurface(tools, surface, overrides = {}) {
   if (!SURFACES.includes(surface))
     throw new TypeError(`Unknown tool surface: ${surface}`);
   const names = new Set(tools.map((tool) => tool.name));
-  for (const table of [TOOL_SURFACES, overrides]) {
-    for (const [name, entry] of Object.entries(table)) {
-      if (!names.has(name)) throw new TypeError(`Unknown tool: ${name}`);
-      for (const key of Object.keys(entry)) {
-        if (!SURFACES.includes(key))
-          throw new TypeError(`Unknown tool surface for ${name}: ${key}`);
-      }
+  for (const [name, entry] of Object.entries(overrides)) {
+    if (!names.has(name)) throw new TypeError(`Unknown tool: ${name}`);
+    for (const key of Object.keys(entry)) {
+      if (!SURFACES.includes(key))
+        throw new TypeError(`Unknown tool surface for ${name}: ${key}`);
     }
   }
   return tools.filter(
@@ -53,4 +54,29 @@ export function toolsForSurface(tools, surface, overrides = {}) {
       (overrides[tool.name]?.[surface] ??
         TOOL_SURFACES[tool.name]?.[surface]) !== false,
   );
+}
+
+/**
+ * A view of a composed catalog that lists and calls only the tools a surface
+ * offers. Tools that combine others still reach the whole catalog, so a
+ * composite such as military_awareness keeps its sections on every surface.
+ */
+export function catalogForSurface(catalog, surface, overrides = {}) {
+  const offered = new Set(
+    toolsForSurface(catalog.list(), surface, overrides).map(
+      (tool) => tool.name,
+    ),
+  );
+  return Object.freeze({
+    list: () => catalog.list().filter((tool) => offered.has(tool.name)),
+    get: (name) => (offered.has(name) ? catalog.get(name) : undefined),
+    async call(name, args, options) {
+      if (!offered.has(name))
+        throw new ToolError(
+          'unsupported',
+          `No tool named ${name} is available`,
+        );
+      return catalog.call(name, args, options);
+    },
+  });
 }

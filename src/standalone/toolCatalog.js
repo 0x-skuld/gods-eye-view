@@ -8,16 +8,19 @@ export function loadToolCatalog() {
     import('../tools/services.js'),
   ]).then(
     ([
-      { composeCatalog, coreTools, toolsForSurface },
+      { composeCatalog, coreTools, catalogForSurface },
       { createToolServices },
     ]) =>
-      composeCatalog({
-        tools: toolsForSurface(coreTools, 'voice'),
-        services: createToolServices({
-          fetchImpl: (...args) => globalThis.fetch(...args),
-          appUrl: globalThis.location.origin,
+      catalogForSurface(
+        composeCatalog({
+          tools: coreTools,
+          services: createToolServices({
+            fetchImpl: (...args) => globalThis.fetch(...args),
+            appUrl: globalThis.location.origin,
+          }),
         }),
-      }),
+        'voice',
+      ),
   );
   pending.catch(() => {
     pending = null;

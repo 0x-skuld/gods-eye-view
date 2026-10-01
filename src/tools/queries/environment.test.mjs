@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { composeCatalog, coreTools, ToolError } from '../index.js';
+import {
+  catalogForSurface,
+  composeCatalog,
+  coreTools,
+  defineTool,
+  ToolError,
+} from '../index.js';
 
 const conditions = {
   observedAt: '2026-10-01T19:15:00.000Z',
@@ -536,6 +542,19 @@ test('military awareness gathers contacts around a point and marks failures', as
     reason: 'unavailable right now',
   });
   assert.equal(result.data.radius_km, 100);
+  const voice = catalogForSurface(catalog, 'voice');
+  assert.equal(voice.get('aircraft_in_area'), undefined);
+  assert.deepEqual(
+    Object.keys(
+      (
+        await voice.call('military_awareness', {
+          location: { lat: 32.7, lon: -117.2 },
+          radius_km: 100,
+        })
+      ).data.sections,
+    ),
+    ['military_aircraft', 'aircraft', 'installations'],
+  );
   assert.equal(
     (await catalog.call('military_awareness', { location: { lat: 0, lon: 0 } }))
       .data.radius_km,
@@ -548,4 +567,37 @@ test('military awareness gathers contacts around a point and marks failures', as
     }),
     /radius_km/,
   );
+});
+
+test('composites reach their sections through the catalog', async () => {
+  const replacement = defineTool({
+    name: 'get_weather',
+    title: 'Weather',
+    description: 'Replaced weather.',
+    inputSchema: {
+      type: 'object',
+      properties: { location: { type: 'object' } },
+    },
+    run: async () => ({ summary: 'Replaced weather.', data: {} }),
+  });
+  const seen = [];
+  const catalog = composeCatalog({
+    tools: [...coreTools, replacement],
+    replace: ['get_weather'],
+    services: { weather, places },
+    interceptors: [
+      (call, next) => {
+        seen.push([call.tool.name, call.parent ?? null]);
+        return next(call);
+      },
+    ],
+  });
+  const result = await catalog.call('situation_brief', {
+    area: { place: 'Austin' },
+  });
+  assert.equal(result.data.sections.weather.summary, 'Replaced weather.');
+  assert.deepEqual(seen, [
+    ['situation_brief', null],
+    ['get_weather', 'situation_brief'],
+  ]);
 });

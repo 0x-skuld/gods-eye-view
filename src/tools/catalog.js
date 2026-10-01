@@ -60,9 +60,11 @@ export function fromSourceError(error) {
 /**
  * Validate and freeze a tool definition.
  *
- * `run(args, { services, signal })` resolves to `{ summary, data }`: a short
- * sentence for people and a structured object for programs. It may add
- * `images`, each `{ mimeType, data }` with base64 data.
+ * `run(args, { services, signal, tools })` resolves to `{ summary, data }`: a
+ * short sentence for people and a structured object for programs. It may add
+ * `images`, each `{ mimeType, data }` with base64 data. `tools` reaches other
+ * tools through the same catalog: `tools.has(name)` and
+ * `tools.call(name, args)`.
  */
 export function defineTool({
   name,
@@ -111,7 +113,8 @@ export function defineTool({
  * - Duplicate names fail unless the later tool is listed in `replace`.
  * - Tools whose required services are missing are left out.
  * - Interceptors wrap every call in order, outermost first, as
- *   `(call, next) => next(call)` where `call` is `{ tool, args, signal }`.
+ *   `(call, next) => next(call)` where `call` is `{ tool, args, signal }`,
+ *   plus `parent`, the calling tool's name, when one tool calls another.
  */
 export function composeCatalog({
   tools,
@@ -135,13 +138,28 @@ export function composeCatalog({
   );
   const index = new Map(available.map((tool) => [tool.name, tool]));
 
+  const invoke = (name, args, signal, parent) => {
+    const tool = index.get(name);
+    if (!tool)
+      return Promise.reject(
+        new ToolError('unsupported', `No tool named ${name} is available`),
+      );
+    return chain({ tool, args, signal, ...(parent ? { parent } : {}) });
+  };
   const execute = async ({ tool, args, signal }) => {
     const problems = validateValue(tool.inputSchema, args);
     if (problems.length)
       throw new ToolError('invalid_arguments', problems.join('; '));
     let result;
     try {
-      result = await tool.run(args, { services, signal });
+      result = await tool.run(args, {
+        services,
+        signal,
+        tools: {
+          has: (name) => index.has(name),
+          call: (name, nested = {}) => invoke(name, nested, signal, tool.name),
+        },
+      });
     } catch (error) {
       throw fromSourceError(error);
     }
@@ -171,13 +189,7 @@ export function composeCatalog({
     get: (name) => index.get(name),
     /** Validate arguments and run a tool through the interceptors. */
     async call(name, args = {}, { signal } = {}) {
-      const tool = index.get(name);
-      if (!tool)
-        throw new ToolError(
-          'unsupported',
-          `No tool named ${name} is available`,
-        );
-      return chain({ tool, args, signal });
+      return invoke(name, args, signal);
     },
   });
 }

@@ -68,7 +68,12 @@ export {
 } from './area.js';
 export { LIMIT_SCHEMA, DEFAULT_LIMIT, MAX_LIMIT, capRows } from './results.js';
 export { toFunctionOutput, toFunctionTools } from './functions.js';
-export { SURFACES, TOOL_SURFACES, toolsForSurface } from './surfaces.js';
+export {
+  SURFACES,
+  TOOL_SURFACES,
+  catalogForSurface,
+  toolsForSurface,
+} from './surfaces.js';
 export {
   createGeocodePlaceService,
   createPlaceSearchService,

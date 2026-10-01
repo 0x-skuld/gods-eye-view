@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   composeCatalog,
   coreTools,
-  toolsForSurface,
+  catalogForSurface,
 } from '../../src/tools/index.js';
 import { createMcpServer } from '../../src/tools/mcp/index.js';
 import { DEFAULT_API_BASE, createLocalToolServices } from './services.js';
@@ -23,10 +23,13 @@ export function createLocalMcpServer({
     readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
   );
   return createMcpServer({
-    catalog: composeCatalog({
-      tools: toolsForSurface(coreTools, 'mcp'),
-      services: createLocalToolServices({ apiBase, fetchImpl }),
-    }),
+    catalog: catalogForSurface(
+      composeCatalog({
+        tools: coreTools,
+        services: createLocalToolServices({ apiBase, fetchImpl }),
+      }),
+      'mcp',
+    ),
     name: 'gods-eye-view',
     version,
     instructions: INSTRUCTIONS,
