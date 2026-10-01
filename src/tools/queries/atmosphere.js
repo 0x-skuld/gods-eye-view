@@ -33,10 +33,12 @@ const round = (value, digits) =>
 
 /**
  * A 2:1 box snapped to 0.25° around the area, moved inside the product's
- * bounds. Returns null when the box would not fit, meaning the whole
- * extent should be shown instead.
+ * bounds. Returns null when no such box covers the whole area (it would not
+ * fit, or the area crosses the antimeridian), meaning the whole extent
+ * should be shown instead.
  */
 export function weatherWindow(area, bounds) {
+  if (area.west > area.east) return null;
   const center = areaCenter(area);
   const halfHeight = Math.max(
     MIN_HALF_HEIGHT_DEGREES,
@@ -57,12 +59,19 @@ export function weatherWindow(area, bounds) {
     snapDown(bounds.north - height),
   );
   const mapBox = { west, south, east: west + width, north: south + height };
-  return mapBox.west >= bounds.west &&
+  const insideProduct =
+    mapBox.west >= bounds.west &&
     mapBox.east <= bounds.east &&
     mapBox.south >= bounds.south &&
-    mapBox.north <= bounds.north
-    ? mapBox
-    : null;
+    mapBox.north <= bounds.north;
+  // Moving the box inside the product can uncover part of the area; only a
+  // box that still holds the whole area (clipped to the product) will do.
+  const coversArea =
+    mapBox.west <= Math.max(area.west, bounds.west) &&
+    mapBox.east >= Math.min(area.east, bounds.east) &&
+    mapBox.south <= Math.max(area.south, bounds.south) &&
+    mapBox.north >= Math.min(area.north, bounds.north);
+  return insideProduct && coversArea ? mapBox : null;
 }
 
 export const getWeatherMap = defineTool({

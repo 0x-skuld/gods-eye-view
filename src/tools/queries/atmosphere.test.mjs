@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { composeCatalog, coreTools } from '../index.js';
 import { weatherWindow } from './atmosphere.js';
+import { resolveArea } from '../area.js';
 
 const CONUS = { west: -130, south: 20, east: -60, north: 55 };
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47]);
@@ -155,4 +156,19 @@ test('wind is sampled from the model grid at the location', async () => {
     down.call('get_wind', { location: { lat: 0, lon: 0 } }),
     (error) => error.code === 'unavailable',
   );
+});
+
+test('a weather window that cannot cover the area falls back to the whole map', async () => {
+  const world = { west: -180, south: -90, east: 180, north: 90 };
+  // 100 km around 179.8° crosses the antimeridian.
+  const dateline = await resolveArea({ lat: 0, lon: 179.8, radius_km: 100 });
+  assert.equal(weatherWindow(dateline, world), null);
+  // Near a product edge the window moves inside and still covers the area.
+  const conus = { west: -130, south: 20, east: -60, north: 55 };
+  const edge = await resolveArea({ lat: 40, lon: -129.5, radius_km: 50 });
+  const box = weatherWindow(edge, conus);
+  assert.ok(box);
+  assert.ok(box.west <= Math.max(edge.west, conus.west));
+  assert.ok(box.east >= edge.east);
+  assert.ok(box.south <= edge.south && box.north >= edge.north);
 });
