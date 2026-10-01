@@ -6,6 +6,11 @@
 import { createUsgsEarthquakeSource } from '../../src/layers/earthquakes/source.js';
 import { createFirmsSource } from '../../src/layers/firms/source.js';
 import { createLaunchSource } from '../../src/layers/launches/source.js';
+import { createSatelliteSource } from '../../src/layers/satellites/source.js';
+import {
+  createAdsbLolSource,
+  createOpenSkySource,
+} from '../../src/sources/live/standalone.js';
 import { createGeocodePlaceService } from '../../src/tools/places.js';
 
 export const DEFAULT_API_BASE = 'http://localhost:4173';
@@ -34,6 +39,9 @@ export function createLocalToolServices(options = {}) {
     earthquakes: createUsgsEarthquakeSource({ fetchImpl }),
     fires: createFirmsSource({ fetchImpl }),
     launches: createLaunchSource({ fetchImpl }),
+    aircraft: createOpenSkySource({ fetchImpl }),
+    military: createAdsbLolSource({ fetchImpl }),
+    satellites: createSatelliteSource({ fetchImpl }),
     places: createGeocodePlaceService({ fetchImpl }),
   };
 }

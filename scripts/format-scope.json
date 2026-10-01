@@ -869,5 +869,7 @@
   "src/tools/area.test.mjs",
   "src/tools/queries/queries.test.mjs",
   "src/tools/mcp/mcp.test.mjs",
-  "src/tools/localServer.test.mjs"
+  "src/tools/localServer.test.mjs",
+  "src/tools/queries/aviation.test.mjs",
+  "src/tools/queries/space.test.mjs"
 ]

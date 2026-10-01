@@ -6,8 +6,9 @@
 and `gods-eye-view/tools/mcp` exposes a composed catalog over the Model Context
 Protocol. `npm run mcp` serves Core's tools over stdio to a local MCP client,
 reading from a running app's `/api` routes (default `http://localhost:4173`).
-The first queries are `get_earthquakes`, `get_active_fires` and
-`get_recent_launches`. Tools reuse the layers' portable source factories, take a
+Queries cover earthquakes, active fires, recent launches, aircraft (in an
+area, by identifier, tracks, and type and route lookups) and satellites (next
+pass over a point, and those overhead now). Tools reuse the layers' portable source factories, take a
 shared `area` argument (place name, bounding box, or point and radius) and cap
 lists at 25 rows by default. The app does not import the tools, so its runtime
 behavior is unchanged. See [tools and the MCP server](TOOLS.md).

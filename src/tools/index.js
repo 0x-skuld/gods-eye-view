@@ -3,8 +3,18 @@
  * surface that exposes them. See docs/TOOLS.md.
  */
 
+import {
+  aircraftInArea,
+  findAircraft,
+  getAircraftInfo,
+  getAircraftTrack,
+} from './queries/aviation.js';
 import { getActiveFires, getEarthquakes } from './queries/hazards.js';
-import { getRecentLaunches } from './queries/space.js';
+import {
+  getRecentLaunches,
+  nextSatellitePass,
+  satellitesOverhead,
+} from './queries/space.js';
 
 export {
   defineTool,
@@ -12,7 +22,13 @@ export {
   ToolError,
   TOOL_ERROR_CODES,
 } from './catalog.js';
-export { AREA_SCHEMA, resolveArea, areaContains, distanceKm } from './area.js';
+export {
+  AREA_SCHEMA,
+  resolveArea,
+  areaCenter,
+  areaContains,
+  distanceKm,
+} from './area.js';
 export { LIMIT_SCHEMA, DEFAULT_LIMIT, MAX_LIMIT, capRows } from './results.js';
 export { createGeocodePlaceService, placeFromGeocodeResult } from './places.js';
 
@@ -21,4 +37,10 @@ export const coreTools = Object.freeze([
   getEarthquakes,
   getActiveFires,
   getRecentLaunches,
+  aircraftInArea,
+  findAircraft,
+  getAircraftTrack,
+  getAircraftInfo,
+  nextSatellitePass,
+  satellitesOverhead,
 ]);

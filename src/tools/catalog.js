@@ -33,6 +33,30 @@ export class ToolError extends Error {
   }
 }
 
+// Live sources report failures with these codes (src/sources/live/contract.js).
+const SOURCE_ERROR_CODES = {
+  limited: 'retry_later',
+  denied: 'unavailable',
+  unavailable: 'unavailable',
+  malformed: 'malformed',
+  unsupported: 'unsupported',
+};
+
+/** Translate a source failure into a tool error; other errors pass through. */
+export function fromSourceError(error) {
+  const code =
+    error?.name === 'LiveSourceError' &&
+    Object.hasOwn(SOURCE_ERROR_CODES, error.code)
+      ? SOURCE_ERROR_CODES[error.code]
+      : null;
+  if (!code) return error;
+  const retryAfterSeconds =
+    code === 'retry_later' && Number.isFinite(error.retryAfterMs)
+      ? Math.ceil(error.retryAfterMs / 1000)
+      : null;
+  return new ToolError(code, error.message, { retryAfterSeconds });
+}
+
 /**
  * Validate and freeze a tool definition.
  *
@@ -114,7 +138,12 @@ export function composeCatalog({
     const problems = validateValue(tool.inputSchema, args);
     if (problems.length)
       throw new ToolError('invalid_arguments', problems.join('; '));
-    const result = await tool.run(args, { services, signal });
+    let result;
+    try {
+      result = await tool.run(args, { services, signal });
+    } catch (error) {
+      throw fromSourceError(error);
+    }
     if (!result || typeof result.summary !== 'string' || !result.data)
       throw new TypeError(`${tool.name} returned no summary or data`);
     return result;

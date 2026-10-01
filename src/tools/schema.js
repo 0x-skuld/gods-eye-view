@@ -2,7 +2,7 @@
  * Validates tool arguments against the JSON Schema subset tool definitions use:
  * object, array, string, number, integer and boolean types; required,
  * properties, additionalProperties, items, enum, minimum, maximum, minLength,
- * maxLength, minItems and maxItems. Unsupported keywords are rejected when a
+ * maxLength, pattern, minItems and maxItems. Unsupported keywords are rejected when a
  * tool is defined, so a schema can never promise checks that are not made.
  */
 
@@ -19,6 +19,7 @@ const KEYWORDS = new Set([
   'maximum',
   'minLength',
   'maxLength',
+  'pattern',
   'minItems',
   'maxItems',
   'default',
@@ -42,6 +43,7 @@ export function assertSupportedSchema(schema, path = 'schema') {
   }
   if (!TYPES.has(schema.type))
     throw new TypeError(`${path} has unsupported type ${schema.type}`);
+  if (schema.pattern !== undefined) new RegExp(schema.pattern, 'u');
   for (const [name, child] of Object.entries(schema.properties || {}))
     assertSupportedSchema(child, `${path}.${name}`);
   if (schema.items) assertSupportedSchema(schema.items, `${path}[]`);
@@ -99,6 +101,11 @@ export function validateValue(schema, value, path = 'arguments') {
         fail(`must be at least ${schema.minLength} characters`);
       if (schema.maxLength != null && value.length > schema.maxLength)
         fail(`must be at most ${schema.maxLength} characters`);
+      if (
+        schema.pattern !== undefined &&
+        !new RegExp(schema.pattern, 'u').test(value)
+      )
+        fail(`must match ${schema.pattern}`);
       break;
     case 'number':
     case 'integer':

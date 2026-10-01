@@ -104,6 +104,20 @@ export function distanceKm(a, b) {
   return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+/** The center of a resolved area, handling boxes across the antimeridian. */
+export function areaCenter(area) {
+  if (area.center) return { lat: area.center.lat, lon: area.center.lon };
+  const width =
+    area.west <= area.east
+      ? area.east - area.west
+      : area.east + 360 - area.west;
+  const lon = area.west + width / 2;
+  return {
+    lat: (area.south + area.north) / 2,
+    lon: lon > 180 ? lon - 360 : lon,
+  };
+}
+
 /** Whether a point lies inside a resolved area, including radius areas. */
 export function areaContains(area, point) {
   if (!Number.isFinite(point?.lat) || !Number.isFinite(point?.lon))

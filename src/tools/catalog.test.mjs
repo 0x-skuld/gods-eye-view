@@ -31,10 +31,10 @@ test('definitions are validated, frozen and read-only by default', () => {
       echo('x', {
         inputSchema: {
           type: 'object',
-          properties: { a: { type: 'string', pattern: '.' } },
+          properties: { a: { type: 'string', format: 'email' } },
         },
       }),
-    /unsupported keyword pattern/,
+    /unsupported keyword format/,
   );
   assert.throws(
     () => echo('x', { inputSchema: { type: 'string' } }),
@@ -126,6 +126,45 @@ test('tool errors only use known codes', () => {
     new ToolError('retry_later', 'x', { retryAfterSeconds: 5 })
       .retryAfterSeconds,
     5,
+  );
+});
+
+test('only live source errors are translated', async () => {
+  const { fromSourceError } = await import('./catalog.js');
+  const plain = new Error('x');
+  assert.equal(fromSourceError(plain), plain);
+  const denied = Object.assign(new Error('refused'), {
+    name: 'LiveSourceError',
+    code: 'denied',
+  });
+  const translated = fromSourceError(denied);
+  assert.equal(translated.code, 'unavailable');
+  assert.equal(translated.retryAfterSeconds, null);
+  const odd = Object.assign(new Error('?'), {
+    name: 'LiveSourceError',
+    code: 'toString',
+  });
+  assert.equal(fromSourceError(odd), odd);
+});
+
+test('patterns are validated and must compile', () => {
+  const schema = {
+    type: 'object',
+    properties: { id: { type: 'string', pattern: '^[a-f]{2}$' } },
+  };
+  assert.deepEqual(validateValue(schema, { id: 'ab' }), []);
+  assert.deepEqual(validateValue(schema, { id: 'xy' }), [
+    'arguments.id must match ^[a-f]{2}$',
+  ]);
+  assert.throws(
+    () =>
+      echo('x', {
+        inputSchema: {
+          type: 'object',
+          properties: { id: { type: 'string', pattern: '(' } },
+        },
+      }),
+    SyntaxError,
   );
 });
 

@@ -68,7 +68,17 @@ test('the stdio server answers newline-delimited requests using only its data so
   assert.equal(byId.get(null).error.code, -32700);
   assert.deepEqual(
     byId.get(2).result.tools.map((tool) => tool.name),
-    ['get_earthquakes', 'get_active_fires', 'get_recent_launches'],
+    [
+      'get_earthquakes',
+      'get_active_fires',
+      'get_recent_launches',
+      'aircraft_in_area',
+      'find_aircraft',
+      'get_aircraft_track',
+      'get_aircraft_info',
+      'next_satellite_pass',
+      'satellites_overhead',
+    ],
   );
   assert.equal(
     byId.get(3).result.content[0].text,
