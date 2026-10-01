@@ -438,6 +438,9 @@ test('the HUD caption summarizes the brief through the summary service', async (
   );
   assert.equal(result.summary, 'Overcast skies over Austin');
   assert.equal(sent[0].location, 'Austin, Texas');
+  assert.deepEqual(sent[0].placeLabels, ['Austin, Texas']);
+  assert.deepEqual(sent[0].enabledLayerLabels, ['Weather']);
+  assert.equal(sent[0].feedProvenance.overall, 'nominal');
   assert.match(sent[0].observations[0], /^Weather at /);
   const failing = {
     summarize: async () => ({

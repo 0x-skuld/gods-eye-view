@@ -36,8 +36,7 @@ test('the next pass defaults to the ISS and reports times, peak and direction', 
     services: { satellites: satellites(), clock: CLOCK },
   });
   const result = await catalog.call('next_satellite_pass', {
-    lat: 40.7,
-    lon: -74,
+    location: { lat: 40.7, lon: -74 },
   });
   const { pass } = result.data;
   assert.equal(result.data.satellite, 'ISS (ZARYA)');
@@ -50,7 +49,7 @@ test('the next pass defaults to the ISS and reports times, peak and direction', 
   assert.match(
     result.summary,
     new RegExp(
-      `^ISS \\(ZARYA\\) next rises ${pass.rise} in the ${pass.rise_direction}, peaking at \\d+°`,
+      `^ISS \\(ZARYA\\) next rises over 40.7000, -74.0000 at ${pass.rise} in the ${pass.rise_direction}, peaking at \\d+°`,
     ),
   );
 });
@@ -62,14 +61,12 @@ test('satellites are matched by name or catalog number within the group', async 
     services: { satellites: source, clock: CLOCK },
   });
   const byName = await catalog.call('next_satellite_pass', {
-    lat: 0,
-    lon: 0,
+    location: { lat: 0, lon: 0 },
     satellite: 'tianhe',
   });
   assert.equal(byName.data.norad, 48274);
   const byNumber = await catalog.call('next_satellite_pass', {
-    lat: 0,
-    lon: 0,
+    location: { lat: 0, lon: 0 },
     satellite: '48274',
     group: 'visual',
   });
@@ -77,14 +74,16 @@ test('satellites are matched by name or catalog number within the group', async 
   assert.deepEqual(source.calls, ['stations', 'visual']);
   await assert.rejects(
     catalog.call('next_satellite_pass', {
-      lat: 0,
-      lon: 0,
+      location: { lat: 0, lon: 0 },
       satellite: 'Hubble',
     }),
     /No satellite matching "Hubble" is in the stations group/,
   );
   await assert.rejects(
-    catalog.call('next_satellite_pass', { lat: 0, lon: 0, group: 'weather' }),
+    catalog.call('next_satellite_pass', {
+      location: { lat: 0, lon: 0 },
+      group: 'weather',
+    }),
     /must be one of/,
   );
 });
@@ -96,21 +95,20 @@ test('a pass that never comes is a normal answer, and catalog failures are unava
   });
   // The ISS orbit is inclined 51.6°, so it never rises 10° above the pole.
   const none = await catalog.call('next_satellite_pass', {
-    lat: 89.9,
-    lon: 0,
+    location: { lat: 89.9, lon: 0 },
     hours: 6,
   });
   assert.equal(none.data.pass, null);
   assert.equal(
     none.summary,
-    'ISS (ZARYA) has no pass over this location in the next 6 hours.',
+    'ISS (ZARYA) has no pass over 89.9000, 0.0000 in the next 6 hours.',
   );
   const down = composeCatalog({
     tools: coreTools,
     services: { satellites: satellites('', false), clock: CLOCK },
   });
   await assert.rejects(
-    down.call('next_satellite_pass', { lat: 0, lon: 0 }),
+    down.call('next_satellite_pass', { location: { lat: 0, lon: 0 } }),
     (error) => error.code === 'unavailable' && /HTTP 503/.test(error.message),
   );
 });
@@ -120,7 +118,9 @@ test('satellites overhead are those above the elevation, highest first', async (
   const services = { satellites: source, clock: CLOCK };
   const catalog = composeCatalog({ tools: coreTools, services });
   const pass = (
-    await catalog.call('next_satellite_pass', { lat: 40.7, lon: -74 })
+    await catalog.call('next_satellite_pass', {
+      location: { lat: 40.7, lon: -74 },
+    })
   ).data.pass;
   const atPeak = {
     satellites: source,
@@ -130,8 +130,7 @@ test('satellites overhead are those above the elevation, highest first', async (
     tools: coreTools,
     services: atPeak,
   }).call('satellites_overhead', {
-    lat: 40.7,
-    lon: -74,
+    location: { lat: 40.7, lon: -74 },
   });
   assert.equal(overhead.data.rows[0].name, 'ISS (ZARYA)');
   assert.ok(
@@ -142,8 +141,7 @@ test('satellites overhead are those above the elevation, highest first', async (
     tools: coreTools,
     services: atPeak,
   }).call('satellites_overhead', {
-    lat: 40.7,
-    lon: -74,
+    location: { lat: 40.7, lon: -74 },
     min_elevation_deg: 90,
   });
   assert.equal(strict.data.total, 0);

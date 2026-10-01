@@ -200,9 +200,13 @@ export const getAircraftTrack = defineTool({
   requires: ['aircraft'],
   async run(args, { services, signal }) {
     const icao24 = args.icao24.toLowerCase();
-    const track = await feedFor(services, args.military).getTrack(icao24, {
-      signal,
-    });
+    // A track server answers 404 for an aircraft it has no positions for.
+    const track = await feedFor(services, args.military)
+      .getTrack(icao24, { signal })
+      .catch((error) => {
+        if (error?.status === 404) return { records: [] };
+        throw error;
+      });
     const points = [...track.records].sort(
       (a, b) => a.observedAtMs - b.observedAtMs,
     );
@@ -284,13 +288,13 @@ export const getAircraftInfo = defineTool({
     if (icao24)
       parts.push(
         aircraft
-          ? `${icao24} is ${aircraft.type_name || aircraft.type_code || 'an aircraft of unknown type'}${aircraft.registration ? ` (${aircraft.registration})` : ''}`
+          ? `aircraft ${icao24} is ${aircraft.type_name || aircraft.type_code || 'an aircraft of unknown type'}${aircraft.registration ? ` (${aircraft.registration})` : ''}`
           : `no type is known for ${icao24}`,
       );
     if (callsign)
       parts.push(
         flight
-          ? `${callsign} flies ${flight.origin?.code || flight.origin?.name} to ${flight.destination?.code || flight.destination?.name}${flight.airline ? ` (${flight.airline})` : ''}`
+          ? `flight ${callsign} flies ${flight.origin?.code || flight.origin?.name} to ${flight.destination?.code || flight.destination?.name}${flight.airline ? ` (${flight.airline})` : ''}`
           : `no route is known for ${callsign}`,
       );
     const summary = parts.join('; ');

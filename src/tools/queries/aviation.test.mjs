@@ -215,6 +215,30 @@ test('tracks are ordered and thinned to 200 points', async () => {
     (await empty.call('get_aircraft_track', { icao24: 'aaa111' })).summary,
     'No recent track is available for aaa111.',
   );
+  const failing = (status) => ({
+    getSnapshot: async () => snapshot([]),
+    getTrack: async () => {
+      throw new LiveSourceError('unavailable', `OpenSky HTTP ${status}`, {
+        status,
+      });
+    },
+  });
+  const unknown = composeCatalog({
+    tools: coreTools,
+    services: { aircraft: failing(404) },
+  });
+  assert.equal(
+    (await unknown.call('get_aircraft_track', { icao24: 'abcdef' })).summary,
+    'No recent track is available for abcdef.',
+  );
+  const down = composeCatalog({
+    tools: coreTools,
+    services: { aircraft: failing(502) },
+  });
+  await assert.rejects(
+    down.call('get_aircraft_track', { icao24: 'abcdef' }),
+    (error) => error.code === 'unavailable',
+  );
 });
 
 test('aircraft info combines type and route lookups', async () => {
@@ -241,7 +265,7 @@ test('aircraft info combines type and route lookups', async () => {
   });
   assert.equal(
     both.summary,
-    'Aaa111 is Boeing 737-800 (N12345); UAL123 flies SFO to EWR (United Airlines).',
+    'Aircraft aaa111 is Boeing 737-800 (N12345); flight UAL123 flies SFO to EWR (United Airlines).',
   );
   assert.equal(both.data.route.destination.name, 'Newark');
   const unknown = await catalog.call('get_aircraft_info', { callsign: 'XYZ9' });

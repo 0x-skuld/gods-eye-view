@@ -25,6 +25,7 @@ const AWARENESS_RADIUS_KM = 250;
 const SECTIONS = [
   {
     key: 'weather',
+    label: 'Weather',
     tool: getWeather,
     args: (area, center) => ({
       location: { lat: center.lat, lon: center.lon },
@@ -32,26 +33,31 @@ const SECTIONS = [
   },
   {
     key: 'earthquakes',
+    label: 'Earthquakes',
     tool: getEarthquakes,
     args: (area) => ({ area: area.argument, limit: SECTION_LIMIT }),
   },
   {
     key: 'fires',
+    label: 'Active fires',
     tool: getActiveFires,
     args: (area) => ({ area: area.argument, limit: SECTION_LIMIT }),
   },
   {
     key: 'aircraft',
+    label: 'Aircraft',
     tool: aircraftInArea,
     args: (area) => ({ area: area.argument, limit: SECTION_LIMIT }),
   },
   {
     key: 'vessels',
+    label: 'Ships',
     tool: vesselsInArea,
     args: (area) => ({ area: area.argument, limit: SECTION_LIMIT }),
   },
   {
     key: 'cyclones',
+    label: 'Tropical cyclones',
     tool: getCyclones,
     args: (area) => ({ area: area.argument }),
   },
@@ -181,9 +187,30 @@ export const getHudCaption = defineTool({
   },
   requires: ['weather', 'summary'],
   async run(args, context) {
-    const { area, center, lines } = await buildBrief(args, context);
+    const { area, center, brief, lines } = await buildBrief(args, context);
+    // The app's caption context: place labels and the layers that answered,
+    // with their feed state.
+    const answered = SECTIONS.filter(
+      ({ key }) => brief[key] && !brief[key].unavailable,
+    );
+    const layers = answered.map(({ key, label }) => ({
+      id: key,
+      name: label,
+      feedState: 'nominal',
+    }));
     const response = await context.services.summary.summarize(
-      { location: area.label, center, observations: lines },
+      {
+        placeLabels: [area.label],
+        location: area.label,
+        center,
+        observations: lines,
+        enabledLayerLabels: layers.map((layer) => layer.name),
+        enabledLayers: layers,
+        feedProvenance: {
+          overall: layers.length ? 'nominal' : null,
+          layers,
+        },
+      },
       { signal: context.signal },
     );
     const caption = response?.data?.summary;

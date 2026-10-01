@@ -6,6 +6,7 @@ import {
   lookAnglesAt,
 } from '../../data/satellitePass.js';
 import { parseTleText, tleCatalogNumber } from '../../sources/tle.js';
+import { POINT_SCHEMA, resolvePoint } from '../area.js';
 import { defineTool, ToolError } from '../catalog.js';
 import { LIMIT_SCHEMA, capRows, countNoun, isoTime } from '../results.js';
 
@@ -83,20 +84,6 @@ const COMPASS = [
   'NW',
   'NNW',
 ];
-const OBSERVER = {
-  lat: {
-    type: 'number',
-    minimum: -90,
-    maximum: 90,
-    description: 'Observer latitude.',
-  },
-  lon: {
-    type: 'number',
-    minimum: -180,
-    maximum: 180,
-    description: 'Observer longitude.',
-  },
-};
 const GROUP_SCHEMA = {
   type: 'string',
   enum: GROUPS,
@@ -154,7 +141,7 @@ export const nextSatellitePass = defineTool({
   inputSchema: {
     type: 'object',
     properties: {
-      ...OBSERVER,
+      location: POINT_SCHEMA,
       satellite: {
         type: 'string',
         minLength: 1,
@@ -170,11 +157,12 @@ export const nextSatellitePass = defineTool({
       },
       hours: { type: 'number', minimum: 1, maximum: 72 },
     },
-    required: ['lat', 'lon'],
+    required: ['location'],
     additionalProperties: false,
   },
   requires: ['satellites'],
   async run(args, { services, signal }) {
+    const point = await resolvePoint(args.location, { services, signal });
     const group = args.group ?? 'stations';
     const entries = await readCatalog(services, group, signal);
     const satellite = matchSatellite(entries, args.satellite);
@@ -186,8 +174,8 @@ export const nextSatellitePass = defineTool({
     const hours = args.hours ?? 24;
     const pass = findNextSatellitePass({
       satrec: satellite.satrec,
-      latDeg: args.lat,
-      lonDeg: args.lon,
+      latDeg: point.lat,
+      lonDeg: point.lon,
       fromMs: nowMs(services),
       minElevDeg: args.min_elevation_deg ?? 10,
       horizonHours: hours,
@@ -196,15 +184,21 @@ export const nextSatellitePass = defineTool({
     const name = satellite.name;
     if (!pass)
       return {
-        summary: `${name} has no ${args.visible_only ? 'visible ' : ''}pass over this location in the next ${hours} hours.`,
-        data: { satellite: name, norad: satellite.norad, pass: null },
+        summary: `${name} has no ${args.visible_only ? 'visible ' : ''}pass over ${point.label} in the next ${hours} hours.`,
+        data: {
+          location: point,
+          satellite: name,
+          norad: satellite.norad,
+          pass: null,
+        },
       };
     return {
       summary:
-        `${name} next rises ${isoTime(pass.riseMs)} in the ${compass(pass.riseAzDeg)}, ` +
+        `${name} next rises over ${point.label} at ${isoTime(pass.riseMs)} in the ${compass(pass.riseAzDeg)}, ` +
         `peaking at ${Math.round(pass.maxElevDeg)}°` +
         `${pass.visible ? '; visible to the naked eye' : ''}.`,
       data: {
+        location: point,
         satellite: name,
         norad: satellite.norad,
         pass: {
@@ -230,22 +224,23 @@ export const satellitesOverhead = defineTool({
   inputSchema: {
     type: 'object',
     properties: {
-      ...OBSERVER,
+      location: POINT_SCHEMA,
       group: GROUP_SCHEMA,
       min_elevation_deg: { type: 'number', minimum: 0, maximum: 90 },
       limit: LIMIT_SCHEMA,
     },
-    required: ['lat', 'lon'],
+    required: ['location'],
     additionalProperties: false,
   },
   requires: ['satellites'],
   async run(args, { services, signal }) {
+    const point = await resolvePoint(args.location, { services, signal });
     const group = args.group ?? 'stations';
     const minimum = args.min_elevation_deg ?? 10;
     const at = nowMs(services);
     const rows = (await readCatalog(services, group, signal))
       .flatMap((entry) => {
-        const look = lookAnglesAt(entry.satrec, at, args.lat, args.lon);
+        const look = lookAnglesAt(entry.satrec, at, point.lat, point.lon);
         return look && look.elevDeg >= minimum
           ? [
               {
@@ -260,8 +255,13 @@ export const satellitesOverhead = defineTool({
       })
       .sort((a, b) => b.elevation_deg - a.elevation_deg);
     return {
-      summary: `${countNoun(rows.length, 'satellite')} from the ${group} group ${rows.length === 1 ? 'is' : 'are'} at least ${minimum}° above this location at ${isoTime(at)}.`,
-      data: { ...capRows(rows, args.limit), group, at: isoTime(at) },
+      summary: `${countNoun(rows.length, 'satellite')} from the ${group} group ${rows.length === 1 ? 'is' : 'are'} at least ${minimum}° above ${point.label} at ${isoTime(at)}.`,
+      data: {
+        ...capRows(rows, args.limit),
+        location: point,
+        group,
+        at: isoTime(at),
+      },
     };
   },
 });

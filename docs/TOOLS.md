@@ -140,14 +140,14 @@ public feeds the sources already use.
 | `vessels_in_area` | `vessels` | Ships reported by AIS in an area, nearest first, optionally by type |
 | `find_vessel` | `vessels` | Ships anywhere by MMSI, IMO number or name |
 | `get_vessel_track` | `vessels` | Recent positions of one ship, thinned to 200 points |
-| `next_satellite_pass` | `satellites` | Next pass over a point (default the ISS), with naked-eye visibility |
-| `satellites_overhead` | `satellites` | Satellites in a CelesTrak group above a point now, highest first |
+| `next_satellite_pass` | `satellites` | Next pass over a place or point (default the ISS), with naked-eye visibility |
+| `satellites_overhead` | `satellites` | Satellites in a CelesTrak group above a place or point now, highest first |
 | `find_cctv_cameras` | `cctv` | Public cameras in an area, nearest first |
 | `get_cctv_snapshot` | `cctv` | The current image from one camera, returned as image content |
 | `find_alpr_cameras` | `alpr` | OpenStreetMap-mapped license plate readers in a US/Canadian area up to 3° |
 | `find_radio_stations` | `radio` | Radio Browser stations by area and/or search terms, with stream URLs |
 | `search_places` | `placeSearch` | Points of interest matching a query within an area (Google Places) |
-| `places_nearby` | `placeSearch` | Notable places around a point (Google Places) |
+| `places_nearby` | `placeSearch` | Notable places around a place or point (Google Places) |
 | `plan_route` | `routing` | Walking, driving or cycling route over OpenStreetMap, with a simplified path |
 | `get_bike_share` | `bikeshare` | Live GBFS stations in an area, with bikes and docks available |
 | `get_transit_vehicles` | `transit` | Live GTFS-Realtime vehicle positions in an area, optionally one route |

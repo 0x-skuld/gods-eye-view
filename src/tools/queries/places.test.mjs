@@ -93,11 +93,10 @@ test('nearby places use the given radius', async () => {
     services: { placeSearch: search },
   });
   const result = await catalog.call('places_nearby', {
-    lat: 30.27,
-    lon: -97.74,
+    location: { lat: 30.27, lon: -97.74 },
     radius_m: 400,
   });
-  assert.equal(result.summary, '1 place within 400 m.');
+  assert.equal(result.summary, '1 place within 400 m of 30.2700, -97.7400.');
   assert.deepEqual(search.calls[0], {
     latitude: 30.27,
     longitude: -97.74,

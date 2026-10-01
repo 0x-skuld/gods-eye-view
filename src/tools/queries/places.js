@@ -82,25 +82,25 @@ export const placesNearby = defineTool({
   inputSchema: {
     type: 'object',
     properties: {
-      lat: { type: 'number', minimum: -90, maximum: 90 },
-      lon: { type: 'number', minimum: -180, maximum: 180 },
+      location: POINT_SCHEMA,
       radius_m: { type: 'number', minimum: 10, maximum: 5000 },
       limit: LIMIT_SCHEMA,
     },
-    required: ['lat', 'lon'],
+    required: ['location'],
     additionalProperties: false,
   },
   requires: ['placeSearch'],
   async run(args, { services, signal }) {
+    const point = await resolvePoint(args.location, { services, signal });
     const radiusM = Math.round(args.radius_m ?? 250);
     const result = await services.placeSearch.nearby(
-      { latitude: args.lat, longitude: args.lon, radiusM },
+      { latitude: point.lat, longitude: point.lon, radiusM },
       { signal },
     );
     if (!result.configured) throw new ToolError('unavailable', NOT_CONFIGURED);
     const rows = result.places.map(placeRow);
     return {
-      summary: `${countNoun(rows.length, 'place')} within ${radiusM} m.`,
+      summary: `${countNoun(rows.length, 'place')} within ${radiusM} m of ${point.label}.`,
       data: capRows(rows, args.limit),
     };
   },
