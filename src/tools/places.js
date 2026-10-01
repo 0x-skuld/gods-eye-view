@@ -20,16 +20,53 @@ const POINT_RADIUS_DEGREES = 0.25;
  */
 export function createGeocodePlaceService({
   fetchImpl = (...args) => globalThis.fetch(...args),
+  cacheSize = 200,
+  cacheMs = 10 * 60_000,
+  now = () => Date.now(),
 } = {}) {
+  // Recent answers by name, so tools that combine others resolve a place to
+  // the same point once instead of once per section.
+  const cache = new Map();
+  async function lookup(name) {
+    const query = new URLSearchParams({ q: name });
+    const response = await fetchImpl(`/api/geocode?${query}`);
+    if (!response.ok) throw new Error(`Geocode HTTP ${response.status}`);
+    const payload = await response.json();
+    return placeFromGeocodeResult(payload?.results?.[0]);
+  }
   return {
     async resolve(name, { signal } = {}) {
-      const query = new URLSearchParams({ q: name });
-      const response = await fetchImpl(`/api/geocode?${query}`, { signal });
-      if (!response.ok) throw new Error(`Geocode HTTP ${response.status}`);
-      const payload = await response.json();
-      return placeFromGeocodeResult(payload?.results?.[0]);
+      signal?.throwIfAborted();
+      const key = name.trim().toLowerCase();
+      const hit = cache.get(key);
+      if (hit && now() - hit.at < cacheMs) {
+        cache.delete(key);
+        cache.set(key, hit);
+        return waitFor(hit.place, signal);
+      }
+      const place = lookup(name);
+      const entry = { at: now(), place };
+      cache.set(key, entry);
+      while (cache.size > cacheSize) cache.delete(cache.keys().next().value);
+      place.catch(() => {
+        if (cache.get(key) === entry) cache.delete(key);
+      });
+      return waitFor(place, signal);
     },
   };
+}
+
+/** Settle with `promise`, or reject when `signal` aborts first. */
+function waitFor(promise, signal) {
+  if (!signal) return promise;
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    promise
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', abort));
+  });
 }
 
 /** Convert one geocode result to a place with bounds, or null. */
