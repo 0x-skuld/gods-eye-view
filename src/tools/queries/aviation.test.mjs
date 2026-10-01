@@ -298,3 +298,42 @@ test('live source failures become tool errors with retry guidance', async () => 
       error.message === 'OpenSky rate limited',
   );
 });
+
+test('aircraft searches keep the feeds that answered and name the others', async () => {
+  const down = {
+    getSnapshot: async () => {
+      throw new LiveSourceError('unavailable', 'OpenSky HTTP 503');
+    },
+  };
+  const military = feed([
+    record('ae1234', 38, -77, { callsign: 'RCH123', registration: '05-5140' }),
+  ]);
+  const catalog = composeCatalog({
+    tools: coreTools,
+    services: { aircraft: down, military },
+  });
+  const byCallsign = await catalog.call('find_aircraft', {
+    callsign: 'rch123',
+  });
+  assert.equal(
+    byCallsign.summary,
+    'Found 1 aircraft with callsign RCH123. The civil feed did not answer.',
+  );
+  assert.deepEqual(byCallsign.data.unavailable_feeds, ['civil']);
+  const civil = feed([]);
+  const byRegistration = await composeCatalog({
+    tools: coreTools,
+    services: { aircraft: civil, military },
+  }).call('find_aircraft', { registration: '05-5140' });
+  assert.equal(byRegistration.data.rows[0].id, 'ae1234');
+  assert.deepEqual(byRegistration.data.unavailable_feeds, []);
+  assert.equal(civil.calls.length, 0);
+  await assert.rejects(
+    composeCatalog({
+      tools: coreTools,
+      services: { aircraft: down, military: down },
+    }).call('find_aircraft', { callsign: 'RCH123' }),
+    (error) =>
+      error.code === 'unavailable' && error.message === 'OpenSky HTTP 503',
+  );
+});

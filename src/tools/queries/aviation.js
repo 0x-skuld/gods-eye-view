@@ -161,13 +161,31 @@ export const findAircraft = defineTool({
       icao24: 'id',
       registration: 'registration',
     }[key];
-    const feeds = [services.aircraft, services.military].filter(Boolean);
-    const snapshots = await Promise.all(
-      feeds.map((feed) => feed.getSnapshot({}, { signal })),
+    // Only the military feed reports registrations.
+    const feeds = [
+      ...(key === 'registration'
+        ? []
+        : [{ name: 'civil', feed: services.aircraft }]),
+      { name: 'military', feed: services.military },
+    ].filter(({ feed }) => feed);
+    if (!feeds.length)
+      throw new ToolError(
+        'unavailable',
+        'The military aircraft feed is not available here',
+      );
+    const settled = await Promise.allSettled(
+      feeds.map(({ feed }) => feed.getSnapshot({}, { signal })),
     );
+    signal?.throwIfAborted();
+    // A search succeeds when any feed answers; missing feeds are named.
+    const unavailable = feeds
+      .filter((_, index) => settled[index].status === 'rejected')
+      .map(({ name }) => name);
+    if (unavailable.length === feeds.length) throw settled[0].reason;
     const seen = new Set();
-    const rows = snapshots
-      .flatMap((snapshot) => snapshot.records)
+    const rows = settled
+      .filter((result) => result.status === 'fulfilled')
+      .flatMap((result) => result.value.records)
       .filter(
         (record) =>
           String(record[field] || '')
@@ -177,10 +195,14 @@ export const findAircraft = defineTool({
       .filter((record) => !seen.has(record.id) && seen.add(record.id))
       .map((record) => aircraftRow(record));
     return {
-      summary: rows.length
-        ? `Found ${countNoun(rows.length, 'aircraft', 'aircraft')} with ${key} ${wanted}.`
-        : `No aircraft with ${key} ${wanted} is currently reported.`,
-      data: capRows(rows, args.limit),
+      summary:
+        (rows.length
+          ? `Found ${countNoun(rows.length, 'aircraft', 'aircraft')} with ${key} ${wanted}.`
+          : `No aircraft with ${key} ${wanted} is currently reported.`) +
+        (unavailable.length
+          ? ` The ${unavailable.join(' and ')} feed did not answer.`
+          : ''),
+      data: { ...capRows(rows, args.limit), unavailable_feeds: unavailable },
     };
   },
 });
