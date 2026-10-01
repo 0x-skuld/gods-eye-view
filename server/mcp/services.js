@@ -13,7 +13,11 @@ import {
   createAdsbLolSource,
   createOpenSkySource,
 } from '../../src/sources/live/standalone.js';
-import { createGeocodePlaceService } from '../../src/tools/places.js';
+import {
+  createGeocodePlaceService,
+  createPlaceSearchService,
+  createRouteService,
+} from '../../src/tools/places.js';
 
 export const DEFAULT_API_BASE = 'http://localhost:4173';
 
@@ -46,6 +50,8 @@ export function createLocalToolServices(options = {}) {
     satellites: createSatelliteSource({ fetchImpl }),
     cctv: createCctvSource({ fetchImpl }),
     radio: createRadioSource({ fetchImpl }),
+    placeSearch: createPlaceSearchService({ fetchImpl }),
+    routing: createRouteService({ fetchImpl }),
     places: createGeocodePlaceService({ fetchImpl }),
   };
 }

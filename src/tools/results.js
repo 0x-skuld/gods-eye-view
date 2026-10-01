@@ -31,3 +31,13 @@ export function isoTime(ms) {
 export function countNoun(count, singular, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
+
+/** Keep the first and last items and evenly spaced items between them. */
+export function thinEvenly(items, max) {
+  if (items.length <= max) return items;
+  const step = (items.length - 1) / (max - 1);
+  return Array.from(
+    { length: max },
+    (_, index) => items[Math.round(index * step)],
+  );
+}

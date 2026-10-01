@@ -49,7 +49,9 @@ Services are the portable source factories the layers already use, such as
 plus a `places` service with `resolve(name, { signal })`. Sources request
 relative `/api/...` paths through an injected `fetchImpl`, so the same tool
 code runs wherever an application routes those paths.
-`createGeocodePlaceService` resolves place names through `/api/geocode`.
+`createGeocodePlaceService` resolves place names through `/api/geocode`;
+`createPlaceSearchService` searches `/api/google/*` and reports when no search key
+is configured; `createRouteService` plans routes through `/api/route`.
 
 ## The `area` argument
 
@@ -98,3 +100,6 @@ public feeds the sources already use.
 | `find_cctv_cameras` | `cctv` | Public cameras in an area, nearest first |
 | `get_cctv_snapshot` | `cctv` | The current image from one camera, returned as image content |
 | `find_radio_stations` | `radio` | Radio Browser stations by area and/or search terms, with stream URLs |
+| `search_places` | `placeSearch` | Points of interest matching a query within an area (Google Places) |
+| `places_nearby` | `placeSearch` | Notable places around a point (Google Places) |
+| `plan_route` | `routing` | Walking, driving or cycling route over OpenStreetMap, with a simplified path |

@@ -8,7 +8,13 @@ import {
   distanceKm,
   resolveArea,
 } from '../area.js';
-import { LIMIT_SCHEMA, capRows, countNoun, isoTime } from '../results.js';
+import {
+  LIMIT_SCHEMA,
+  capRows,
+  countNoun,
+  isoTime,
+  thinEvenly,
+} from '../results.js';
 
 const ICAO24_SCHEMA = Object.freeze({
   type: 'string',
@@ -200,7 +206,7 @@ export const getAircraftTrack = defineTool({
     const points = [...track.records].sort(
       (a, b) => a.observedAtMs - b.observedAtMs,
     );
-    const kept = thin(points, MAX_TRACK_POINTS);
+    const kept = thinEvenly(points, MAX_TRACK_POINTS);
     const first = points[0];
     const last = points.at(-1);
     return {
@@ -223,16 +229,6 @@ export const getAircraftTrack = defineTool({
     };
   },
 });
-
-/** Keep the first and last items and evenly spaced items between them. */
-function thin(items, max) {
-  if (items.length <= max) return items;
-  const step = (items.length - 1) / (max - 1);
-  return Array.from(
-    { length: max },
-    (_, index) => items[Math.round(index * step)],
-  );
-}
 
 export const getAircraftInfo = defineTool({
   name: 'get_aircraft_info',

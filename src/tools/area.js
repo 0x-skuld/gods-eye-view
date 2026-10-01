@@ -93,6 +93,53 @@ function circleArea(lat, lon, radiusKm) {
   };
 }
 
+/** JSON Schema for a single location: a place name, or lat and lon. */
+export const POINT_SCHEMA = Object.freeze({
+  type: 'object',
+  description: 'A place name, or lat and lon.',
+  properties: {
+    place: { type: 'string', minLength: 1, maxLength: 200 },
+    lat: { type: 'number', minimum: -90, maximum: 90 },
+    lon: { type: 'number', minimum: -180, maximum: 180 },
+  },
+  additionalProperties: false,
+});
+
+/** Resolve a point argument to `{ label, lat, lon }`. */
+export async function resolvePoint(point, { services, signal } = {}) {
+  if (point?.place != null && point.lat == null && point.lon == null) {
+    const area = await resolveArea(
+      { place: point.place },
+      { services, signal },
+    );
+    return { label: area.label, ...areaCenter(area) };
+  }
+  if (point?.place == null && point?.lat != null && point?.lon != null)
+    return {
+      label: `${point.lat.toFixed(4)}, ${point.lon.toFixed(4)}`,
+      lat: point.lat,
+      lon: point.lon,
+    };
+  throw new ToolError(
+    'invalid_arguments',
+    'A location needs either place, or lat and lon',
+  );
+}
+
+/** Distance in kilometers from an area's center to its farthest edge point. */
+export function areaRadiusKm(area) {
+  if (area.center) return area.center.radiusKm;
+  const center = areaCenter(area);
+  return Math.max(
+    ...[
+      { lat: area.north, lon: area.west },
+      { lat: area.north, lon: area.east },
+      { lat: area.south, lon: area.west },
+      { lat: area.south, lon: area.east },
+    ].map((corner) => distanceKm(center, corner)),
+  );
+}
+
 /** Great-circle distance in kilometers. */
 export function distanceKm(a, b) {
   const toRad = Math.PI / 180;

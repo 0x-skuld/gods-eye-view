@@ -10,6 +10,7 @@ import {
   getAircraftTrack,
 } from './queries/aviation.js';
 import { getActiveFires, getEarthquakes } from './queries/hazards.js';
+import { placesNearby, planRoute, searchPlaces } from './queries/places.js';
 import {
   findCctvCameras,
   findRadioStations,
@@ -35,7 +36,12 @@ export {
   distanceKm,
 } from './area.js';
 export { LIMIT_SCHEMA, DEFAULT_LIMIT, MAX_LIMIT, capRows } from './results.js';
-export { createGeocodePlaceService, placeFromGeocodeResult } from './places.js';
+export {
+  createGeocodePlaceService,
+  createPlaceSearchService,
+  createRouteService,
+  placeFromGeocodeResult,
+} from './places.js';
 
 /** Every query Core defines, in a stable order. */
 export const coreTools = Object.freeze([
@@ -51,4 +57,7 @@ export const coreTools = Object.freeze([
   findCctvCameras,
   getCctvSnapshot,
   findRadioStations,
+  searchPlaces,
+  placesNearby,
+  planRoute,
 ]);
