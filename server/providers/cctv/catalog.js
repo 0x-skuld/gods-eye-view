@@ -3,7 +3,7 @@ import path from 'node:path';
 import { DEFAULT_CCTV_SOURCE_FILE, CCTV_SOURCE_CACHE_MS } from './constants.js';
 import { allocateSourceCap, resolveCatalogCap } from './cap.js';
 import { loadGroundHeights, joinGroundHeights } from './groundHeights.js';
-import { normalizeSourceItem } from './normalize.js';
+import { cameraRegion, normalizeSourceItem } from './normalize.js';
 import {
   loadAustinSourcesFromOpenData,
   loadCaltransSourcesFromOpenData,
@@ -217,6 +217,7 @@ export function createCctvCatalog({ sourceRoot = process.cwd() } = {}) {
       available: Number.isFinite(items.available)
         ? items.available
         : items.length,
+      region: items.region ?? null,
     });
     const packs = [
       ...LIVE_PACKS.map((pack, index) =>
@@ -246,6 +247,8 @@ export function createCctvCatalog({ sourceRoot = process.cwd() } = {}) {
         pack: pack.name,
         available: Math.max(pack.available, allocation.packs[index].offered),
         served: allocation.packs[index].kept,
+        // Where the pack's cameras are, including those not served.
+        region: pack.region ?? cameraRegion(pack.sources),
       }))
       .filter((pack) => pack.served < pack.available);
     if (trimmed.length) {

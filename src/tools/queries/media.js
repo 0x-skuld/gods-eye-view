@@ -31,6 +31,21 @@ async function readCatalog(services, signal) {
   };
 }
 
+/** Whether an area's box overlaps a plain region box. */
+function boxesOverlap(area, region) {
+  if (area.south > region.north || area.north < region.south) return false;
+  const spans =
+    area.west <= area.east
+      ? [[area.west, area.east]]
+      : [
+          [area.west, 180],
+          [-180, area.east],
+        ];
+  return spans.some(
+    ([west, east]) => west <= region.east && east >= region.west,
+  );
+}
+
 async function readCameras(services, signal) {
   return (await readCatalog(services, signal)).cameras;
 }
@@ -55,8 +70,12 @@ export const findCctvCameras = defineTool({
     const found = catalog.cameras.filter((camera) =>
       areaContains(area, camera),
     );
+    // A trimmed pack matters wherever its cameras are, served or not, so
+    // its region decides, not the cameras returned.
     const packs = new Set(found.map((camera) => camera.pack).filter(Boolean));
-    const trimmed = catalog.trimmed.filter((entry) => packs.has(entry.pack));
+    const trimmed = catalog.trimmed.filter((entry) =>
+      entry.region ? boxesOverlap(area, entry.region) : packs.has(entry.pack),
+    );
     const rows = found
       .map((camera) => ({
         id: camera.id,

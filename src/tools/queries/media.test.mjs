@@ -282,3 +282,43 @@ test('cameras from a trimmed catalog pack are reported as partial', async () => 
     /\(the catalog serves only some cameras here: 250 of 900 from tfl\)\.$/,
   );
 });
+
+test('an area the catalog trimmed away entirely is not reported complete', async () => {
+  const catalog = composeCatalog({
+    tools: coreTools,
+    services: {
+      cctv: {
+        getCatalog: async () => ({
+          trimmedPacks: [
+            {
+              pack: 'tfl',
+              available: 900,
+              served: 250,
+              region: { west: -0.6, south: 51.3, east: 0.3, north: 51.7 },
+            },
+          ],
+          // Every served camera is in central London, none in the suburb.
+          sources: [
+            {
+              id: 'jam-1',
+              name: 'Strand',
+              lat: 51.51,
+              lon: -0.12,
+              pack: 'tfl',
+            },
+          ],
+        }),
+      },
+    },
+  });
+  const suburb = await catalog.call('find_cctv_cameras', {
+    area: { lat: 51.4, lon: -0.5, radius_km: 3 },
+  });
+  assert.equal(suburb.data.rows.length, 0);
+  assert.equal(suburb.data.complete, false);
+  assert.match(suburb.summary, /250 of 900 from tfl/);
+  const elsewhere = await catalog.call('find_cctv_cameras', {
+    area: { lat: 40.7, lon: -74, radius_km: 3 },
+  });
+  assert.equal(elsewhere.data.complete, true);
+});

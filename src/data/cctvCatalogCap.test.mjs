@@ -129,9 +129,13 @@ test('the catalog applies the fair cap to configured packs end to end', async ()
       ['env-0', 'env-1', 'env-2'],
     );
     assert.equal(sources[0].pack, 'env');
-    assert.deepEqual(getSources.trimmedPacks(), [
-      { pack: 'env', available: 12, served: 9 },
-    ]);
+    const [trimmed] = getSources.trimmedPacks();
+    assert.deepEqual(
+      { ...trimmed, region: undefined },
+      { pack: 'env', available: 12, served: 9, region: undefined },
+    );
+    assert.equal(trimmed.region.south, 30);
+    assert.ok(Math.abs(trimmed.region.north - 30.11) < 1e-9);
   } finally {
     for (const key of Object.keys(process.env)) {
       if (!(key in saved)) delete process.env[key];
@@ -154,4 +158,5 @@ test('a pack trimmed to its nearest cameras reports how many it offered', async 
     ['c0', 'c1'],
   );
   assert.equal(kept.available, 5);
+  assert.deepEqual(kept.region, { west: 0, south: 0, east: 0, north: 4 });
 });
