@@ -1,5 +1,11 @@
 # Changelog
 
+- Cockpit now enters on the existing matching map style while keeping one fixed,
+  duplicate-free carousel over `Normal / CRT / NVG / FLIR / Anime / Noir / Snow`.
+  Normal remains a real unfiltered option; Cockpit-only choices still restore
+  the captured map style through both Exit Cockpit and Reset.
+- Cyber's compact right-rail and Cockpit utility buttons now center their glyphs
+  vertically and share the same inset and edge alignment.
 - Public Overpass instances are no longer used by default. Street Traffic
   roads come from TomTom flow tiles, OpenFreeMap vector tiles, or both, chosen
   on the layer row (TomTom / OSM / Hybrid) or with `?trafficRoads=`. With a
@@ -157,8 +163,9 @@
   waves stay on-screen.
 - Keep Cyber Voice help/error popups and Location/Visual Presets pins clear of
   their decorative frames. Leave space above attribution for its full logo row.
-  Add shared panel surface hooks for theme styling, rail input and bounded body
-  scrolling without changing panel disclosure or visibility policies.
+- Add an intentionally future-facing, opt-in panel surface contract for new
+  panels to inherit compatible Normal, Cyber and Cockpit styling. Its first
+  production adopter will land separately after this change.
 - Restore the user's previous visual preset when they explicitly switch from
   Cyber to another HUD layout, without overriding scene or shared-link state.
 - Move the aligned Cyber side-panel rails upward on desktop so the left stack

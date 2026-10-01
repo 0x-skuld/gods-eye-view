@@ -197,6 +197,7 @@ export class VisualSettings {
     });
     this.activeStyle = 'normal';
     this._preCyberStyle = null;
+    this._cyberStyleUserSelected = false;
     document.documentElement.dataset.gevStyle = this.activeStyle;
     this._detectionUserOverridden = false;
     this._cockpitVisionMode = 'optical';
@@ -342,23 +343,15 @@ export class VisualSettings {
       );
     }
     if (next === 'optical') {
-      applyCockpitVisionStageIntensities(
-        this.stages,
-        next,
-        this._cockpitVisionRestore,
-      );
+      applyCockpitVisionStageIntensities(this.stages, next);
       this._syncStagesEnabledFromIntensity();
       this._cockpitVisionMode = next;
       this._syncIrBoost();
-      this._updateSliderPanel(this.activeStyle, { reveal: false });
+      this._updateSliderPanel(null, { reveal: false });
       this._revealCockpitStyleParameters({ openDisplay: revealParameters });
       return;
     }
-    const target = applyCockpitVisionStageIntensities(
-      this.stages,
-      next,
-      this._cockpitVisionRestore,
-    );
+    const target = applyCockpitVisionStageIntensities(this.stages, next);
     this._syncStagesEnabledFromIntensity();
     this._cockpitVisionMode = next;
     this._syncIrBoost(); // Cockpit vision override ('nvg'/'thermal' boost; CRT/NOIR clear)
@@ -370,8 +363,11 @@ export class VisualSettings {
     const cockpitMode = this.cockpitView?.active
       ? this._cockpitVisionMode
       : null;
-    const effective =
-      cockpitMode && cockpitMode !== 'optical' ? cockpitMode : this.activeStyle;
+    const effective = cockpitMode
+      ? cockpitMode === 'optical'
+        ? 'normal'
+        : cockpitMode
+      : this.activeStyle;
     const irBoost =
       effective === 'surveillance' ||
       effective === 'thermal' ||
@@ -385,7 +381,7 @@ export class VisualSettings {
       new CustomEvent('gev:vision-change', {
         detail: {
           style: effective,
-          cockpit: Boolean(cockpitMode && cockpitMode !== 'optical'),
+          cockpit: Boolean(cockpitMode),
         },
       }),
     );
@@ -622,8 +618,10 @@ export class VisualSettings {
       // the current Cyber variant. Do not let an older explicit entry restore
       // stale local preset memory on the next user-selected exit.
       this._preCyberStyle = null;
+      this._cyberStyleUserSelected = false;
     } else if (enteredCyber) {
       this._preCyberStyle = this.activeStyle;
+      this._cyberStyleUserSelected = false;
     }
     if (this._hudLayoutSelect && this._hudLayoutSelect.value !== nextVariant) {
       this._hudLayoutSelect.value = nextVariant;
@@ -635,12 +633,17 @@ export class VisualSettings {
     );
     if (visualDefaults) this._applyCyberVisualDefaults(visualDefaults);
     if (leftCyber) {
-      const restoreStyle = applyVisualDefaults ? this._preCyberStyle : null;
+      const restoreStyle =
+        applyVisualDefaults && !this._cyberStyleUserSelected
+          ? this._preCyberStyle
+          : null;
       this._preCyberStyle = null;
+      this._cyberStyleUserSelected = false;
       if (restoreStyle && restoreStyle !== this.activeStyle) {
         this.setStyle(restoreStyle, {
           applyPreset: false,
           revealParameters: false,
+          preserveCyberRestore: true,
         });
       }
     }
@@ -653,6 +656,7 @@ export class VisualSettings {
     this.setStyle(style, {
       applyPreset: false,
       revealParameters: false,
+      preserveCyberRestore: true,
     });
     const thermalUniforms = this.stages?.thermal?.uniforms;
     if (!thermalUniforms || thermalUniforms.palette === undefined) return;
@@ -1530,10 +1534,24 @@ export class VisualSettings {
       applyPreset = true,
       revealParameters = applyPreset,
       restore = false,
+      userInitiated = false,
+      preserveCyberRestore = false,
     } = {},
   ) {
     const { setDetectionStyle } = this.services;
     if (!restore) this.shareLinkManager?.claimRestoreLane?.('visual');
+    if (this.hud.getVariant() === 'cyber') {
+      if (userInitiated) {
+        // A direct preset choice owns the active style even when it selects the
+        // same value as Cyber's automatic FLIR default.
+        this._cyberStyleUserSelected = true;
+      } else if (!preserveCyberRestore) {
+        // Scene/share/reset state is authoritative and must not be overwritten
+        // by a remembered local Cyber entry when the user later exits.
+        this._preCyberStyle = null;
+        this._cyberStyleUserSelected = false;
+      }
+    }
     if (styleName === this.activeStyle) {
       if (revealParameters && styleName !== 'normal')
         this._revealStyleParameters();

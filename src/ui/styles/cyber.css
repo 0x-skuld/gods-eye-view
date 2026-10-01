@@ -229,6 +229,65 @@
   border-bottom: 1px solid rgba(206, 222, 226, 0.08);
 }
 
+/* The right-rail surfaces use different content gutters, but their disclosure
+   controls should still read as one vertical column. Eight pixels here plus
+   the shared two-pixel header inset matches Display's eleven-pixel framed
+   edge inset once the surface border is included. */
+:root[data-ui-theme='cyber']
+  #right-context-rail
+  :is(
+    .cctv-panel-inner,
+    .weather-panel-inner,
+    .recent-imagery-panel-inner,
+    .global-context-panel-inner
+  ) {
+  padding-right: 8px;
+}
+
+/* Collapsed right-rail panels otherwise inherit different legacy gutters:
+   CCTV lands five pixels low while Context lands four pixels high. Give every
+   compact launcher the same centered 48px content row inside its 1px frame. */
+:root[data-ui-theme='cyber']
+  #right-context-rail
+  :is(
+    #cctv-panel,
+    #weather-panel,
+    #recent-imagery-panel,
+    #global-context-panel
+  ).collapsed
+  > :is(
+    .cctv-panel-inner,
+    .weather-panel-inner,
+    .recent-imagery-panel-inner,
+    .global-context-panel-inner
+  ) {
+  padding: 0;
+}
+
+:root[data-ui-theme='cyber']
+  #right-context-rail
+  :is(
+    #cctv-panel,
+    #weather-panel,
+    #recent-imagery-panel,
+    #global-context-panel
+  ).collapsed
+  > :is(
+    .cctv-panel-inner,
+    .weather-panel-inner,
+    .recent-imagery-panel-inner,
+    .global-context-panel-inner
+  )
+  > .panel-header {
+  box-sizing: border-box;
+  width: 100%;
+  height: 48px;
+  min-height: 48px;
+  margin: 0;
+  padding: 0 10px 0 14px;
+  border-bottom: 0;
+}
+
 :root[data-ui-theme='cyber']
   :is(
     .data-panel-inner,
@@ -1623,7 +1682,7 @@
     .cockpit-utility-launcher {
     height: 50px;
     min-height: 50px;
-    padding: 8px 18px 10px 24px;
+    padding: 9px 18px 9px 24px;
   }
 
   :root[data-ui-theme='cyber']

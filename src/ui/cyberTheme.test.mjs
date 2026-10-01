@@ -140,23 +140,74 @@ test('non-Cyber style presets and explicit HUD choices remain authoritative', (t
   }
 });
 
-test('leaving an explicitly selected Cyber layout restores the prior visual preset', (t) => {
+test('leaving Cyber without a preset choice restores the prior visual preset', (t) => {
   const { owner, hud } = styleOwner(t, 'tactical');
   owner.setStyle('noir');
 
   owner._setHudVariant('cyber', { applyVisualDefaults: true });
   assert.equal(owner.activeStyle, 'thermal');
   assert.equal(owner._preCyberStyle, 'noir');
+  assert.equal(owner._cyberStyleUserSelected, false);
 
-  // A temporary choice made while Cyber is active does not replace the preset
-  // that was active before the user entered Cyber.
-  owner.setStyle('snow');
-  owner._setHudVariant('cyber', { applyVisualDefaults: true });
-  assert.equal(owner._preCyberStyle, 'noir');
   owner._setHudVariant('operator', { applyVisualDefaults: true });
   assert.equal(hud.getVariant(), 'operator');
   assert.equal(owner.activeStyle, 'noir');
   assert.equal(owner._preCyberStyle, null);
+  assert.equal(owner._cyberStyleUserSelected, false);
+});
+
+test('a preset explicitly selected in Cyber survives exit and resets for re-entry', (t) => {
+  const { owner, hud } = styleOwner(t, 'tactical');
+  owner.setStyle('noir');
+
+  owner._setHudVariant('cyber', { applyVisualDefaults: true });
+  owner.setStyle('snow', { userInitiated: true });
+  assert.equal(owner.activeStyle, 'snow');
+  assert.equal(owner._preCyberStyle, 'noir');
+  assert.equal(owner._cyberStyleUserSelected, true);
+
+  // Reselecting the active mode must not erase the user's preset intent.
+  owner._setHudVariant('cyber', { applyVisualDefaults: true });
+  assert.equal(owner._preCyberStyle, 'noir');
+  owner._setHudVariant('operator', { applyVisualDefaults: true });
+  assert.equal(hud.getVariant(), 'operator');
+  assert.equal(owner.activeStyle, 'snow');
+  assert.equal(owner._preCyberStyle, null);
+  assert.equal(owner._cyberStyleUserSelected, false);
+
+  // A later untouched Cyber round trip restores the new pre-Cyber preset.
+  owner._setHudVariant('cyber', { applyVisualDefaults: true });
+  assert.equal(owner.activeStyle, 'thermal');
+  assert.equal(owner._preCyberStyle, 'snow');
+  owner._setHudVariant('minimal', { applyVisualDefaults: true });
+  assert.equal(owner.activeStyle, 'snow');
+});
+
+test('an explicit same-value FLIR choice is preserved on Cyber exit', (t) => {
+  const { owner } = styleOwner(t, 'tactical');
+  owner.setStyle('noir');
+  owner._setHudVariant('cyber', { applyVisualDefaults: true });
+
+  owner.setStyle('thermal', { userInitiated: true });
+  assert.equal(owner.activeStyle, 'thermal');
+  assert.equal(owner._cyberStyleUserSelected, true);
+  owner._setHudVariant('operator', { applyVisualDefaults: true });
+  assert.equal(owner.activeStyle, 'thermal');
+});
+
+test('an authoritative same-Cyber reset clears local preset ownership', (t) => {
+  const { owner } = styleOwner(t, 'tactical');
+  owner.setStyle('noir');
+  owner._setHudVariant('cyber', { applyVisualDefaults: true });
+  owner.setStyle('snow', { userInitiated: true });
+  assert.equal(owner._cyberStyleUserSelected, true);
+
+  owner._setHudVariant('cyber');
+  assert.equal(owner.activeStyle, 'snow');
+  assert.equal(owner._preCyberStyle, null);
+  assert.equal(owner._cyberStyleUserSelected, false);
+  owner._setHudVariant('operator', { applyVisualDefaults: true });
+  assert.equal(owner.activeStyle, 'snow');
 });
 
 test('Display and voice HUD routes preserve explicit Cyber entry and exit authority', async (t) => {
@@ -174,17 +225,25 @@ test('Display and voice HUD routes preserve explicit Cyber entry and exit author
   const display = makeOwner();
   const hudLayout = new EventTarget();
   hudLayout.value = 'cyber';
+  const snowButton = new EventTarget();
+  snowButton.dataset = { style: 'snow' };
   const controls = bindDisplayControls({
-    elements: { hudLayout },
-    actions: { setHudLayout: (value) => display.owner.setHudLayout(value) },
+    elements: { hudLayout, styleButtons: [snowButton] },
+    actions: {
+      setHudLayout: (value) => display.owner.setHudLayout(value),
+      setStyle: (value) =>
+        display.owner.setStyle(value, { userInitiated: true }),
+    },
   });
   hudLayout.dispatchEvent(new Event('change'));
   assert.equal(display.hud.getVariant(), 'cyber');
   assert.equal(display.owner.activeStyle, 'thermal');
+  snowButton.dispatchEvent(new Event('click'));
+  assert.equal(display.owner.activeStyle, 'snow');
   hudLayout.value = 'operator';
   hudLayout.dispatchEvent(new Event('change'));
   assert.equal(display.hud.getVariant(), 'operator');
-  assert.equal(display.owner.activeStyle, 'noir');
+  assert.equal(display.owner.activeStyle, 'snow');
   controls.destroy();
 
   const voice = makeOwner();
@@ -203,27 +262,34 @@ test('Display and voice HUD routes preserve explicit Cyber entry and exit author
   assert.equal(entered.ok, true);
   assert.equal(voice.hud.getVariant(), 'cyber');
   assert.equal(voice.owner.activeStyle, 'thermal');
+  const selected = await runVoiceAction('set_visual_style', { style: 'snow' });
+  assert.equal(selected.ok, true);
+  assert.equal(voice.owner.activeStyle, 'snow');
   const exited = await runVoiceAction('set_hud', { layout: 'operator' });
   assert.equal(exited.ok, true);
   assert.equal(voice.hud.getVariant(), 'operator');
-  assert.equal(voice.owner.activeStyle, 'noir');
+  assert.equal(voice.owner.activeStyle, 'snow');
 });
 
 test('scene and share HUD transitions do not restore a local pre-Cyber preset', async (t) => {
   const { owner, hud } = styleOwner(t, 'tactical');
   owner.setStyle('noir');
   owner._setHudVariant('cyber', { applyVisualDefaults: true });
+  owner.setStyle('snow', { userInitiated: true });
+  assert.equal(owner._cyberStyleUserSelected, true);
 
   await owner.applyVisualState({ style: 'retro', hud: { variant: 'cyber' } });
   assert.equal(hud.getVariant(), 'cyber');
   assert.equal(owner.activeStyle, 'retro');
   assert.equal(owner._preCyberStyle, null);
+  assert.equal(owner._cyberStyleUserSelected, false);
   owner._setHudVariant('operator', { applyVisualDefaults: true });
   assert.equal(owner.activeStyle, 'retro');
 
   owner.setStyle('surveillance');
   owner._setHudVariant('cyber', { applyVisualDefaults: true });
   assert.equal(owner._preCyberStyle, 'surveillance');
+  owner.setStyle('snow', { userInitiated: true });
   await owner.restoreShareState({
     style: 'thermal',
     hudVariant: 'cyber',
@@ -231,6 +297,7 @@ test('scene and share HUD transitions do not restore a local pre-Cyber preset', 
   assert.equal(hud.getVariant(), 'cyber');
   assert.equal(owner.activeStyle, 'thermal');
   assert.equal(owner._preCyberStyle, null);
+  assert.equal(owner._cyberStyleUserSelected, false);
   owner._setHudVariant('tactical', { applyVisualDefaults: true });
   assert.equal(owner.activeStyle, 'thermal');
   assert.equal(owner._preCyberStyle, null);
@@ -451,6 +518,14 @@ test('Cyber side panels share one width and one framed surface material', () => 
     cyberStyles,
     /#pp-toggles\s*> \.pp-header-row\s+\.pp-collapse-btn \{[\s\S]*?width: var\(--cyber-panel-control-size\);[\s\S]*?height: var\(--cyber-panel-control-size\);/,
   );
+  assert.match(
+    cyberStyles,
+    /#right-context-rail\s+:is\(\s*\.cctv-panel-inner,\s*\.weather-panel-inner,\s*\.recent-imagery-panel-inner,\s*\.global-context-panel-inner\s*\) \{\s*padding-right: 8px;/,
+  );
+  assert.match(
+    cyberStyles,
+    /#right-context-rail[\s\S]*?:is\(\s*#cctv-panel,\s*#weather-panel,\s*#recent-imagery-panel,\s*#global-context-panel\s*\)\.collapsed[\s\S]*?> \.panel-header \{[\s\S]*?height: 48px;[\s\S]*?padding: 0 10px 0 14px;/,
+  );
   assert.doesNotMatch(
     cyberStyles,
     /\.cockpit-utility-control\.is-expanded\s*\{[^}]*order:/,
@@ -518,7 +593,15 @@ test('Cyber visual defaults update the style, thermal palette and render state',
 
   assert.equal(owner.stages.thermal.uniforms.palette, 0.42);
   assert.deepEqual(calls, [
-    ['style', 'thermal', { applyPreset: false, revealParameters: false }],
+    [
+      'style',
+      'thermal',
+      {
+        applyPreset: false,
+        revealParameters: false,
+        preserveCyberRestore: true,
+      },
+    ],
     ['sliders', 'thermal', { reveal: false }],
     ['render', 'cyber-visual-defaults'],
   ]);
@@ -726,7 +809,7 @@ test('Cyber desktop cockpit collapsed utility frames match the 50px Data Layers 
   );
   assert.match(
     desktop,
-    /:root\[data-ui-theme='cyber'\]\s+body\.cockpit-mode\s+\.cockpit-utility-control:not\(\.is-expanded\)\s+\.cockpit-utility-launcher\s*\{\s*height: 50px;\s*min-height: 50px;\s*padding: 8px 18px 10px 24px;/,
+    /:root\[data-ui-theme='cyber'\]\s+body\.cockpit-mode\s+\.cockpit-utility-control:not\(\.is-expanded\)\s+\.cockpit-utility-launcher\s*\{\s*height: 50px;\s*min-height: 50px;\s*padding: 9px 18px 9px 24px;/,
   );
   assert.match(
     desktop,
