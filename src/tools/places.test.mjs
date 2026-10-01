@@ -37,3 +37,59 @@ test('place lookups are cached by name for a while, and failures are not', async
   aborted.abort();
   await assert.rejects(places.resolve('Tokyo', { signal: aborted.signal }));
 });
+
+test('a lookup every caller abandoned is cancelled and not reused', async () => {
+  const signals = [];
+  const places = createGeocodePlaceService({
+    fetchImpl: (url, { signal }) => {
+      signals.push(signal);
+      if (signals.length === 1)
+        return new Promise((resolve, reject) =>
+          signal.addEventListener('abort', () => reject(signal.reason)),
+        );
+      return Promise.resolve(Response.json(answer));
+    },
+  });
+  const caller = new AbortController();
+  const first = places.resolve('Tokyo', { signal: caller.signal });
+  caller.abort();
+  await assert.rejects(first);
+  assert.equal(signals[0].aborted, true);
+  const again = await places.resolve('Tokyo');
+  assert.deepEqual(again.point, { lat: 35.68, lon: 139.76 });
+  assert.equal(signals.length, 2);
+});
+
+test('a shared lookup outlives one cancelled caller, and times out on its own', async () => {
+  let release;
+  const signals = [];
+  const places = createGeocodePlaceService({
+    timeoutMs: 50,
+    fetchImpl: (url, { signal }) => {
+      signals.push(signal);
+      if (url.includes('Slow'))
+        return new Promise((resolve, reject) =>
+          signal.addEventListener('abort', () => reject(signal.reason)),
+        );
+      return new Promise((resolve) => {
+        release = () => resolve(Response.json(answer));
+      });
+    },
+  });
+  const leaving = new AbortController();
+  const gone = places.resolve('Tokyo', { signal: leaving.signal });
+  const staying = places.resolve('Tokyo', {
+    signal: new AbortController().signal,
+  });
+  leaving.abort();
+  await assert.rejects(gone);
+  assert.equal(signals[0].aborted, false);
+  release();
+  assert.deepEqual((await staying).point, { lat: 35.68, lon: 139.76 });
+  await assert.rejects(
+    places.resolve('Slow'),
+    (error) => error.name === 'TimeoutError',
+  );
+  await places.resolve('Slow').catch(() => {});
+  assert.equal(signals.length, 3, 'a timed-out lookup is not cached');
+});

@@ -22,51 +22,81 @@ export function createGeocodePlaceService({
   fetchImpl = (...args) => globalThis.fetch(...args),
   cacheSize = 200,
   cacheMs = 10 * 60_000,
+  timeoutMs = 15_000,
   now = () => Date.now(),
 } = {}) {
   // Recent answers by name, so tools that combine others resolve a place to
-  // the same point once instead of once per section.
+  // the same point once instead of once per section. A pending lookup is
+  // shared by its callers: it has its own deadline, is cancelled when every
+  // caller has given up, and only a successful answer stays cached.
   const cache = new Map();
-  async function lookup(name) {
+  async function lookup(name, signal) {
     const query = new URLSearchParams({ q: name });
-    const response = await fetchImpl(`/api/geocode?${query}`);
+    const response = await fetchImpl(`/api/geocode?${query}`, { signal });
     if (!response.ok) throw new Error(`Geocode HTTP ${response.status}`);
     const payload = await response.json();
     return placeFromGeocodeResult(payload?.results?.[0]);
+  }
+  function start(key, name) {
+    const controller = new AbortController();
+    const entry = {
+      at: now(),
+      controller,
+      waiters: 0,
+      settled: false,
+      place: lookup(
+        name,
+        AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]),
+      ),
+    };
+    entry.place.then(
+      () => {
+        entry.settled = true;
+      },
+      () => {
+        entry.settled = true;
+        if (cache.get(key) === entry) cache.delete(key);
+      },
+    );
+    cache.set(key, entry);
+    while (cache.size > cacheSize) cache.delete(cache.keys().next().value);
+    return entry;
+  }
+  function join(key, entry, signal) {
+    if (!signal) {
+      // A caller that cannot cancel keeps the lookup alive.
+      entry.waiters = Infinity;
+      return entry.place;
+    }
+    signal.throwIfAborted();
+    entry.waiters += 1;
+    return new Promise((resolve, reject) => {
+      const leave = () => {
+        entry.waiters -= 1;
+        reject(signal.reason);
+        if (entry.waiters <= 0 && !entry.settled) {
+          entry.controller.abort(signal.reason);
+          if (cache.get(key) === entry) cache.delete(key);
+        }
+      };
+      signal.addEventListener('abort', leave, { once: true });
+      entry.place
+        .then(resolve, reject)
+        .finally(() => signal.removeEventListener('abort', leave));
+    });
   }
   return {
     async resolve(name, { signal } = {}) {
       signal?.throwIfAborted();
       const key = name.trim().toLowerCase();
-      const hit = cache.get(key);
-      if (hit && now() - hit.at < cacheMs) {
+      let entry = cache.get(key);
+      if (entry && now() - entry.at < cacheMs) {
         cache.delete(key);
-        cache.set(key, hit);
-        return waitFor(hit.place, signal);
-      }
-      const place = lookup(name);
-      const entry = { at: now(), place };
-      cache.set(key, entry);
-      while (cache.size > cacheSize) cache.delete(cache.keys().next().value);
-      place.catch(() => {
-        if (cache.get(key) === entry) cache.delete(key);
-      });
-      return waitFor(place, signal);
+        cache.set(key, entry);
+      } else entry = start(key, name);
+      return join(key, entry, signal);
     },
   };
-}
-
-/** Settle with `promise`, or reject when `signal` aborts first. */
-function waitFor(promise, signal) {
-  if (!signal) return promise;
-  signal.throwIfAborted();
-  return new Promise((resolve, reject) => {
-    const abort = () => reject(signal.reason);
-    signal.addEventListener('abort', abort, { once: true });
-    promise
-      .then(resolve, reject)
-      .finally(() => signal.removeEventListener('abort', abort));
-  });
 }
 
 /** Convert one geocode result to a place with bounds, or null. */
