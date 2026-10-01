@@ -742,3 +742,41 @@ test('stale weather and partial fire data reach answers and the HUD caption', as
     ],
   );
 });
+
+test('installation names wait for the name pack, briefly', async (t) => {
+  const site = (name) => ({
+    id: 'osm:9',
+    kind: 'installation',
+    name,
+    latitude: 30.31,
+    longitude: -97.76,
+  });
+  const source = (enrichment) => ({
+    getMappedSites: async () => ({
+      source: 'OpenStreetMap tiles',
+      records: [site('Military area')],
+      enrichment,
+    }),
+  });
+  const area = { lat: 30.31, lon: -97.76, radius_km: 5 };
+  const named = await catalogWith({
+    installations: source(
+      Promise.resolve({
+        source: 'OpenStreetMap tiles',
+        records: [site('Camp Mabry')],
+      }),
+    ),
+  }).call('find_military_installations', { area });
+  assert.equal(named.data.rows[0].name, 'Camp Mabry');
+  assert.equal(named.data.names_pending, false);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pending = catalogWith({
+    installations: source(new Promise(() => {})),
+  }).call('find_military_installations', { area });
+  await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(5000);
+  const slow = await pending;
+  assert.equal(slow.data.rows[0].name, 'Military area');
+  assert.equal(slow.data.names_pending, true);
+  assert.match(slow.summary, /site names are still loading\)\.$/);
+});

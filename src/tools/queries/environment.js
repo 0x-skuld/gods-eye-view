@@ -340,6 +340,33 @@ export const getTerrainHeight = defineTool({
   },
 });
 
+const NAMES_WAIT_MS = 5000;
+
+/**
+ * The value `promise` resolves to within `ms`, or null when it takes longer
+ * or fails. Rejects only when `signal` aborts.
+ */
+function settleWithin(promise, ms, signal) {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const done = (value) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      resolve(value);
+    };
+    const abort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => done(null), ms);
+    signal?.addEventListener('abort', abort, { once: true });
+    Promise.resolve(promise).then(
+      (value) => done(value ?? null),
+      () => done(null),
+    );
+  });
+}
+
 export const findMilitaryInstallations = defineTool({
   name: 'find_military_installations',
   title: 'Military installations',
@@ -365,11 +392,23 @@ export const findMilitaryInstallations = defineTool({
         `The area must be at most ${MAX_SITE_BOX_DEGREES}° on each side and not cross the antimeridian`,
       );
     const center = areaCenter(area);
-    const result = await services.installations.getMappedSites(area, {
+    let result = await services.installations.getMappedSites(area, {
       exact: true,
       thinned: false,
       signal,
     });
+    // Tile results can arrive before the name pack; wait briefly for the
+    // named version rather than answer with generic names.
+    let namesPending = false;
+    if (result.enrichment) {
+      const named = await settleWithin(
+        result.enrichment,
+        NAMES_WAIT_MS,
+        signal,
+      );
+      if (named) result = named;
+      else namesPending = true;
+    }
     // A saturated source returned only part of the mapped sites.
     const complete = !result.saturated;
     const rows = (result.records || [])
@@ -388,13 +427,18 @@ export const findMilitaryInstallations = defineTool({
         distance_km: round(distanceKm(center, point), 1),
       }))
       .sort((a, b) => a.distance_km - b.distance_km);
+    const notes = [
+      ...(complete ? [] : ['partial: the source returned only some sites']),
+      ...(namesPending ? ['site names are still loading'] : []),
+    ];
     return {
       summary:
         `${countNoun(rows.length, 'mapped military installation')} in ${area.label}` +
-        (complete ? '.' : ' (partial: the source returned only some sites).'),
+        (notes.length ? ` (${notes.join('; ')}).` : '.'),
       data: {
         ...capRows(rows, args.limit),
         complete,
+        names_pending: namesPending,
         source: result.source ?? null,
       },
     };
