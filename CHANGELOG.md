@@ -1,6 +1,8 @@
 # Changelog
 
-- Add tools for language-model clients and a local MCP server. `npm run mcp`
+- Add tools for language-model clients and a local MCP server, served over
+  stdio by `npm run mcp` and over HTTP at `/mcp` on the development and preview
+  servers for local requests only. `npm run mcp`
   serves earthquake, active-fire, launch, aircraft, ship, satellite, camera, radio,
   place, routing, bike-share, transit, traffic, weather, cyclone, fire-perimeter,
   terrain, installation and map-feature queries, plus a situation brief, over

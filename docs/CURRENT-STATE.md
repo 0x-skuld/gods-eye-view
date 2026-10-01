@@ -6,6 +6,8 @@
 and `gods-eye-view/tools/mcp` exposes a composed catalog over the Model Context
 Protocol. `npm run mcp` serves Core's tools over stdio to a local MCP client,
 reading from a running app's `/api` routes (default `http://localhost:4173`).
+The development and preview servers also serve the tools over HTTP at `/mcp`,
+accepting only local requests with loopback hosts and origins.
 Queries cover earthquakes, active fires, recent launches, aircraft (in an
 area, by identifier, tracks, and type and route lookups), ships (in an area,
 by identifier, and tracks), satellites (next

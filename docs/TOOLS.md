@@ -11,7 +11,7 @@ They are defined once and exposed through adapters; the Model Context Protocol
 | `src/tools/`         | Tool definitions, catalog composition, argument validation, shared `area` and result helpers      |
 | `src/tools/queries/` | Queries, one file per domain, reading only portable source contracts                              |
 | `src/tools/mcp/`     | MCP protocol (JSON-RPC) and a stateless HTTP transport; knows the catalog interface, not queries |
-| `server/mcp/`        | Node composition: points the sources at a running app's `/api` routes and serves stdio           |
+| `server/mcp/`        | Node composition: points the sources at a running app's `/api` routes; serves stdio and `/mcp`  |
 
 Dependencies point downward only. `gods-eye-view/tools` and
 `gods-eye-view/tools/mcp` are portable exports: they reach no application,
@@ -84,7 +84,18 @@ server with an MCP client, for example Claude Code:
 claude mcp add gods-eye-view -- npm --prefix /path/to/gods-eye-view run --silent mcp
 ```
 
-`npm run mcp -- --api-base http://localhost:4173` selects another server. The
+`npm run mcp -- --api-base http://localhost:4173` selects another server.
+
+The development and preview servers also serve the same tools over HTTP at
+`/mcp`, for clients that connect by URL:
+
+```bash
+claude mcp add --transport http gods-eye-view http://localhost:4173/mcp
+```
+
+The route accepts only requests from this machine that name a loopback host
+and, when a browser sends an `Origin`, come from a loopback origin. This is
+local transport safety, not authentication. The
 local server makes no requests other than to the app's `/api` routes and the
 public feeds the sources already use.
 
