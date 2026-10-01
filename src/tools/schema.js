@@ -44,6 +44,12 @@ export function assertSupportedSchema(schema, path = 'schema') {
   if (!TYPES.has(schema.type))
     throw new TypeError(`${path} has unsupported type ${schema.type}`);
   if (schema.pattern !== undefined) new RegExp(schema.pattern, 'u');
+  // Only the boolean form is checked; a schema here would go unenforced.
+  if (
+    schema.additionalProperties !== undefined &&
+    typeof schema.additionalProperties !== 'boolean'
+  )
+    throw new TypeError(`${path}.additionalProperties must be true or false`);
   for (const [name, child] of Object.entries(schema.properties || {}))
     assertSupportedSchema(child, `${path}.${name}`);
   if (schema.items) assertSupportedSchema(schema.items, `${path}[]`);
@@ -63,11 +69,14 @@ export function validateValue(schema, value, path = 'arguments') {
         break;
       }
       for (const name of schema.required || []) {
-        if (value[name] === undefined) fail(`is missing ${name}`);
+        if (!Object.hasOwn(value, name) || value[name] === undefined)
+          fail(`is missing ${name}`);
       }
+      // Own properties only, so names such as constructor or __proto__ are
+      // not mistaken for declared ones.
       const properties = schema.properties || {};
       for (const [name, child] of Object.entries(value)) {
-        if (properties[name])
+        if (Object.hasOwn(properties, name))
           problems.push(
             ...validateValue(properties[name], child, `${path}.${name}`),
           );

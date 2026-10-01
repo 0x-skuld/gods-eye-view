@@ -203,3 +203,32 @@ test('the validator checks every supported keyword', () => {
     'arguments.n must be a number',
   ]);
 });
+
+test('inherited names are not declared properties, and schema-valued additionalProperties is refused', () => {
+  const schema = {
+    type: 'object',
+    properties: { name: { type: 'string' } },
+    additionalProperties: false,
+  };
+  for (const name of ['constructor', 'toString', '__proto__'])
+    assert.deepEqual(validateValue(schema, JSON.parse(`{"${name}": 1}`)), [
+      `arguments has unknown property ${name}`,
+    ]);
+  assert.deepEqual(validateValue({ ...schema, required: ['toString'] }, {}), [
+    'arguments is missing toString',
+  ]);
+  assert.throws(
+    () =>
+      defineTool({
+        name: 'loose',
+        title: 'Loose',
+        description: 'Promises checks it cannot make.',
+        inputSchema: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+        },
+        run: async () => ({ summary: '', data: {} }),
+      }),
+    /additionalProperties must be true or false/,
+  );
+});
