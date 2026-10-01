@@ -3116,7 +3116,8 @@
       "src/layers/wind/fields.js",
       "src/tools/queries/imagery.js",
       "src/tools/queries/cables.js",
-      "src/tools/queries/surveillance.js"
+      "src/tools/queries/surveillance.js",
+      "src/tools/queries/infrastructure.js"
     ],
     "external": ["satellite.js"]
   },
@@ -3191,7 +3192,8 @@
       "src/layers/alpr/source.js",
       "src/layers/alpr/policy.js",
       "src/layers/alpr/records.js",
-      "src/layers/alpr/tileRecords.js"
+      "src/layers/alpr/tileRecords.js",
+      "src/sources/infrastructureData.js"
     ],
     "external": ["@mapbox/vector-tile", "pbf"]
   }

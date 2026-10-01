@@ -101,3 +101,63 @@ export function mapAnalystRecord(raw, layerId = '') {
     output,
   };
 }
+
+/** A representative point for a feature: its point, or its outline's average vertex. */
+export function featurePoint(feature) {
+  const geometry = feature?.geometry;
+  const outline =
+    geometry?.type === 'Point'
+      ? [geometry.coordinates]
+      : geometry?.type === 'LineString'
+        ? geometry.coordinates
+        : geometry?.type === 'Polygon'
+          ? geometry.coordinates?.[0]
+          : geometry?.type === 'MultiPolygon'
+            ? geometry.coordinates?.[0]?.[0]
+            : null;
+  const points = (outline || []).filter(
+    (point) => Number.isFinite(point?.[0]) && Number.isFinite(point?.[1]),
+  );
+  if (!points.length) return null;
+  return {
+    lon: points.reduce((sum, point) => sum + point[0], 0) / points.length,
+    lat: points.reduce((sum, point) => sum + point[1], 0) / points.length,
+  };
+}
+
+/** Read the bundled layers' analyst records through a supplied transport. */
+export function createInfrastructureSource({
+  fetchImpl = (...args) => globalThis.fetch(...args),
+} = {}) {
+  const cache = new Map();
+  return {
+    async getRecords(layerId, { signal } = {}) {
+      const url = INFRASTRUCTURE_DATA_URLS[layerId];
+      if (!url) throw new TypeError(`Unknown infrastructure layer: ${layerId}`);
+      if (!cache.has(layerId)) {
+        signal?.throwIfAborted();
+        const response = await fetchImpl(url, { signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const records = parseGeojsonLines(await response.text()).flatMap(
+          (feature) => {
+            const point = featurePoint(feature);
+            return point
+              ? [
+                  mapAnalystRecord(
+                    {
+                      id: feature.properties?.osm_id ?? feature.id,
+                      ...point,
+                      properties: feature.properties,
+                    },
+                    layerId,
+                  ),
+                ]
+              : [];
+          },
+        );
+        cache.set(layerId, records);
+      }
+      return cache.get(layerId);
+    },
+  };
+}

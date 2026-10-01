@@ -26,6 +26,7 @@ import { createTransitSource } from '../layers/transit/source.js';
 import { createWeatherSource } from '../layers/weather/source.js';
 import { createWindSource } from '../layers/wind/source.js';
 import { createApplicationRequestServices } from '../services/requests.js';
+import { createInfrastructureSource } from '../sources/infrastructureData.js';
 import {
   createAdsbLolSource,
   createAisStreamSource,
@@ -70,6 +71,7 @@ export function createToolServices({ fetchImpl, appUrl }) {
     imagery: createImageryService({ fetchImpl }),
     cables: createBundledCableSource({ fetchImpl }),
     alpr: createAlprTileSource({ tileFetchImpl: fetchImpl }),
+    infrastructure: createInfrastructureSource({ fetchImpl }),
     regional: requests.regional,
     terrain: requests.terrain,
     summary: requests.summary,
