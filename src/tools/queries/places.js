@@ -12,6 +12,12 @@ import {
 } from '../area.js';
 import { LIMIT_SCHEMA, capRows, countNoun, thinEvenly } from '../results.js';
 
+// Most results the app's place search endpoints return, and the widest
+// radius a text search covers.
+const SEARCH_RESULTS = 5;
+const NEARBY_RESULTS = 20;
+const MAX_SEARCH_RADIUS_M = 50_000;
+
 const MODES = { walk: 'foot', drive: 'car', bike: 'bike' };
 const MAX_ROUTE_POINTS = 100;
 const NOT_CONFIGURED =
@@ -52,8 +58,9 @@ export const searchPlaces = defineTool({
   async run(args, { services, signal }) {
     const area = await resolveArea(args.area, { services, signal });
     const center = areaCenter(area);
+    const wantedM = areaRadiusKm(area) * 1000;
     const radiusM = Math.round(
-      Math.min(50000, Math.max(500, areaRadiusKm(area) * 1000)),
+      Math.min(MAX_SEARCH_RADIUS_M, Math.max(500, wantedM)),
     );
     const result = await services.placeSearch.search(
       args.query,
@@ -66,9 +73,27 @@ export const searchPlaces = defineTool({
         areaContains(area, { lat: place.latitude, lon: place.longitude }),
       )
       .map(placeRow);
+    // The search returns a few matches within a capped radius; say so when
+    // either limit may have left places out.
+    const limited = result.places.length >= SEARCH_RESULTS;
+    const narrowed = wantedM > MAX_SEARCH_RADIUS_M;
+    const notes = [
+      ...(limited
+        ? [`the search returns at most ${SEARCH_RESULTS} matches`]
+        : []),
+      ...(narrowed
+        ? [`searched within ${MAX_SEARCH_RADIUS_M / 1000} km of the center`]
+        : []),
+    ];
     return {
-      summary: `${countNoun(rows.length, 'place')} matching "${args.query}" in ${area.label}.`,
-      data: capRows(rows, args.limit),
+      summary:
+        `${countNoun(rows.length, 'place')} matching "${args.query}" in ${area.label}` +
+        (notes.length ? ` (${notes.join('; ')}).` : '.'),
+      data: {
+        ...capRows(rows, args.limit),
+        may_have_more: limited || narrowed,
+        searched_radius_km: radiusM / 1000,
+      },
     };
   },
 });
@@ -99,9 +124,14 @@ export const placesNearby = defineTool({
     );
     if (!result.configured) throw new ToolError('unavailable', NOT_CONFIGURED);
     const rows = result.places.map(placeRow);
+    const limited = result.places.length >= NEARBY_RESULTS;
     return {
-      summary: `${countNoun(rows.length, 'place')} within ${radiusM} m of ${point.label}.`,
-      data: capRows(rows, args.limit),
+      summary:
+        `${countNoun(rows.length, 'place')} within ${radiusM} m of ${point.label}` +
+        (limited
+          ? ` (nearby search returns at most ${NEARBY_RESULTS} places).`
+          : '.'),
+      data: { ...capRows(rows, args.limit), may_have_more: limited },
     };
   },
 });

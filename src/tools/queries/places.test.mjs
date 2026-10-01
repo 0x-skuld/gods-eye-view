@@ -248,3 +248,29 @@ test('the place and route services read the app routes and translate failures', 
     (error) => error.code === 'retry_later' && error.retryAfterSeconds === 5,
   );
 });
+
+test('place answers say when the search limits may have left places out', async () => {
+  const five = Array.from({ length: 5 }, (_, index) =>
+    place(`p${index}`, 30.27, -97.74),
+  );
+  const catalog = composeCatalog({
+    tools: coreTools,
+    services: {
+      placeSearch: placeSearch({ configured: true, places: five }),
+      places,
+    },
+  });
+  const capped = await catalog.call('search_places', {
+    query: 'coffee',
+    area: { place: 'Austin' },
+    limit: 100,
+  });
+  assert.equal(capped.data.may_have_more, true);
+  assert.match(capped.summary, /the search returns at most 5 matches\)\.$/);
+  const wide = await catalog.call('search_places', {
+    query: 'coffee',
+    area: { lat: 30.27, lon: -97.74, radius_km: 200 },
+  });
+  assert.equal(wide.data.searched_radius_km, 50);
+  assert.match(wide.summary, /searched within 50 km of the center/);
+});

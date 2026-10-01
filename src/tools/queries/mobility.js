@@ -24,17 +24,31 @@ const MAX_SYSTEMS = 3;
 const round = (value, digits) =>
   Number.isFinite(value) ? Number(value.toFixed(digits)) : null;
 
-/** Systems or feeds whose coverage reaches the area, nearest first. */
+/**
+ * Systems or feeds whose coverage reaches the area, nearest first: the
+ * nearest MAX_SYSTEMS are read and the rest are returned as `skipped`.
+ */
 function covering(area, entries, centerOf, radiusOf) {
   const center = areaCenter(area);
   const reach = areaRadiusKm(area);
-  return entries
+  const reaching = entries
     .map((entry) => ({ entry, distance: distanceKm(center, centerOf(entry)) }))
     .filter(({ entry, distance }) => distance <= reach + radiusOf(entry))
     .sort((a, b) => a.distance - b.distance)
-    .slice(0, MAX_SYSTEMS)
     .map(({ entry }) => entry);
+  return {
+    selected: reaching.slice(0, MAX_SYSTEMS),
+    skipped: reaching.slice(MAX_SYSTEMS),
+  };
 }
+
+/** A note naming systems left out of an answer, or an empty list. */
+const skippedNote = (skipped, nameOf) =>
+  skipped.length
+    ? [
+        `${skipped.length} more not searched: ${skipped.map(nameOf).join(', ')}; use a smaller area`,
+      ]
+    : [];
 
 export const getBikeShare = defineTool({
   name: 'get_bike_share',
@@ -52,7 +66,7 @@ export const getBikeShare = defineTool({
   async run(args, { services, signal }) {
     const area = await resolveArea(args.area, { services, signal });
     const { bikeshare } = services;
-    const systems = covering(
+    const { selected: systems, skipped } = covering(
       area,
       bikeshare.systems,
       (system) => ({ lat: system.centerLat, lon: system.centerLon }),
@@ -110,14 +124,19 @@ export const getBikeShare = defineTool({
     const failed = results.filter(
       (result) => result.status === 'rejected',
     ).length;
+    const notes = [
+      ...(failed ? [`${countNoun(failed, 'system')} unavailable`] : []),
+      ...skippedNote(skipped, (system) => system.city),
+    ];
     return {
       summary:
         `${countNoun(rows.length, 'bike-share station')} in ${area.label} with ` +
         `${countNoun(bikes, 'bike')} available` +
-        (failed ? ` (${countNoun(failed, 'system')} unavailable).` : '.'),
+        (notes.length ? ` (${notes.join('; ')}).` : '.'),
       data: {
         ...capRows(rows, args.limit),
         systems: systems.map((system) => system.city),
+        systems_not_searched: skipped.map((system) => system.city),
         bikes_available: bikes,
       },
     };
@@ -149,7 +168,7 @@ export const getTransitVehicles = defineTool({
   requires: ['transit'],
   async run(args, { services, signal }) {
     const area = await resolveArea(args.area, { services, signal });
-    const feeds = covering(
+    const { selected: feeds, skipped } = covering(
       area,
       await services.transit.getFeeds({ signal }),
       (feed) => feed.center,
@@ -248,6 +267,7 @@ export const getTransitVehicles = defineTool({
             `${countNoun(staleFeeds, 'feed')} stale; positions may be out of date`,
           ]
         : []),
+      ...skippedNote(skipped, (feed) => feed.name),
     ];
     const what = args.route ? ` on route ${args.route}` : '';
     return {
@@ -258,6 +278,7 @@ export const getTransitVehicles = defineTool({
         ...capRows(rows, args.limit),
         stale: staleFeeds > 0,
         expired_positions_dropped: expired,
+        feeds_not_searched: skipped.map((feed) => feed.name),
         feeds: feeds.map((feed, index) => ({
           name: feed.name,
           status:

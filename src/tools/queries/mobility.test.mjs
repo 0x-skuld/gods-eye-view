@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { composeCatalog, coreTools } from '../index.js';
+import { GBFS_CITY_REGISTRY } from '../../layers/bikeshare/registry.js';
 
 const system = (id, city, centerLat, centerLon) => ({
   id,
@@ -402,5 +403,28 @@ test('transit marks stale feeds and drops expired positions', async () => {
   assert.equal(
     result.summary,
     '1 transit vehicle in 2 km around 30.267, -97.743 (1 feed stale; positions may be out of date).',
+  );
+});
+
+test('bike share names the systems it did not search', async () => {
+  const empty = { data: { stations: [] } };
+  const catalog = composeCatalog({
+    tools: coreTools,
+    services: {
+      bikeshare: {
+        systems: GBFS_CITY_REGISTRY,
+        getStations: async () => empty,
+      },
+    },
+  });
+  // New York, Philadelphia, Washington and Boston.
+  const result = await catalog.call('get_bike_share', {
+    area: { bbox: [-77.5, 38.5, -70.5, 42.8] },
+  });
+  assert.equal(result.data.systems.length, 3);
+  assert.ok(result.data.systems_not_searched.length >= 1);
+  assert.match(
+    result.summary,
+    /more not searched: .*; use a smaller area\)\.$/,
   );
 });
