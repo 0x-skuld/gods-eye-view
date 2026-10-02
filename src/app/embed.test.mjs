@@ -152,6 +152,41 @@ test('an embedded page takes views only from its parent and answers it', async (
   remove();
 });
 
+test('an app loaded inline into a panel page talks through its own window', async () => {
+  const posted = [];
+  const windowRef = new EventTarget();
+  windowRef.parent = windowRef;
+  windowRef.postMessage = (message) => posted.push(message);
+  windowRef.document = { body: { classList: new Set() } };
+  windowRef.document.body.classList.add = Set.prototype.add;
+  globalThis.GEV_EMBED_INLINE = true;
+  try {
+    assert.equal(isEmbedded({ search: '' }), true);
+    const remove = installViews({
+      shell: { initialRestorePromise: Promise.resolve() },
+      viewer: fakeViewer(),
+      dataManager: fakeLayers(new Set()),
+      run: recorder().run,
+      location: { search: '', hash: '' },
+      windowRef,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(posted, [{ type: 'gev:ready' }]);
+    const event = new Event('message');
+    Object.assign(event, {
+      source: windowRef,
+      data: { type: 'gev:view', id: 7, view: { camera: { lat: 1, lon: 2 } } },
+    });
+    windowRef.dispatchEvent(event);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(posted[1].id, 7);
+    assert.equal(posted[1].ok, true);
+    remove();
+  } finally {
+    delete globalThis.GEV_EMBED_INLINE;
+  }
+});
+
 test('annotations in a link are drawn after it restores, embedded or not', async () => {
   const { calls, run } = recorder();
   const an = encodeURIComponent(

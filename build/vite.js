@@ -2,6 +2,12 @@ import { applicationHtmlPlugin } from './application-html.js';
 import cesium from 'vite-plugin-cesium';
 import { embedFramingPlugin } from './embed-framing.js';
 
+/** Origins allowed to read the dev and preview servers' responses. */
+export const PANEL_CORS_ORIGINS = Object.freeze([
+  /^https?:\/\/(?:(?:[^:]+\.)?localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/,
+  /^https:\/\/[a-z0-9]+\.claudemcpcontent\.com$/,
+]);
+
 /** Build browser assets with explicit inputs; never load environment or providers. */
 export function createBrowserViteConfig({
   plugins = [],
@@ -44,6 +50,10 @@ export function createBrowserViteConfig({
       fs: {
         deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/ENVIRONMENT'],
       },
+      // Cross-origin reads: local pages, as Vite allows by default, plus the
+      // MCP Apps panels that load the app into a conversation (Claude's
+      // sandbox origins). Development and preview only.
+      cors: { origin: PANEL_CORS_ORIGINS },
       // These headers protect the document containing Provider Settings.
       // Embed-mode documents are framable instead; see embed-framing.js.
       headers: {

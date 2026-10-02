@@ -28,9 +28,21 @@ const FOLLOW_ATTEMPTS = 20;
 const FOLLOW_RETRY_MS = 1000;
 const FLIGHT_SECONDS = 2;
 
-/** Whether this page was opened in embed mode. */
+/**
+ * Whether this page shows the app embedded: `?embed=1` when another page
+ * frames it, or inline when a panel page loads the app into itself and sets
+ * `globalThis.GEV_EMBED_INLINE` first.
+ */
 export function isEmbedded(location = globalThis.location) {
-  return new URLSearchParams(location?.search || '').get('embed') === '1';
+  return (
+    isEmbeddedInline() ||
+    new URLSearchParams(location?.search || '').get('embed') === '1'
+  );
+}
+
+/** Whether a panel page loaded the app into itself. */
+export function isEmbeddedInline() {
+  return globalThis.GEV_EMBED_INLINE === true;
 }
 
 const delay = (ms, signal) =>
@@ -157,14 +169,17 @@ export function installViews({
 
   windowRef.document.body.classList.add('ui-embed');
   shell.setCleanView?.(true);
-  const parent = windowRef.parent;
+  // A framing page talks to the app across frames; an inline panel shares
+  // the page with it and talks through the page's own window.
+  const peer = isEmbeddedInline() ? windowRef : windowRef.parent;
   const post = (message) => {
-    if (parent && parent !== windowRef) parent.postMessage(message, '*');
+    if (peer && (peer !== windowRef || isEmbeddedInline()))
+      peer.postMessage(message, '*');
   };
   // Views apply one at a time, in the order they arrive.
   let queue = ready;
   const onMessage = (event) => {
-    if (event.source !== parent || event.data?.type !== EMBED_VIEW_MESSAGE)
+    if (event.source !== peer || event.data?.type !== EMBED_VIEW_MESSAGE)
       return;
     const { id = null } = event.data;
     let view;

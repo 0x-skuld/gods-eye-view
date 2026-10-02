@@ -212,7 +212,8 @@ export function shouldShowFirstRun({
   const params = new URLSearchParams(location?.search || '');
   if (params.get('welcome') === '0') return false;
   // An embedded globe never shows the welcome launcher.
-  if (params.get('embed') === '1') return false;
+  if (params.get('embed') === '1' || globalThis.GEV_EMBED_INLINE === true)
+    return false;
   // The demo/support escape hatch outranks both suppressions on purpose.
   if (params.get('welcome') === '1') return true;
   if (readStored('local', storage, FIRST_RUN_STORAGE_KEY) === 'suppressed')
