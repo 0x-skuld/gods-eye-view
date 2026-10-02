@@ -149,7 +149,12 @@ function panelHtml(appOrigin) {
       Object.defineProperty(type.prototype, attribute, {
         ...property,
         set(value) {
-          property.set.call(this, toApp(value));
+          const target = toApp(value);
+          // The app treated the address as its own site; now that it is
+          // another site, images must load with CORS or WebGL refuses them.
+          if (target !== value && 'crossOrigin' in this && this.crossOrigin === null)
+            this.crossOrigin = 'anonymous';
+          property.set.call(this, target);
         },
       });
     }
@@ -184,8 +189,10 @@ function panelHtml(appOrigin) {
           if (node.nodeType !== 1) continue;
           for (const element of [node, ...node.querySelectorAll('[src]')]) {
             const value = element.getAttribute('src');
-            if (value && toApp(value) !== value)
-              element.setAttribute('src', toApp(value));
+            if (!value || toApp(value) === value) continue;
+            if ('crossOrigin' in element && element.crossOrigin === null)
+              element.crossOrigin = 'anonymous';
+            element.setAttribute('src', toApp(value));
           }
         }
       }
