@@ -1,13 +1,24 @@
 import * as Cesium from 'cesium';
 
 /**
- * Camera height above the surface under the camera, in metres. Falls back to
- * the ellipsoidal height when the globe has no height sample yet.
+ * Camera height above the surface under the camera, in metres. The globe's
+ * terrain answers when the globe is shown; Google 3D hides the globe, so
+ * there the bare-earth height from `groundAt(lon, lat)` answers instead
+ * (without it a camera over a city 1,600 m up reads 1,600 m too high). Falls
+ * back to the ellipsoidal height when neither has a sample yet.
+ * @param {object} viewer
+ * @param {{groundAt?: (lon: number, lat: number) => number|null}} [options]
  */
-export function cameraHeightAboveGround(viewer) {
+export function cameraHeightAboveGround(viewer, { groundAt } = {}) {
   const carto = viewer?.camera?.positionCartographic;
   if (!carto) return null;
-  const ground = viewer.scene?.globe?.getHeight?.(carto);
+  const globe = viewer.scene?.globe;
+  let ground = globe?.show === false ? null : globe?.getHeight?.(carto);
+  if (!Number.isFinite(ground))
+    ground = groundAt?.(
+      Cesium.Math.toDegrees(carto.longitude),
+      Cesium.Math.toDegrees(carto.latitude),
+    );
   return carto.height - (Number.isFinite(ground) ? ground : 0);
 }
 

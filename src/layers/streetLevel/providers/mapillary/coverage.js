@@ -172,9 +172,12 @@ export function createCoverage({ state, source }) {
     const lines = entry.sequenceList
       .filter((sequence) => passesImageryFilter(sequence, filter()))
       .map((sequence) => sequence.coordinates);
-    state.context.groundCaster.prepareLines(lines, { signal }).then(() => {
+    const caster = state.context.groundCaster;
+    caster.prepareLines(lines, { signal }).then(() => {
       const attached = [...state.coverage.tiles.values()].includes(entry);
       if (signal.aborted || !attached || !terrainMode()) return;
+      // Nothing new to cast (terrain proxy down, tile too big): keep it draped.
+      if (!lines.some((coords) => caster.castLine(coords))) return;
       // Keep the draped lines until the cast ones are built, so nothing blinks.
       const previous = entry.primitives;
       entry.primitives = [];
@@ -393,7 +396,9 @@ export function createCoverage({ state, source }) {
   function refresh() {
     const viewer = state.viewer;
     if (!viewer || !state.context.isActive() || state.keyRequired) return;
-    const height = cameraHeightAboveGround(viewer);
+    const height = cameraHeightAboveGround(viewer, {
+      groundAt: state.context.groundCaster?.groundAt,
+    });
     const sequenceZoom = coverageZoomForHeight(height);
     const overviewZoom = sequenceZoom ? null : overviewZoomForHeight(height);
     const zoom = sequenceZoom ?? overviewZoom;
@@ -481,10 +486,15 @@ export function createCoverage({ state, source }) {
     notify();
   }
 
-  /** Redraw loaded tiles draped or cast after the core's surface mode changes. */
+  /**
+   * Redraw loaded tiles draped or cast after the core's surface mode changes,
+   * then re-pick the zoom: the bare-earth height under the camera that the
+   * change brings in can move it (a high city reads much closer to the street).
+   */
   function setSurface() {
     if (!state.context.isActive()) return;
     rebuild();
+    refresh();
   }
 
   /** Look a sequence up across loaded tiles. */

@@ -9,6 +9,7 @@
  */
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
+import { LAYER_STATE_REGISTRY } from '../src/data/layerState.js';
 
 /** Viewports every layout assertion runs at. */
 export const VIEWPORTS = Object.freeze([
@@ -18,6 +19,11 @@ export const VIEWPORTS = Object.freeze([
 
 /** Provider chips the panel must show, in order (one per registered provider). */
 export const EXPECTED_PROVIDERS = Object.freeze(['mapillary']);
+
+/** Street Level's share-link token, as the ledger assigned it. */
+const STREET_LEVEL_TOKEN = LAYER_STATE_REGISTRY.find(
+  (entry) => entry.id === 'street-level',
+).token;
 
 /** Expected right-rail order once the layout controller has run. */
 export const RAIL_ORDER = Object.freeze([
@@ -338,13 +344,14 @@ async function main() {
         assert.ok(after <= before, `${after} ≤ ${before}`);
         assert.equal((await ui()).filter.pano, 'pano');
         // The click is a user params request, so the share link records it
-        // (Street Level's share token is `0`).
+        // under Street Level's share token, whatever the ledger assigned.
         await page.waitForFunction(
-          () =>
-            /(^|_)0\.p\.p(_|$)/.test(
-              new URLSearchParams(location.hash.slice(1)).get('lo') || '',
-            ),
+          (option) =>
+            (new URLSearchParams(location.hash.slice(1)).get('lo') || '')
+              .split('_')
+              .includes(option),
           { timeout: 10_000 },
+          `${STREET_LEVEL_TOKEN}.p.p`,
         );
         await page.click('[data-sl-pano="all"]');
         await sleep(600);

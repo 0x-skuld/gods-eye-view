@@ -901,6 +901,7 @@
   "src/layers/streetLevel/pickRouter.test.mjs",
   "src/layers/streetLevel/uiState.test.mjs",
   "src/layers/streetLevel/groundCast.test.mjs",
+  "src/layers/streetLevel/view.test.mjs",
   "src/layers/streetLevel/providers/mapillary/provider.test.mjs",
   "src/layers/streetLevel/providers/mapillary/decode.test.mjs",
   "src/ui/panelDock.test.mjs",

@@ -125,22 +125,23 @@ export function createStreetLevelLayer({
 
   /**
    * Camera height above the bare earth under it, for the surface mode. The
-   * ground comes from the caster's coarse grid; a cold cell is fetched once
-   * and the mode checked again when it lands.
+   * ground comes from the caster's coarse grid; a cold cell near enough to
+   * matter is fetched once and the mode checked again when it lands.
    */
   function cameraHeightForSurface() {
     const carto = state.viewer?.camera?.positionCartographic;
     if (!carto) return null;
-    const fallback = cameraHeightAboveGround(state.viewer);
-    if (!(fallback < SURFACE_WARM_BELOW_M)) return fallback;
+    const caster = parts.groundCaster;
+    const height = cameraHeightAboveGround(state.viewer, {
+      groundAt: caster.groundAt,
+    });
     const lon = (carto.longitude * 180) / Math.PI;
     const lat = (carto.latitude * 180) / Math.PI;
-    const ground = parts.groundCaster.heightAt(lon, lat);
-    if (ground !== null) return carto.height - ground;
-    parts.groundCaster.prepare([[lon, lat]]).then((ready) => {
-      if (ready) scheduleSurfaceSync();
-    });
-    return fallback;
+    if (caster.groundAt(lon, lat) === null && height < SURFACE_WARM_BELOW_M)
+      caster.prepare([[lon, lat]]).then((ready) => {
+        if (ready) scheduleSurfaceSync();
+      });
+    return height;
   }
 
   /**
