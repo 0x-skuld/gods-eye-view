@@ -3,6 +3,7 @@
  * terrain height, mapped military sites and map features.
  */
 
+import { suggestView } from '../views.js';
 import { defineTool, ToolError } from '../catalog.js';
 import {
   AREA_SCHEMA,
@@ -221,6 +222,16 @@ export const getCyclones = defineTool({
           ? `; strongest ${storms[0].name} at ${storms[0].wind_kt} kt.`
           : '.'),
       data: {
+        view: suggestView(
+          services,
+          area
+            ? { area, layers: ['weather-cyclones'] }
+            : {
+                point: { lat: 20, lon: 0 },
+                altitudeM: 15_000_000,
+                layers: ['weather-cyclones'],
+              },
+        ),
         storms,
         coverage: snapshot.coverage ?? null,
         source: snapshot.source ?? null,
@@ -269,7 +280,10 @@ export const getFirePerimeters = defineTool({
       .sort((a, b) => (b.acres ?? 0) - (a.acres ?? 0));
     return {
       summary: `${countNoun(rows.length, 'mapped wildfire perimeter')} in ${area.label}.`,
-      data: capRows(rows, args.limit),
+      data: {
+        view: suggestView(services, { area, layers: ['fire-perimeters'] }),
+        ...capRows(rows, args.limit),
+      },
     };
   },
 });
@@ -436,6 +450,10 @@ export const findMilitaryInstallations = defineTool({
         `${countNoun(rows.length, 'mapped military installation')} in ${area.label}` +
         (notes.length ? ` (${notes.join('; ')}).` : '.'),
       data: {
+        view: suggestView(services, {
+          area,
+          layers: ['military-installations'],
+        }),
         ...capRows(rows, args.limit),
         complete,
         names_pending: namesPending,

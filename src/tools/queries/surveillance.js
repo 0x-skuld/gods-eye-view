@@ -1,5 +1,6 @@
 /** Automated license plate reader cameras mapped in OpenStreetMap. */
 
+import { suggestView } from '../views.js';
 import { defineTool, ToolError } from '../catalog.js';
 import {
   AREA_SCHEMA,
@@ -88,6 +89,7 @@ export const findAlprCameras = defineTool({
         `${countNoun(rows.length, 'license plate reader camera')} mapped in ${area.label}` +
         (notes.length ? ` (${notes.join('; ')}).` : '.'),
       data: {
+        view: suggestView(services, { area, layers: ['alpr-cameras'] }),
         ...capRows(rows, args.limit),
         // Some tiles failed, or a dense area was trimmed to the source limit.
         complete: !result.saturated,

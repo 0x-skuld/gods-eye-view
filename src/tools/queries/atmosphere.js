@@ -1,5 +1,6 @@
 /** Weather map imagery (radar, satellite, lightning) and wind at a point. */
 
+import { suggestView } from '../views.js';
 import { windFrom } from '../../layers/wind/inspection.js';
 import { sampleWind, windSpeed } from '../../layers/wind/model.js';
 import { defineTool, ToolError } from '../catalog.js';
@@ -19,6 +20,13 @@ const MAPS = {
   satellite: 'clouds-regional',
   global_satellite: 'clouds',
   lightning: 'lightning',
+};
+/** The app layer that shows each map. */
+const MAP_LAYERS = {
+  radar: 'weather-radar',
+  satellite: 'weather-satellite',
+  global_satellite: 'weather-satellite',
+  lightning: 'weather-lightning',
 };
 const IMAGE_SIZE = { width: 1024, height: 512 };
 const SNAP_DEGREES = 0.25;
@@ -136,6 +144,19 @@ export const getWeatherMap = defineTool({
     return {
       summary: `${snapshot.title || args.map} at ${snapshot.latest}${where}.`,
       data: {
+        view: suggestView(
+          services,
+          area
+            ? { area, layers: [MAP_LAYERS[args.map]] }
+            : {
+                point: {
+                  lat: (snapshot.bounds.south + snapshot.bounds.north) / 2,
+                  lon: (snapshot.bounds.west + snapshot.bounds.east) / 2,
+                },
+                altitudeM: 8_000_000,
+                layers: [MAP_LAYERS[args.map]],
+              },
+        ),
         map: args.map,
         title: snapshot.title ?? null,
         description: snapshot.description ?? null,
@@ -188,6 +209,11 @@ export const getWind = defineTool({
         `Wind at ${point.label}: ${kph.toFixed(0)} km/h` +
         (from === 'Calm' ? ', calm.' : ` from the ${from}.`),
       data: {
+        view: suggestView(services, {
+          point,
+          altitudeM: 2_000_000,
+          layers: ['wind'],
+        }),
         location: point,
         speed_mps: round(speed, 1),
         speed_kph: round(kph, 1),

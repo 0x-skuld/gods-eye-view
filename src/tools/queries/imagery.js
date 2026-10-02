@@ -1,5 +1,6 @@
 /** The most recent satellite image of an area. */
 
+import { suggestView } from '../views.js';
 import { defineTool, ToolError } from '../catalog.js';
 import { AREA_SCHEMA, areaRadiusKm, resolveArea } from '../area.js';
 import { toBase64 } from '../results.js';
@@ -105,6 +106,7 @@ export const getRecentImagery = defineTool({
     return {
       summary: `Most recent image of ${area.label}: ${sensor}, ${candidate.day}, ${quality}${reason === 'overview' ? '' : `, ${cloud}`}.`,
       data: {
+        view: suggestView(services, { area, layers: ['recent-imagery'] }),
         area: area.label,
         image: {
           product: candidate.product,

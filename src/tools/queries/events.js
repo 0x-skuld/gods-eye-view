@@ -1,5 +1,6 @@
 /** The bundled Bhote Koshi 2026 outburst flood event pack. */
 
+import { suggestView } from '../views.js';
 import { BHOTE_KOSHI_FLOOD_PATH } from '../../data/bhoteKoshiFloodPath.js';
 import { defineTool, ToolError } from '../catalog.js';
 import { distanceKm } from '../area.js';
@@ -25,6 +26,18 @@ function pathLengthKm(path) {
 }
 
 const pathPoint = ([lon, lat]) => ({ lat, lon });
+
+/** The box around a `[lon, lat]` path, as an area to frame. */
+function pathArea(path) {
+  const lons = path.map(([lon]) => lon);
+  const lats = path.map(([, lat]) => lat);
+  return {
+    west: Math.min(...lons),
+    south: Math.min(...lats),
+    east: Math.max(...lons),
+    north: Math.max(...lats),
+  };
+}
 
 function evidenceRow(record) {
   return {
@@ -88,6 +101,10 @@ export const getBhoteKoshiFlood = defineTool({
         (args.phase ? ` in the ${args.phase} phase` : '') +
         ` along a ${lengthKm} km mapped flood path.`,
       data: {
+        view: suggestView(services, {
+          area: pathArea(BHOTE_KOSHI_FLOOD_PATH),
+          layers: ['bhote-koshi-2026'],
+        }),
         id: event.id,
         title: event.title,
         observed_date: event.observedDate,

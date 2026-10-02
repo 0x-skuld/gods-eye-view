@@ -1,5 +1,6 @@
 /** Space queries: launches, satellite passes and satellites overhead. */
 
+import { suggestView } from '../views.js';
 import { twoline2satrec } from 'satellite.js';
 import {
   findNextSatellitePass,
@@ -57,7 +58,15 @@ export const getRecentLaunches = defineTool({
       summary:
         `${countNoun(rows.length, 'launch', 'launches')} in the last 30 days${rows[0] ? `; latest ${rows[0].name}` : ''}` +
         (stale ? ' (data may be stale).' : '.'),
-      data: { ...result, stale },
+      data: {
+        view: suggestView(services, {
+          point: { lat: 20, lon: 0 },
+          altitudeM: 15_000_000,
+          layers: ['rocket-launches'],
+        }),
+        ...result,
+        stale,
+      },
     };
   },
 });
@@ -102,6 +111,17 @@ const compass = (degrees) =>
 const round = (value, digits) =>
   Number.isFinite(value) ? Number(value.toFixed(digits)) : null;
 const nowMs = (services) => services.clock?.now() ?? Date.now();
+
+/** A view following a satellite from above an observer. */
+function followSatellite(services, point, satellite) {
+  return satellite.norad
+    ? suggestView(services, {
+        point,
+        altitudeM: 3_000_000,
+        follow: { kind: 'satellite', id: String(satellite.norad) },
+      })
+    : null;
+}
 
 async function readCatalog(services, group, signal) {
   const result = await services.satellites.readGroup(group, { signal });
@@ -197,6 +217,7 @@ export const nextSatellitePass = defineTool({
       return {
         summary: `${name} has no ${args.visible_only ? 'visible ' : ''}pass over ${point.label} in the next ${hours} hours${staleNote}.`,
         data: {
+          view: followSatellite(services, point, satellite),
           stale,
           location: point,
           satellite: name,
@@ -210,6 +231,7 @@ export const nextSatellitePass = defineTool({
         `peaking at ${Math.round(pass.maxElevDeg)}°` +
         `${pass.visible ? '; visible to the naked eye' : ''}${staleNote}.`,
       data: {
+        view: followSatellite(services, point, satellite),
         stale,
         location: point,
         satellite: name,
@@ -273,6 +295,11 @@ export const satellitesOverhead = defineTool({
         `${countNoun(rows.length, 'satellite')} from the ${group} group ${rows.length === 1 ? 'is' : 'are'} at least ${minimum}° above ${point.label} at ${isoTime(at)}` +
         (stale ? ' (orbit data may be stale).' : '.'),
       data: {
+        view: suggestView(services, {
+          point,
+          altitudeM: 3_000_000,
+          layers: ['satellites'],
+        }),
         ...capRows(rows, args.limit),
         stale,
         location: point,

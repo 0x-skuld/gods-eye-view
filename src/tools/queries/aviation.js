@@ -1,5 +1,6 @@
 /** Aviation queries over the live aircraft sources (src/sources/live). */
 
+import { suggestView } from '../views.js';
 import { defineTool, ToolError } from '../catalog.js';
 import {
   AREA_SCHEMA,
@@ -129,7 +130,14 @@ export const aircraftInArea = defineTool({
       summary:
         `${rows.length} ${kind} in ${area.label}` +
         (notes.length ? ` (${notes.join('; ')}).` : '.'),
-      data: { ...capRows(rows, args.limit), ...snapshotInfo(snapshot) },
+      data: {
+        view: suggestView(services, {
+          area,
+          layers: [args.military ? 'military' : 'flights'],
+        }),
+        ...capRows(rows, args.limit),
+        ...snapshotInfo(snapshot),
+      },
     };
   },
 });
@@ -190,17 +198,25 @@ export const findAircraft = defineTool({
       .map(({ name }) => name);
     if (unavailable.length === feeds.length) throw settled[0].reason;
     const seen = new Set();
-    const rows = settled
-      .filter((result) => result.status === 'fulfilled')
-      .flatMap((result) => result.value.records)
+    const matches = settled
+      .flatMap((result, index) =>
+        result.status === 'fulfilled'
+          ? result.value.records.map((record) => ({
+              record,
+              feed: feeds[index].name,
+            }))
+          : [],
+      )
       .filter(
-        (record) =>
+        ({ record }) =>
           String(record[field] || '')
             .trim()
             .toUpperCase() === wanted,
       )
-      .filter((record) => !seen.has(record.id) && seen.add(record.id))
-      .map((record) => aircraftRow(record));
+      .filter(({ record }) => !seen.has(record.id) && seen.add(record.id));
+    const rows = matches.map(({ record }) => aircraftRow(record));
+    // One match is shown followed; several are not framed.
+    const only = matches.length === 1 ? matches[0] : null;
     // Each feed that answered, with its own freshness and coverage.
     const answered = feeds.flatMap(({ name }, index) =>
       settled[index].status === 'fulfilled'
@@ -222,6 +238,16 @@ export const findAircraft = defineTool({
           ? ` The ${stale.join(' and ')} feed data may be stale.`
           : ''),
       data: {
+        view: only
+          ? suggestView(services, {
+              point: { lat: only.record.latitude, lon: only.record.longitude },
+              follow: {
+                kind:
+                  only.feed === 'military' ? 'military_aircraft' : 'aircraft',
+                id: only.record.id,
+              },
+            })
+          : null,
         ...capRows(rows, args.limit),
         unavailable_feeds: unavailable,
         stale_feeds: stale,
@@ -264,6 +290,15 @@ export const getAircraftTrack = defineTool({
         ? `${countNoun(points.length, 'position')} for ${icao24} from ${isoTime(first.observedAtMs)} to ${isoTime(last.observedAtMs)}.`
         : `No recent track is available for ${icao24}.`,
       data: {
+        view: last
+          ? suggestView(services, {
+              point: { lat: last.latitude, lon: last.longitude },
+              follow: {
+                kind: args.military ? 'military_aircraft' : 'aircraft',
+                id: icao24,
+              },
+            })
+          : null,
         icao24,
         total: points.length,
         returned: kept.length,

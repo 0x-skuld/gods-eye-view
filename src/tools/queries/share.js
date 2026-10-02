@@ -2,12 +2,8 @@
 
 import { VIEW_PROPERTIES, createView, viewUrl } from '../../view/index.js';
 import { defineTool, ToolError } from '../catalog.js';
-import { AREA_SCHEMA, areaCenter, areaRadiusKm, resolveArea } from '../area.js';
-
-const MIN_ALTITUDE_M = 500;
-const MAX_ALTITUDE_M = 15_000_000;
-// A top-down view sees roughly this many meters of ground per meter of altitude.
-const GROUND_PER_ALTITUDE = 0.55;
+import { AREA_SCHEMA, resolveArea } from '../area.js';
+import { cameraForArea } from '../views.js';
 
 /** Tool arguments that describe a view: an area to frame, or a camera. */
 export const VIEW_ARGUMENTS = Object.freeze({
@@ -24,20 +20,8 @@ export async function resolveViewArguments(args, { services, signal }) {
   let label = null;
   if (args.area) {
     const area = await resolveArea(args.area, { services, signal });
-    const center = areaCenter(area);
     label = area.label;
-    camera = {
-      lat: center.lat,
-      lon: center.lon,
-      altitude_m: Math.min(
-        MAX_ALTITUDE_M,
-        Math.max(
-          MIN_ALTITUDE_M,
-          (areaRadiusKm(area) * 1000) / GROUND_PER_ALTITUDE,
-        ),
-      ),
-      ...camera,
-    };
+    camera = { ...cameraForArea(area), ...camera };
   }
   if (!Number.isFinite(camera.lat) || !Number.isFinite(camera.lon))
     throw new ToolError(

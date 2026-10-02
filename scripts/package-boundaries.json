@@ -3133,7 +3133,8 @@
       "src/data/feedState.js",
       "src/loadingFeedback.js",
       "src/data/installationFeedback.js",
-      "src/view/index.js"
+      "src/view/index.js",
+      "src/tools/views.js"
     ],
     "external": ["satellite.js"]
   },

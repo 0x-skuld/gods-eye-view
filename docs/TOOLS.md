@@ -52,7 +52,10 @@ as `structuredContent`, for clients that read only one of them.
 
 `src/tools/surfaces.js` lists which tools MCP and voice offer. A tool is on
 both unless `TOOL_SURFACES` turns it off; edit an entry to turn a tool on or
-off for one surface. `catalogForSurface(catalog, surface, overrides)` is the
+off for one surface. MCP leaves out place search, routing, plain
+weather and wind, the regional brief, the HUD caption, radio, bike share and
+transit, which assistants already cover or which add little without the
+globe. `catalogForSurface(catalog, surface, overrides)` is the
 view a surface exposes: it lists and calls only the tools it offers, while
 composite tools still reach the whole catalog. `toolsForSurface` gives the
 same selection as a list of definitions, such as for the voice session's tool
@@ -94,6 +97,12 @@ Tools take a view as `VIEW_ARGUMENTS`: an `area` to frame from above, or a
 `camera`, plus `layers`, `style`, `map` and `follow`; camera fields given
 with an area override its framing. `resolveViewArguments` turns them into a
 view.
+
+Answers that have something to show include `data.view`: the view that
+shows them, with the matching layers on, an area framed from above, and a
+single aircraft or satellite followed, plus `url` to open it (null when the
+app's address is not configured). `suggestView` in `src/tools/views.js`
+builds one.
 
 ## The `area` argument
 

@@ -1,5 +1,6 @@
 /** Submarine cables and their landing points. */
 
+import { suggestView } from '../views.js';
 import { defineTool, ToolError } from '../catalog.js';
 import {
   AREA_SCHEMA,
@@ -80,6 +81,16 @@ export const findSubmarineCables = defineTool({
           ? `, with ${countNoun(landingRows.length, 'landing point')}.`
           : '.'),
       data: {
+        view: suggestView(
+          services,
+          area
+            ? { area, layers: ['telegeography-submarine-cables'] }
+            : {
+                point: { lat: 20, lon: 0 },
+                altitudeM: 15_000_000,
+                layers: ['telegeography-submarine-cables'],
+              },
+        ),
         ...capRows(rows, args.limit),
         landing_points: area ? capRows(landingRows, args.limit) : null,
         attribution: ATTRIBUTION,

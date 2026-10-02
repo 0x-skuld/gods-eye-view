@@ -1,5 +1,6 @@
 /** Bundled OpenStreetMap infrastructure: datacenters and dams. */
 
+import { suggestView } from '../views.js';
 import { defineTool } from '../catalog.js';
 import {
   AREA_SCHEMA,
@@ -62,6 +63,7 @@ export const findInfrastructure = defineTool({
     return {
       summary: `${countNoun(rows.length, `mapped ${noun}`)} in ${area.label}.`,
       data: {
+        view: suggestView(services, { area, layers: [layerId] }),
         ...capRows(rows, args.limit),
         attribution: ATTRIBUTION[args.kind],
       },

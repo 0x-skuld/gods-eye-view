@@ -1,5 +1,6 @@
 /** Bike-share and public transit queries. */
 
+import { suggestView } from '../views.js';
 import {
   parseStationInformation,
   parseStationStatus,
@@ -134,6 +135,7 @@ export const getBikeShare = defineTool({
         `${countNoun(bikes, 'bike')} available` +
         (notes.length ? ` (${notes.join('; ')}).` : '.'),
       data: {
+        view: suggestView(services, { area, layers: ['bikeshare'] }),
         ...capRows(rows, args.limit),
         systems: systems.map((system) => system.city),
         systems_not_searched: skipped.map((system) => system.city),
@@ -275,6 +277,7 @@ export const getTransitVehicles = defineTool({
         `${countNoun(rows.length, 'transit vehicle')}${what} in ${area.label}` +
         (notes.length ? ` (${notes.join('; ')}).` : '.'),
       data: {
+        view: suggestView(services, { area, layers: ['transit'] }),
         ...capRows(rows, args.limit),
         stale: staleFeeds > 0,
         expired_positions_dropped: expired,
@@ -472,6 +475,7 @@ export const getTrafficFlow = defineTool({
           ? ' Some map tiles did not load, so these figures are partial.'
           : ''),
       data: {
+        view: suggestView(services, { area, layers: ['traffic'] }),
         area: area.label,
         partial: flow.partial,
         speed_pct_of_free_flow: speedPct,

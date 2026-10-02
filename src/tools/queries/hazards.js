@@ -1,5 +1,6 @@
 /** Natural hazard queries: earthquakes and active fires. */
 
+import { suggestView } from '../views.js';
 import { defineTool, ToolError } from '../catalog.js';
 import { AREA_SCHEMA, areaContains, resolveArea } from '../area.js';
 import { LIMIT_SCHEMA, capRows, countNoun, isoTime } from '../results.js';
@@ -38,6 +39,16 @@ export const getEarthquakes = defineTool({
     return {
       summary: `${countNoun(events.length, 'earthquake')} of M${minimum}+ in the last 24 hours${where}${strongest}.`,
       data: {
+        view: suggestView(
+          services,
+          area
+            ? { area, layers: ['earthquakes'] }
+            : {
+                point: { lat: 20, lon: 0 },
+                altitudeM: 15_000_000,
+                layers: ['earthquakes'],
+              },
+        ),
         ...result,
         rows: result.rows.map((event) => ({
           id: event.usgsId ?? event.stableId,
@@ -93,6 +104,7 @@ export const getActiveFires = defineTool({
         `${countNoun(fires.length, 'fire detection')} in ${area.label} in the last 24 hours` +
         (notes.length ? ` (${notes.join('; ')}).` : '.'),
       data: {
+        view: suggestView(services, { area, layers: ['local-firms'] }),
         stale,
         missing_sources: missing,
         fetched_at: isoTime(snapshot.fetchedAt),

@@ -1,5 +1,6 @@
 /** Composite queries that combine other tools' answers for one area. */
 
+import { suggestView } from '../views.js';
 import { feedProvenanceEnvelope } from '../../data/layerSnapshot.js';
 import { defineTool, ToolError } from '../catalog.js';
 import {
@@ -28,30 +29,35 @@ const SECTIONS = [
   },
   {
     key: 'earthquakes',
+    layer: 'earthquakes',
     label: 'Earthquakes',
     tool: 'get_earthquakes',
     args: (area) => ({ area: area.argument, limit: SECTION_LIMIT }),
   },
   {
     key: 'fires',
+    layer: 'local-firms',
     label: 'Active fires',
     tool: 'get_active_fires',
     args: (area) => ({ area: area.argument, limit: SECTION_LIMIT }),
   },
   {
     key: 'aircraft',
+    layer: 'flights',
     label: 'Aircraft',
     tool: 'aircraft_in_area',
     args: (area) => ({ area: area.argument, limit: SECTION_LIMIT }),
   },
   {
     key: 'vessels',
+    layer: 'ais-live-vessels',
     label: 'Ships',
     tool: 'vessels_in_area',
     args: (area) => ({ area: area.argument, limit: SECTION_LIMIT }),
   },
   {
     key: 'cyclones',
+    layer: 'weather-cyclones',
     label: 'Tropical cyclones',
     tool: 'get_cyclones',
     args: (area) => ({ area: area.argument }),
@@ -187,7 +193,16 @@ export const situationBrief = defineTool({
     const { area, brief, lines } = await buildBrief(args, context);
     return {
       summary: `Situation in ${area.label}: ${lines.join(' ')}`,
-      data: { area: area.label, sections: brief },
+      data: {
+        view: suggestView(context.services, {
+          area,
+          layers: SECTIONS.filter(({ key }) => brief[key])
+            .map(({ layer }) => layer)
+            .filter(Boolean),
+        }),
+        area: area.label,
+        sections: brief,
+      },
     };
   },
 });
@@ -277,6 +292,10 @@ export const militaryAwareness = defineTool({
     return {
       summary: `Military awareness within ${radiusKm} km of ${point.label}: ${lines.join(' ')}`,
       data: {
+        view: suggestView(services, {
+          area,
+          layers: ['military', 'ais-live-vessels', 'military-installations'],
+        }),
         location: point,
         radius_km: radiusKm,
         sections: answers,

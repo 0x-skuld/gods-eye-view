@@ -889,5 +889,6 @@
   "src/tools/functions.test.mjs",
   "src/tools/surfaces.test.mjs",
   "src/tools/places.test.mjs",
-  "src/view/index.test.mjs"
+  "src/view/index.test.mjs",
+  "src/tools/views.test.mjs"
 ]

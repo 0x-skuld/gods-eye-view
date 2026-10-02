@@ -1,5 +1,6 @@
 /** Maritime queries over the live vessel source (src/sources/live). */
 
+import { suggestView } from '../views.js';
 import { defineTool, ToolError } from '../catalog.js';
 import {
   AREA_SCHEMA,
@@ -104,7 +105,11 @@ export const vesselsInArea = defineTool({
       summary:
         `${countNoun(rows.length, kind)} in ${area.label}` +
         (snapshot.freshness === 'stale' ? ' (data may be stale).' : '.'),
-      data: { ...capRows(rows, args.limit), ...snapshotInfo(snapshot) },
+      data: {
+        view: suggestView(services, { area, layers: ['ais-live-vessels'] }),
+        ...capRows(rows, args.limit),
+        ...snapshotInfo(snapshot),
+      },
     };
   },
 });
@@ -148,7 +153,19 @@ export const findVessel = defineTool({
       summary: rows.length
         ? `Found ${countNoun(rows.length, 'vessel')} with ${key} ${args[key]}.`
         : `No vessel with ${key} ${args[key]} is currently reported.`,
-      data: { ...capRows(rows, args.limit), ...snapshotInfo(snapshot) },
+      data: {
+        // Ships cannot be followed from a link; one match is framed closely.
+        view:
+          rows.length === 1
+            ? suggestView(services, {
+                point: { lat: rows[0].lat, lon: rows[0].lon },
+                layers: ['ais-live-vessels'],
+                altitudeM: 5_000,
+              })
+            : null,
+        ...capRows(rows, args.limit),
+        ...snapshotInfo(snapshot),
+      },
     };
   },
 });
@@ -177,6 +194,13 @@ export const getVesselTrack = defineTool({
         ? `${countNoun(points.length, 'position')} for ${args.mmsi} from ${isoTime(points[0].observedAtMs)} to ${isoTime(points.at(-1).observedAtMs)}.`
         : `No recent track is available for ${args.mmsi}.`,
       data: {
+        view: kept.length
+          ? suggestView(services, {
+              point: { lat: kept.at(-1).latitude, lon: kept.at(-1).longitude },
+              layers: ['ais-live-vessels'],
+              altitudeM: 20_000,
+            })
+          : null,
         mmsi: args.mmsi,
         total: points.length,
         returned: kept.length,

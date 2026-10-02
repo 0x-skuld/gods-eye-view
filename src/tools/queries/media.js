@@ -1,5 +1,6 @@
 /** Public camera and radio queries over the CCTV and radio sources. */
 
+import { suggestView } from '../views.js';
 import { defineTool, ToolError } from '../catalog.js';
 import {
   AREA_SCHEMA,
@@ -106,6 +107,7 @@ export const findCctvCameras = defineTool({
               .join(', ')}).`
           : '.'),
       data: {
+        view: suggestView(services, { area, layers: ['cctv'] }),
         ...capRows(rows, args.limit),
         complete: trimmed.length === 0,
         catalog_trimmed: trimmed,
@@ -150,6 +152,11 @@ export const getCctvSnapshot = defineTool({
     return {
       summary: `Current view from ${name}${camera.city ? ` in ${camera.city}` : ''}${camera.credit ? `, courtesy of ${camera.credit}` : ''}.`,
       data: {
+        view: suggestView(services, {
+          point: { lat: camera.lat, lon: camera.lon },
+          altitudeM: 1_500,
+          layers: ['cctv'],
+        }),
         id: camera.id,
         name,
         city: text(camera.city),
@@ -247,6 +254,7 @@ export const findRadioStations = defineTool({
     return {
       summary: `${countNoun(rows.length, 'radio station')}${what}${where} (${notes.join('; ')}).`,
       data: {
+        view: area ? suggestView(services, { area, layers: ['radio'] }) : null,
         ...capRows(rows, args.limit),
         directory_size: directory.stations.length,
         stale: directory.stale === true,
