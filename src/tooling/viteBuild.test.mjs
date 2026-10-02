@@ -72,6 +72,11 @@ test('panel origins may read every dev server path, other sites may not', () => 
     request('https://abc123.claudemcpcontent.com', 'OPTIONS').ended,
     true,
   );
+  assert.equal(
+    request('codex-sandbox://mcp-app-ab12.web-sandbox.oaiusercontent.com')
+      .headers['Access-Control-Allow-Origin'],
+    'codex-sandbox://mcp-app-ab12.web-sandbox.oaiusercontent.com',
+  );
   const other = request('https://example.com');
   assert.deepEqual(other.headers, {});
   assert.equal(other.passed, true);

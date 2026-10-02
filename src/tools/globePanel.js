@@ -99,8 +99,9 @@ function panelHtml(appOrigin) {
   // The panel page lives on the host's site, which serves none of the app.
   // Hosts may refuse <base>, so the app's own addresses (relative ones, and
   // absolute ones on this page's site) are sent to the app's server instead.
-  // The page's own site; location.origin is "null" in a srcdoc document.
-  const PAGE_ORIGIN = new URL(document.baseURI).origin;
+  // The page's own site, by scheme and host: location.origin is "null" in a
+  // srcdoc document, and a host may serve the page from its own scheme.
+  const PAGE = new URL(document.baseURI);
   const toApp = (value) => {
     let url;
     try {
@@ -108,8 +109,7 @@ function panelHtml(appOrigin) {
     } catch {
       return value;
     }
-    if (!/^https?:$/.test(url.protocol) || url.origin !== PAGE_ORIGIN)
-      return value;
+    if (url.protocol !== PAGE.protocol || url.host !== PAGE.host) return value;
     return APP_ORIGIN + url.pathname + url.search + url.hash;
   };
   const isRemote = (value) => {

@@ -6,6 +6,7 @@ import { embedFramingPlugin } from './embed-framing.js';
 export const PANEL_CORS_ORIGINS = Object.freeze([
   /^https?:\/\/(?:(?:[^:]+\.)?localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/,
   /^https:\/\/[a-z0-9]+\.claudemcpcontent\.com$/,
+  /^(?:https|codex-sandbox):\/\/[a-z0-9-]+\.web-sandbox\.oaiusercontent\.com$/,
 ]);
 
 /**
