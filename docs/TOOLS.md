@@ -109,8 +109,11 @@ sending them.
 The voice session token endpoint takes its tool list as `realtime.tools`.
 `realtimeSessionTools(additional)` appends function tools to the app actions,
 skipping names an action already uses, so `next_satellite_pass` stays the
-action. The standalone server supplies every core query except
-`open_in_gods_eye_view`, since voice runs inside the app.
+action. The standalone server supplies the core queries that
+`src/tools/surfaces.js` offers on voice, which leaves out tools that answer
+with images, link to the app, or repeat what voice's app actions answer
+(aircraft, ships, earthquakes, fires, datacenters, dams and satellites
+overhead, which `analyst_query` covers).
 
 In the browser, `initGevVoiceCommands({ toolCatalog })` takes a function that
 resolves a catalog. App action names go to the action runner; other names the

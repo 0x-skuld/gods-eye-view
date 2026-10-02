@@ -469,3 +469,19 @@ test('the debug log rotates instead of growing without bound', async (t) => {
   assert.ok(live + previous < 64 * 1024 * 1024);
   assert.ok(!existsSync(`${file}.2`), 'exactly one generation is retained');
 });
+
+test('the voice instructions name only tools the voice session offers', async () => {
+  const { coreTools } = await import('../tools/index.js');
+  const tools = new Set(standaloneVoiceTools().map((tool) => tool.name));
+  const known = new Set([
+    ...coreTools.map((tool) => tool.name),
+    ...GEV_REALTIME_TOOLS.map((tool) => tool.name),
+  ]);
+  const named = new Set(
+    realtimeInstructions().match(/\b[a-z]+(?:_[a-z]+)+\b/g),
+  );
+  const missing = [...named].filter(
+    (name) => known.has(name) && !tools.has(name),
+  );
+  assert.deepEqual(missing, []);
+});
