@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { GEV_ACTION_SCHEMAS, createActionTools } from './actionSchemas.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
+import { validateArgs } from '../../scripts/voice-bench/grade.mjs';
 
 const stable = (value) =>
   Array.isArray(value)
@@ -30,7 +31,7 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // Re-derived for the voice layer manifest (generated layer enums and
     // aliases), point-and-ask (pointer sentinels, referent args) and the
     // consolidated tool wording (each policy stated once).
-    '087cb623adb90f0f6203aecd6f33345bc4e5616c66ca4f4c55afdba7ff25c8bf',
+    'a824c2ed0ceb553eb3041350856db05dbfc5abad8a3fa17d29dc378bf7a732d2',
   );
 });
 
@@ -110,6 +111,11 @@ test('all legacy action arguments are byte-identical after removing the delibera
         value.enum = value.enum.filter((key) => key !== 'pointer');
     }
   }
+  const track = legacy.find((tool) => tool.name === 'track_entity').parameters;
+  delete track.anyOf;
+  delete track.properties.query.minLength;
+  delete track.properties.query.pattern;
+  track.required = ['query'];
   const analystScopeKind = legacy.find((tool) => tool.name === 'analyst_query')
     .parameters.properties.scope.properties.kind;
   analystScopeKind.enum = analystScopeKind.enum.filter(
@@ -130,4 +136,18 @@ test('all legacy action arguments are byte-identical after removing the delibera
     createHash('sha256').update(JSON.stringify(legacy)).digest('hex'),
     '01f14fdb1523eebfcbff8b115e48e6ab99e36fa06f55a3bb13c65e198f79d758',
   );
+});
+
+test('track_entity accepts a referent alone but rejects an empty target', () => {
+  const schema = GEV_REALTIME_TOOLS.find(
+    (tool) => tool.name === 'track_entity',
+  ).parameters;
+  assert.deepEqual(validateArgs(schema, { referent: 2 }), []);
+  assert.deepEqual(validateArgs(schema, { referent: -1 }), []);
+  assert.deepEqual(validateArgs(schema, { query: 'UPS793' }), []);
+  assert.ok(validateArgs(schema, {}).length > 0);
+  assert.ok(validateArgs(schema, { query: '' }).length > 0);
+  assert.ok(validateArgs(schema, { query: '   ' }).length > 0);
+  assert.ok(validateArgs(schema, { referent: 0 }).length > 0);
+  assert.ok(validateArgs(schema, { referent: 6 }).length > 0);
 });

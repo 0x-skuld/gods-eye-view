@@ -18,7 +18,7 @@
  *
  * Providers (injected — keeps the engine pure and node-testable):
  *   getRecords(layerKey) → Array<record>            (layer accessor snapshot)
- *   resolveRegionRing(name) → Promise<{ring, name}|{error:'region-timeout'}|null>
+ *   resolveRegionRing(name, signal?) → Promise<{ring, name}|{error:'region-timeout'}|null>
  *   getViewContext() → {lat, lon, viewRadiusKm, bounds?}  (camera-derived)
  *
  * @module data/analystEngine
@@ -714,12 +714,20 @@ export function createAnalystEngine(providers) {
   /**
    * Run one query.
    * @param {object} spec Query arguments (see the analyst_query tool).
-   * @param {{isCurrent?: () => boolean}} [options] A query that is no longer
-   *   current (cancelled or superseded while awaiting a boundary or between
-   *   scan slices) returns CANCELLED and never replaces the follow-up memory.
+   * @param {{isCurrent?: () => boolean, signal?: AbortSignal,
+   *   beforeCommit?: (result: object) => Promise<object|void>}} [options]
+   *   A query that is no longer current
+   *   (cancelled or superseded while awaiting a boundary or between scan
+   *   slices) returns CANCELLED and never replaces the follow-up memory.
+   *   `beforeCommit` lets a caller finish required async projection work and
+   *   optionally supply the exact cohort that was presented before memory is
+   *   changed.
    * @returns {Promise<object>} Result or refusal.
    */
-  async function query(spec = {}, { isCurrent = () => true } = {}) {
+  async function query(
+    spec = {},
+    { isCurrent = () => true, signal = undefined, beforeCommit = null } = {},
+  ) {
     const cancelled = () =>
       refusal('CANCELLED', 'This query was superseded.', { cancelled: true });
     if (spec.followUp && !lastResult)
@@ -788,6 +796,7 @@ export function createAnalystEngine(providers) {
       groups = lastResult.matched;
       layersQueried = lastResult.coverage.layersQueried;
       queriedSnapshots = lastResult.coverage.feedProvenance?.layers || [];
+      unanswered = [...(lastResult.unanswered || [])];
     } else {
       groups = [];
       layersQueried = [];
@@ -870,18 +879,20 @@ export function createAnalystEngine(providers) {
     }
 
     // 2) Spatial scope
+    const rememberedScope =
+      followUp && !spec.scope ? lastResult.scopePresentation || null : null;
     let resolvedScope = null;
-    let scopeNote = 'anywhere';
+    let scopeNote = rememberedScope?.coverage || 'anywhere';
     // Human phrasing for the same scope, so every spoken count can name what it
     // measured ("8 in view", "about 30 within 250 km of Austin") instead of
     // arriving as a bare number that contradicts the panel.
-    let scopeLabel = 'anywhere in the loaded data';
-    let scopeDetail = scopeLabel;
+    let scopeLabel = rememberedScope?.label || 'anywhere in the loaded data';
+    let scopeDetail = rememberedScope?.detail || scopeLabel;
     // A follow-up re-filters a set that was already scoped, so it only narrows
     // further when a new scope is given.
     const scope = spec.scope || { kind: followUp ? 'anywhere' : 'view' };
     if (scope.kind === 'region') {
-      const region = await providers.resolveRegionRing(scope.name);
+      const region = await providers.resolveRegionRing(scope.name, signal);
       if (!isCurrent()) return cancelled();
       if (region?.error === 'region-timeout') {
         return {
@@ -1039,6 +1050,7 @@ export function createAnalystEngine(providers) {
         layersQueried,
         records: totals,
         scope: scopeNote,
+        ...(rememberedScope?.note ? { note: rememberedScope.note } : {}),
         ...(queriedSnapshots.length
           ? { feedProvenance: feedProvenanceEnvelope(queriedSnapshots) }
           : {}),
@@ -1050,10 +1062,27 @@ export function createAnalystEngine(providers) {
         ? { centeredOn: resolvedScope.centeredOn }
         : {}),
     };
+    const memoryOverride =
+      typeof beforeCommit === 'function'
+        ? (await beforeCommit(result)) || null
+        : null;
+    if (!isCurrent()) return cancelled();
+    const committedCoverage = memoryOverride?.coverage || result.coverage;
     lastResult = {
-      matched: selection.matched,
-      layerKeys: [...layers],
-      coverage: result.coverage,
+      matched: memoryOverride?.matched || selection.matched,
+      layerKeys: [...(memoryOverride?.layerKeys || layers)],
+      coverage: committedCoverage,
+      unanswered: [
+        ...(memoryOverride?.unanswered === undefined
+          ? unanswered
+          : memoryOverride.unanswered),
+      ],
+      scopePresentation: {
+        label: memoryOverride?.scopeLabel || result.scopeLabel,
+        detail: memoryOverride?.scopeDetail || result.display.scope,
+        coverage: committedCoverage.scope,
+        note: committedCoverage.note || null,
+      },
     };
     return result;
   }

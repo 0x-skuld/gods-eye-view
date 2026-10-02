@@ -21,6 +21,8 @@ import {
 } from './gevActions.js';
 import { MAP_STACKS } from '../mapStackController.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
+import { presentResult } from './resultDisplay.js';
+import { attachVoiceResult } from './speech.js';
 
 test('every live basemap is reachable by its own id — no enum value without a voice alias', () => {
   // B1 regression: a stack added to MAP_STACKS (and the set_map_stack enum)
@@ -2819,8 +2821,58 @@ test('a nested Cockpit rollback result is translated too', async () => {
  */
 function awarenessSubjectHarness({ subject, flights = [], military = [] }) {
   const position = subject ? { __subject: true } : null;
+  const snapshotFlights = flights.slice(0, 20_000);
+  const snapshotMilitary = military.slice(0, 20_000);
   return {
-    snapshot: subject ? { subject: { ...subject, position }, radiusM: 250_000, cohorts: [] } : null,
+    snapshot: subject
+      ? {
+          subject: { ...subject, position },
+          evaluatedAt: 1_790_782_400_000,
+          radiusM: 250_000,
+          cohorts: [
+            {
+              id: 'flights',
+              count: snapshotFlights.length,
+              complete: flights.length <= 20_000,
+            },
+            {
+              id: 'military',
+              count: snapshotMilitary.length,
+              complete: military.length <= 20_000,
+            },
+          ],
+        }
+      : null,
+    aircraftSnapshot: subject
+      ? {
+          subject: { ...subject, position },
+          evaluatedAt: 1_790_782_400_000,
+          radiusM: 250_000,
+          cohorts: {
+            flights: {
+              count: snapshotFlights.length,
+              complete: flights.length <= 20_000,
+              truncated: flights.length > 20_000,
+              items: snapshotFlights.map((item) => ({ ...item })),
+            },
+            military: {
+              count: snapshotMilitary.length,
+              complete: military.length <= 20_000,
+              truncated: military.length > 20_000,
+              items: snapshotMilitary.map((item) => ({ ...item })),
+            },
+          },
+          contactsWindow: {
+            centeredOn: subject.label || subject.id,
+            radiusKm: 250,
+            aircraft: snapshotFlights.length + snapshotMilitary.length,
+            flights: snapshotFlights.length,
+            military: snapshotMilitary.length,
+            vessels: 'unknown',
+            complete: flights.length <= 20_000 && military.length <= 20_000,
+          },
+        }
+      : null,
     flights,
     military,
   };
@@ -2832,11 +2884,40 @@ async function withAwareness(harness, run) {
   const militaryLayer = (await import('../data/militaryFlights.js')).default;
   const originals = {
     snapshot: awareness.getContextSnapshot,
+    aircraftSnapshot: awareness.getAircraftQuerySnapshot,
     flightsNearby: flightsLayer.getNearby,
     militaryNearby: militaryLayer.getNearby,
     cartoFrom: Cesium.Cartographic.fromCartesian,
   };
   awareness.getContextSnapshot = () => harness.snapshot;
+  awareness.getAircraftQuerySnapshot = () => {
+    const snapshot = harness.aircraftSnapshot;
+    if (!snapshot) return null;
+    return {
+      ...snapshot,
+      subject: { ...snapshot.subject },
+      contactsWindow: snapshot.contactsWindow
+        ? { ...snapshot.contactsWindow }
+        : null,
+      cohorts: Object.fromEntries(
+        Object.entries(snapshot.cohorts).map(([key, cohort]) => [
+          key,
+          {
+            ...cohort,
+            provenance: cohort.provenance
+              ? {
+                  ...cohort.provenance,
+                  stats: cohort.provenance.stats
+                    ? { ...cohort.provenance.stats }
+                    : undefined,
+                }
+              : null,
+            items: cohort.items.map((item) => ({ ...item })),
+          },
+        ]),
+      ),
+    };
+  };
   flightsLayer.getNearby = () => harness.flights.slice();
   militaryLayer.getNearby = () => harness.military.slice();
   Cesium.Cartographic.fromCartesian = (value) => (
@@ -2848,13 +2929,14 @@ async function withAwareness(harness, run) {
     return await run(awareness);
   } finally {
     awareness.getContextSnapshot = originals.snapshot;
+    awareness.getAircraftQuerySnapshot = originals.aircraftSnapshot;
     flightsLayer.getNearby = originals.flightsNearby;
     militaryLayer.getNearby = originals.militaryNearby;
     Cesium.Cartographic.fromCartesian = originals.cartoFrom;
   }
 }
 
-function analystRunner(awareness) {
+function analystRunner(awareness, { getAll } = {}) {
   const flights = {
     id: 'flights',
     // Deliberately a DIFFERENT population from the proximity window: this is
@@ -2878,7 +2960,16 @@ function analystRunner(awareness) {
     dataManager: {
       layers: new Map([['flights', { module: flights }], ['military-awareness', { module: awareness }]]),
       isEnabled: (id) => id === 'flights',
-      getAll: () => [{ id: 'flights', name: 'Live Flights', enabled: true, stats: { count: 1 } }],
+      getAll:
+        getAll ||
+        (() => [
+          {
+            id: 'flights',
+            name: 'Live Flights',
+            enabled: true,
+            stats: { count: 1 },
+          },
+        ]),
     },
   });
 }
@@ -3426,6 +3517,199 @@ test('the Contacts window ranks, filters and formats like any analyst answer', a
   });
 });
 
+test('a cancelled Contacts scan returns cancellation and cannot seed follow-up memory', async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const harness = awarenessSubjectHarness({
+    subject: { id: 'a1b2c3', label: 'N546PC' },
+    flights: Array.from({ length: 20_000 }, (_, index) => ({
+      id: `F${index}`,
+      icao24: `f${index}`,
+      distance: index,
+    })),
+  });
+  await withAwareness(harness, async (awareness) => {
+    const runner = analystRunner(awareness);
+    let current = true;
+    const pending = runner(
+      'analyst_query',
+      {
+        layers: ['flights'],
+        scope: { kind: 'radius', km: 250 },
+      },
+      { isCurrent: () => current },
+    );
+    current = false;
+    const stale = await pending;
+    assert.equal(stale.ok, false);
+    assert.equal(stale.cancelled, true);
+    assert.equal(stale.code, 'CANCELLED');
+
+    const followUp = await runner('analyst_query', { followUp: true });
+    assert.equal(followUp.ok, false);
+    assert.equal(followUp.code, 'NO_RESULT_CONTEXT');
+  });
+});
+
+test('overlapping analyst siblings from one response complete independently', async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const harness = awarenessSubjectHarness({
+    subject: { id: 'a1b2c3', label: 'N546PC' },
+    flights: Array.from({ length: 20_000 }, (_, index) => ({
+      id: `F${index}`,
+      icao24: `f${index}`,
+      distance: index,
+    })),
+  });
+  await withAwareness(harness, async (awareness) => {
+    const runner = analystRunner(awareness);
+    const older = runner('analyst_query', {
+      layers: ['flights'],
+      scope: { kind: 'radius', km: 250 },
+    });
+    const sibling = await runner('analyst_query', {
+      layers: ['flights'],
+      scope: { kind: 'anywhere' },
+    });
+    assert.equal(sibling.ok, true);
+    assert.deepEqual(
+      sibling.items.map((item) => item.id),
+      ['STALE1'],
+    );
+    assert.equal((await older).ok, true);
+  });
+});
+
+test('a capped Contacts snapshot is a lower bound from one immutable cohort', async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const harness = awarenessSubjectHarness({
+    subject: { id: 'a1b2c3', label: 'N546PC' },
+    flights: Array.from({ length: 20_001 }, (_, index) => ({
+      id: `F${index}`,
+      icao24: `f${index}`,
+      distance: index,
+    })),
+  });
+  await withAwareness(harness, async (awareness) => {
+    let source = 'snapshot-a';
+    const capture = awareness.getAircraftQuerySnapshot;
+    awareness.getAircraftQuerySnapshot = () => {
+      const frozen = capture();
+      frozen.cohorts.flights.provenance = {
+        id: 'flights',
+        name: 'Live Flights',
+        enabled: true,
+        feedState: 'nominal',
+        source,
+        count: 20_000,
+        lastUpdate: frozen.evaluatedAt,
+        ageSec: 0,
+        ageLabel: 'now',
+        error: null,
+      };
+      harness.aircraftSnapshot.cohorts.flights.items.length = 1;
+      harness.aircraftSnapshot.cohorts.flights.count = 1;
+      harness.aircraftSnapshot.contactsWindow.aircraft = 1;
+      harness.aircraftSnapshot.contactsWindow.flights = 1;
+      queueMicrotask(() => {
+        source = 'snapshot-b';
+      });
+      return frozen;
+    };
+    const pending = analystRunner(awareness, {
+      // The live registry has already advanced before query entry. The answer
+      // must still narrate the provenance retained with panel cohort A.
+      getAll: () => [
+        {
+          id: 'flights',
+          name: 'Live Flights',
+          enabled: true,
+          source: 'live-snapshot-b',
+          stats: { count: 1, source: 'live-snapshot-b' },
+        },
+      ],
+    })('analyst_query', {
+      layers: ['flights'],
+      scope: { kind: 'radius', km: 250 },
+    });
+    const result = await pending;
+    assert.equal(result.ok, true);
+    assert.equal(result.count, 20_000);
+    assert.equal(result.complete, false);
+    assert.deepEqual(result.coverage.records, {
+      returned: 20_000,
+      total: null,
+      truncated: true,
+    });
+    assert.match(result.say, /^At least 20,000 aircraft within 250 km/);
+    assert.equal(result.window.flights, 20_000);
+    assert.equal(result.window.complete, false);
+    assert.equal(result.contactsWindow.aircraft, 20_000);
+    assert.equal(result.contactsWindow.flights, 20_000);
+    assert.equal(result.feedProvenance.layers[0].source, 'snapshot-a');
+    assert.equal(result.coverage.layersQueried[0].source, 'snapshot-a');
+  });
+});
+
+test('Contacts follow-ups filter the cohort that was actually displayed', async () => {
+  globalThis.window = globalThis.window || {
+    clearTimeout,
+    setTimeout,
+    requestIdleCallback: null,
+  };
+  const harness = awarenessSubjectHarness({
+    subject: { id: 'a1b2c3', label: 'N546PC' },
+    flights: Array.from({ length: 6 }, (_, index) => ({
+      id: `F${index + 1}`,
+      icao24: `f${index + 1}`,
+      distance: index * 1000,
+    })),
+  });
+  await withAwareness(harness, async (awareness) => {
+    const runner = analystRunner(awareness);
+    const first = await runner('analyst_query', {
+      layers: ['flights'],
+      scope: { kind: 'radius', km: 250 },
+      limit: 6,
+    });
+    assert.deepEqual(
+      first.items.map((item) => item.id),
+      ['F1', 'F2', 'F3', 'F4', 'F5', 'F6'],
+    );
+    const followUp = await runner('analyst_query', {
+      followUp: true,
+      filters: [{ field: 'id', op: 'eq', value: 'F3' }],
+    });
+    assert.equal(followUp.count, 1);
+    assert.equal(followUp.items[0].id, 'F3');
+    assert.equal(followUp.scopeLabel, 'within 250 km of N546PC');
+    assert.equal(
+      followUp.display.scope,
+      'within 250 km of N546PC (Contacts window)',
+    );
+    assert.equal(followUp.coverage.scope, 'window:250km@N546PC');
+    assert.equal(
+      presentResult('analyst_query', followUp).display.title,
+      '1 aircraft within 250 km of N546PC',
+    );
+    assert.equal(
+      attachVoiceResult('analyst_query', followUp).say,
+      '1 aircraft within 250 km of N546PC.',
+    );
+  });
+});
+
 test('point-and-ask: the runner resolves pointer and referent targets', async () => {
   globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
   const { viewer, styleManager } = createVoiceNavigationHarness();
@@ -3479,14 +3763,30 @@ test('point-and-ask: only accepted, current results become the referent list', a
   const { viewer, styleManager } = createVoiceNavigationHarness();
   const referents = createReferentRegistry();
   let used = 0;
+  let tracked = 0;
   const runner = createActionRunner({
     viewer,
     styleManager,
     dataManager: {
-      layers: new Map([['flights', { module: {
-        findByQuery: () => ({ icao24: 'ccc333', callsign: 'AAL9', latitude: 1, longitude: 2 }),
-        trackById: () => true,
-      } }]]),
+      layers: new Map([
+        [
+          'flights',
+          {
+            module: {
+              findByQuery: () => ({
+                icao24: 'ccc333',
+                callsign: 'AAL9',
+                latitude: 1,
+                longitude: 2,
+              }),
+              trackById: () => {
+                tracked++;
+                return true;
+              },
+            },
+          },
+        ],
+      ]),
       isEnabled: () => true,
       getAll: () => [],
     },
@@ -3509,9 +3809,16 @@ test('point-and-ask: only accepted, current results become the referent list', a
   await runner('track_entity', { query: 'pointer' }, { signal: aborted.signal });
   assert.equal(referents.get(1), null, 'a cancelled action leaves the registry alone');
   assert.equal(used, 0, 'nor does it announce the pointer');
-  await runner('track_entity', { query: 'pointer' }, { isCurrent: () => false });
+  assert.equal(tracked, 0, 'nor does it start tracking');
+  await runner(
+    'track_entity',
+    { query: 'pointer' },
+    { isCurrent: () => false },
+  );
   assert.equal(referents.get(1), null, 'a superseded action leaves it alone');
+  assert.equal(tracked, 0, 'a superseded action does not start tracking');
   await runner('track_entity', { query: 'pointer' });
   assert.equal(referents.get(1)?.id, 'ccc333');
   assert.equal(used, 1, 'a current pointer resolution announces the chip');
+  assert.equal(tracked, 1);
 });

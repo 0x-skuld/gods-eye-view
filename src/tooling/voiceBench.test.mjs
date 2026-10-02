@@ -79,6 +79,27 @@ test('toGeminiSchema drops unsupported keywords and expresses unions as anyOf', 
   assert.deepEqual(out.required, ['a']);
 });
 
+test('referent-only tracking keeps object alternatives in Gemini OpenAPI mode', () => {
+  const track = toGeminiDeclarations(GEV_REALTIME_TOOLS, {
+    mode: 'openapi',
+  }).find((tool) => tool.name === 'track_entity');
+  assert.deepEqual(
+    track.parameters.anyOf.map((branch) => ({
+      type: branch.type,
+      required: branch.required,
+    })),
+    [
+      { type: 'object', required: ['query'] },
+      { type: 'object', required: ['referent'] },
+    ],
+  );
+  assert.equal(track.parameters.properties.query.pattern, '\\S');
+  assert.deepEqual(
+    track.parameters.properties.referent.enum,
+    [-1, 1, 2, 3, 4, 5],
+  );
+});
+
 test('toGeminiDeclarations: jsonSchema mode is verbatim; openapi mode omits empty parameter objects', () => {
   const json = toGeminiDeclarations(GEV_REALTIME_TOOLS);
   assert.deepEqual(json[0].parametersJsonSchema, GEV_REALTIME_TOOLS[0].parameters);

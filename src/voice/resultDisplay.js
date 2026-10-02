@@ -34,26 +34,42 @@ function notesOf(...values) {
     .filter(Boolean);
 }
 
-function nounFor(layerKeys) {
+export function analystNounFor(layerKeys) {
   const keys = [...new Set(layerKeys.filter(Boolean))];
   if (keys.length !== 1) return 'results';
   const key = keys[0];
   return LAYER_NOUNS[key] || voiceLayer(key)?.aliases?.[0] || 'results';
 }
 
-function analystCard(result) {
-  if (!result?.ok) return null;
-  const keys = (result.coverage?.layersQueried || []).map(
+/** The count/scope headline shared by the analyst card and spoken answer. */
+const ANALYST_HEADLINE_MAX = 64;
+
+function boundedHeadline(value) {
+  const text = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (text.length <= ANALYST_HEADLINE_MAX) return text;
+  return `${text.slice(0, ANALYST_HEADLINE_MAX - 1).trimEnd()}…`;
+}
+
+export function analystHeadline(result) {
+  const keys = (result?.coverage?.layersQueried || []).map(
     (layer) => layer.layerKey,
   );
-  const count = Number(result.count) || 0;
-  const floor = result.complete === false ? 'At least ' : '';
+  const count = Number(result?.count) || 0;
+  const floor = result?.complete === false ? 'At least ' : '';
+  return boundedHeadline(
+    `${floor}${count.toLocaleString('en-US')} ${analystNounFor(keys)} ${result?.scopeLabel || ''}`,
+  );
+}
+
+function analystCard(result) {
+  if (!result?.ok) return null;
   const display = result.display || {};
   const unanswered = Array.isArray(result.unanswered) ? result.unanswered : [];
   return {
     display: {
-      title:
-        `${floor}${count.toLocaleString('en-US')} ${nounFor(keys)} ${result.scopeLabel || ''}`.trim(),
+      title: analystHeadline(result),
       // The precise scope, unless the title already says exactly that.
       lines: [
         display.scope !== result.scopeLabel ? display.scope : null,

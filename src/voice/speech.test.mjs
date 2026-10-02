@@ -367,10 +367,34 @@ test('annotation speech names only what failed and never announces drawing', () 
   assert.deepEqual(pending.display.notes, ['Tracing outlines']);
 });
 
-test('builders never break an action and analyst_query has no default builder', () => {
-  assert.equal(SPEECH_BUILDERS.analyst_query, undefined);
+test('analyst speech preserves exact counts, lower bounds and partial status', () => {
+  const raw = {
+    ok: true,
+    action: 'analyst_query',
+    count: 3,
+    complete: true,
+    scopeLabel: 'anywhere in the loaded data',
+    coverage: { layersQueried: [{ layerKey: 'flights' }] },
+  };
+  assert.equal(
+    attachVoiceResult('analyst_query', raw).say,
+    '3 aircraft anywhere in the loaded data.',
+  );
+  assert.equal(
+    attachVoiceResult('analyst_query', {
+      ...raw,
+      count: 250_000,
+      complete: false,
+      partial: true,
+      unanswered: ['military'],
+    }).say,
+    'At least 250,000 aircraft anywhere in the loaded data. Partial; military not answered.',
+  );
+});
+
+test('builders never break an action and callers can override analyst speech', () => {
+  assert.equal(typeof SPEECH_BUILDERS.analyst_query, 'function');
   const raw = { ok: true, action: 'analyst_query', count: 3 };
-  assert.equal(attachVoiceResult('analyst_query', raw), raw);
   const hooked = attachVoiceResult(
     'analyst_query',
     raw,

@@ -1,7 +1,14 @@
 # Changelog
 
 - The voice card shows analyst counts ("At least 250,000 aircraft …") with
-  their scope, feed window and caveats, and marks partial answers.
+  their scope, feed window and caveats, and marks partial answers. Analyst
+  speech uses the same deterministic headline, preserves lower bounds and says
+  when an answer is partial. Follow-ups retain unanswered-layer coverage, and
+  keep the original scope label when they narrow a remembered result.
+  Contacts-window answers read one immutable panel snapshot, mark a 20,000-row
+  layer cap as a lower bound, and commit that displayed cohort only after
+  cancellation checks pass. Concurrent analyst calls from one model response
+  remain independent; a stopped or replaced user turn still cancels them.
 - Voice answers are shorter and fill slow work instead of going silent. Slow
   or multi-step requests may open with one short spoken plan; instant ones
   just happen. Tool results carry a code-built `say` line and a `display`
@@ -20,6 +27,9 @@
   around here". A reticle marks the point and the voice card shows what
   "this" meant. In open mic it works when you have just moved the cursor
   there. "The second one" picks from the last numbered list. Asking about
+  "the last one" resolves to the last of the five rows actually shown, and
+  referent-only tracking calls are accepted while empty targets are rejected.
+  Asking about
   bare ground up close gives the assistant a small crop of the map around the
   point.
 

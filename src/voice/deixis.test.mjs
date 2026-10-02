@@ -147,3 +147,23 @@ test('registry: mirrors the card, records analyst items, clears per session', ()
   assert.equal(referents.get(1), null);
   assert.deepEqual(referentsFromResult('x', null), []);
 });
+
+test('registry: hidden card rows never resolve and last means displayed item five', () => {
+  const referents = createReferentRegistry();
+  referents.recordResult('analyst_query', {
+    ok: true,
+    count: 6,
+    scopeLabel: 'anywhere',
+    coverage: { layersQueried: [{ layerKey: 'flights' }] },
+    items: Array.from({ length: 6 }, (_, index) => ({
+      layerKey: 'flights',
+      id: `F${index + 1}`,
+    })),
+  });
+  assert.deepEqual(
+    referents.list().map((entry) => entry.n),
+    [1, 2, 3, 4, 5],
+  );
+  assert.equal(referents.get(6), null);
+  assert.equal(referents.get(-1)?.id, 'F5');
+});

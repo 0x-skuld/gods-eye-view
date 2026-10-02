@@ -527,15 +527,21 @@ const schemas = [
       properties: {
         query: {
           type: 'string',
+          minLength: 1,
+          pattern: '\\S',
         },
         layerId: {
           type: 'string',
         },
         referent: {
           type: 'integer',
+          enum: [-1, 1, 2, 3, 4, 5],
         },
       },
-      required: ['query'],
+      anyOf: [
+        { type: 'object', required: ['query'] },
+        { type: 'object', required: ['referent'] },
+      ],
     },
   },
   {

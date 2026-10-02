@@ -15,6 +15,7 @@ import { createVoiceCommands } from './sessionCommands.js';
 import { harness, tick } from './voiceWorkflowHarness.mjs';
 import { realtimeInstructions } from '../../server/providers/openai/instructions.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
+import { attachVoiceResult } from './speech.js';
 
 /** Run one call and fold it through the real voice card. */
 async function throughCard(runner, name, args, card = initialVoiceCardState()) {
@@ -47,6 +48,7 @@ test('an analyst count reaches the model and the card with its scope and caveats
   });
   assert.equal(result.ok, true);
   assert.equal(result.complete, true, 'complete survives the projection');
+  assert.equal(result.say, '3 aircraft anywhere in the loaded data.');
   assert.equal(view.visible, true, 'the card shows an analyst result');
   assert.equal(view.title, '3 aircraft anywhere in the loaded data');
   assert.ok(
@@ -57,6 +59,34 @@ test('an analyst count reaches the model and the card with its scope and caveats
     view.referents.map((r) => r.label),
     ['UAL1', 'DAL2', 'SWA3'],
   );
+});
+
+test('long analyst scope text is bounded identically for speech and card', () => {
+  const result = attachVoiceResult('analyst_query', {
+    ok: true,
+    action: 'analyst_query',
+    count: 12,
+    complete: true,
+    scopeLabel:
+      'over the extraordinarily long alpine administrative research corridor with a deliberately verbose official name',
+    coverage: { layersQueried: [{ layerKey: 'flights' }] },
+  });
+  const started = reduceVoiceCard(initialVoiceCardState(), {
+    type: 'action-call',
+    name: 'analyst_query',
+    callId: 'long-scope',
+    arguments: {},
+  });
+  const card = reduceVoiceCard(started, {
+    type: 'action-result',
+    name: 'analyst_query',
+    callId: 'long-scope',
+    result,
+  });
+  const title = voiceCardView(card).result.title;
+  assert.equal(result.say, title);
+  assert.ok(title.length <= 64);
+  assert.match(title, /…$/);
 });
 
 test('a capped count is a floor everywhere: model, card and caveat', async () => {
@@ -76,6 +106,7 @@ test('a capped count is a floor everywhere: model, card and caveat', async () =>
     limit: 1,
   });
   assert.equal(result.complete, false);
+  assert.match(result.say, /^At least 250,000 aircraft/);
   assert.match(view.title, /^At least 250,000 aircraft/);
   assert.ok(
     view.notes.some((note) => /counted 250,000 of 400,000/.test(note)),
@@ -90,6 +121,7 @@ test('a partial answer names the layers it could not read', async () => {
     scope: { kind: 'anywhere' },
   });
   assert.equal(result.partial, true);
+  assert.match(result.say, /Partial; earthquakes not answered/);
   assert.deepEqual(result.unanswered, ['earthquakes']);
   assert.ok(view.chips.includes('partial'));
   assert.ok(view.notes.includes('Not answered: earthquakes'));
@@ -103,6 +135,32 @@ test('"the second one" is the second row the card lists', async () => {
   });
   assert.equal(referents.get(2).label, 'DAL2');
   assert.equal(referents.get(-1).label, 'SWA3');
+});
+
+test('numbered and last referents are exactly the five rows the card displays', async () => {
+  const flights = {
+    getStats: () => ({ count: 6, lastUpdate: Date.now() }),
+    getAnalystRecords: () =>
+      Array.from({ length: 6 }, (_, index) => ({
+        id: `F${index + 1}`,
+        icao24: `f${index + 1}`,
+        callsign: `CALL${index + 1}`,
+        lat: 30,
+        lon: -97,
+      })),
+  };
+  const { runner, referents } = harness({ flights });
+  const { view } = await throughCard(runner, 'analyst_query', {
+    layers: ['flights'],
+    scope: { kind: 'anywhere' },
+    limit: 6,
+  });
+  assert.deepEqual(
+    view.referents.map((entry) => entry.label),
+    ['CALL1', 'CALL2', 'CALL3', 'CALL4', 'CALL5'],
+  );
+  assert.equal(referents.get(6), null);
+  assert.equal(referents.get(-1)?.label, 'CALL5');
 });
 
 test('a follow-up naming other layers than the last answer is refused, not answered from it', async () => {

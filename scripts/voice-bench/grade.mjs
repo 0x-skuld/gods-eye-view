@@ -153,7 +153,7 @@ const TYPE_CHECKS = {
 };
 
 /**
- * Validate `value` against a JSON schema (type / enum / required /
+ * Validate `value` against a JSON schema (type / enum / anyOf / required /
  * properties / additionalProperties:false / items / min/max bounds).
  * Returns a list of human-readable violations; empty means valid.
  */
@@ -169,6 +169,12 @@ export function validateArgs(schema, value, where = 'args') {
   }
   if (schema.enum && !schema.enum.includes(value)) {
     errors.push(`${where}=${JSON.stringify(value)} is not one of ${schema.enum.join(', ')}`);
+  }
+  if (typeof value === 'string') {
+    if (typeof schema.minLength === 'number' && value.length < schema.minLength)
+      errors.push(`${where} needs at least ${schema.minLength} characters`);
+    if (typeof schema.pattern === 'string' && !new RegExp(schema.pattern).test(value))
+      errors.push(`${where} does not match ${schema.pattern}`);
   }
   if (typeof value === 'number') {
     if (typeof schema.minimum === 'number' && value < schema.minimum) errors.push(`${where} below ${schema.minimum}`);
@@ -190,6 +196,13 @@ export function validateArgs(schema, value, where = 'args') {
       }
       errors.push(...validateArgs(sub, v, `${where}.${key}`));
     }
+  }
+  if (Array.isArray(schema.anyOf)) {
+    const branches = schema.anyOf.map((branch) =>
+      validateArgs(branch, value, where),
+    );
+    if (!branches.some((branchErrors) => branchErrors.length === 0))
+      errors.push(`${where} does not match any allowed shape`);
   }
   return errors;
 }

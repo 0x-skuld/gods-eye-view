@@ -174,11 +174,95 @@ test('analyst: nearest sorting attaches distanceKm ascending', async () => {
 
 test('analyst: follow-up re-filters the remembered set without re-snapshot', async () => {
   const eng = makeEngine();
-  await eng.query({ layers: ['flights'], scope: { kind: 'region', name: 'Texland' } });
-  const r = await eng.query({ followUp: true, filters: [{ field: 'onGround', op: 'eq', value: true }] });
+  const first = await eng.query({
+    layers: ['flights'],
+    scope: { kind: 'region', name: 'Texland' },
+  });
+  const r = await eng.query({
+    followUp: true,
+    filters: [{ field: 'onGround', op: 'eq', value: true }],
+  });
   assert.equal(r.count, 1);
   assert.equal(r.items[0].id, 'GND1');
   assert.equal(r.coverage.followUp, true);
+  assert.equal(r.scopeLabel, first.scopeLabel);
+  assert.equal(r.display.scope, first.display.scope);
+  assert.equal(r.coverage.scope, first.coverage.scope);
+});
+
+test('analyst: follow-ups preserve partial and unanswered coverage', async () => {
+  const eng = createAnalystEngine({
+    getRecords: (key) => (key === 'flights' ? FLIGHTS : []),
+    getLayerSnapshot: (key) => ({
+      enabled: key === 'flights',
+      feedState: key === 'flights' ? 'nominal' : 'off',
+    }),
+    getViewContext: () => ({ lat: 30.27, lon: -97.74, viewRadiusKm: 150 }),
+  });
+  const first = await eng.query({
+    layers: ['flights', 'military'],
+    scope: { kind: 'anywhere' },
+  });
+  assert.equal(first.partial, true);
+  assert.deepEqual(first.unanswered, ['military']);
+
+  const followUp = await eng.query({ followUp: true, limit: 1 });
+  assert.equal(followUp.partial, true);
+  assert.deepEqual(followUp.unanswered, ['military']);
+  assert.deepEqual(
+    followUp.coverage.layersQueried.map(({ layerKey, status }) => [
+      layerKey,
+      status,
+    ]),
+    first.coverage.layersQueried.map(({ layerKey, status }) => [
+      layerKey,
+      status,
+    ]),
+  );
+});
+
+test('analyst: cancelled pre-commit work cannot replace follow-up memory', async () => {
+  const eng = makeEngine();
+  await eng.query({
+    layers: ['flights'],
+    scope: { kind: 'anywhere' },
+    filters: [{ field: 'id', op: 'eq', value: 'SWA1' }],
+  });
+  let current = true;
+  const stale = await eng.query(
+    { layers: ['local-firms'], scope: { kind: 'anywhere' } },
+    {
+      isCurrent: () => current,
+      beforeCommit: async () => {
+        current = false;
+      },
+    },
+  );
+  assert.equal(stale.code, 'CANCELLED');
+  const followUp = await eng.query({ followUp: true });
+  assert.deepEqual(followUp.items.map((item) => item.id), ['SWA1']);
+});
+
+test('analyst: failed pre-commit work cannot replace follow-up memory', async () => {
+  const eng = makeEngine();
+  await eng.query({
+    layers: ['flights'],
+    scope: { kind: 'anywhere' },
+    filters: [{ field: 'id', op: 'eq', value: 'SWA1' }],
+  });
+  await assert.rejects(
+    eng.query(
+      { layers: ['local-firms'], scope: { kind: 'anywhere' } },
+      {
+        beforeCommit: async () => {
+          throw new Error('projection failed');
+        },
+      },
+    ),
+    /projection failed/,
+  );
+  const followUp = await eng.query({ followUp: true });
+  assert.deepEqual(followUp.items.map((item) => item.id), ['SWA1']);
 });
 
 test('analyst: unresolved region is an honest failure, not empty success', async () => {
@@ -198,6 +282,39 @@ test('analyst: a region lookup timeout is reported as region-timeout', async () 
   assert.equal(r.code, 'region-timeout');
   assert.match(r.error, /Texas/);
   assert.equal(r.coverage.scope, 'region:Texas:timeout');
+});
+
+test('analyst: region lookup receives and obeys the owning action signal', async () => {
+  const controller = new AbortController();
+  let receivedSignal = null;
+  const eng = createAnalystEngine({
+    getRecords: () => FLIGHTS,
+    resolveRegionRing: async (_name, signal) => {
+      receivedSignal = signal;
+      await new Promise((resolve) =>
+        signal.addEventListener('abort', resolve, { once: true }),
+      );
+      return null;
+    },
+    getViewContext: () => ({
+      lat: 30.27,
+      lon: -97.74,
+      viewRadiusKm: 150,
+    }),
+  });
+  const pending = eng.query(
+    { layers: ['flights'], scope: { kind: 'region', name: 'Texas' } },
+    {
+      signal: controller.signal,
+      isCurrent: () => !controller.signal.aborted,
+    },
+  );
+  await Promise.resolve();
+  controller.abort();
+  const result = await pending;
+  assert.equal(receivedSignal, controller.signal);
+  assert.equal(result.code, 'CANCELLED');
+  assert.equal(result.cancelled, true);
 });
 
 test('analyst: route fields queryable from cached enrichment only', async () => {

@@ -15,10 +15,10 @@
  *   continue, not something to read back).
  *
  * Builders are small pure functions keyed by tool name. Tools without one are
- * returned unchanged. analyst_query deliberately has no builder here: its
- * result contract is owned by the analyst engine. Supply one through
- * `createGevActionRunner({ speechBuilders: { analyst_query: fn } })`.
+ * returned unchanged.
  */
+
+import { analystHeadline } from './resultDisplay.js';
 
 const LAYER_NOUNS = Object.freeze({
   flights: 'aircraft',
@@ -398,7 +398,21 @@ function annotateMap(result) {
   };
 }
 
-/** Default builders by tool name. analyst_query plugs in through the runner. */
+function analystQuery(result) {
+  if (!result?.ok || result.cancelled) return null;
+  const headline = spokenLabel(analystHeadline(result), 96);
+  const unanswered = (Array.isArray(result.unanswered) ? result.unanswered : [])
+    .map((layer) => spokenLabel(layer, 24))
+    .filter(Boolean);
+  const missing = unanswered.length
+    ? `Partial; ${listPhrase(unanswered.slice(0, 2))}${unanswered.length > 2 ? ` and ${unanswered.length - 2} more` : ''} not answered.`
+    : 'Partial answer.';
+  return {
+    say: `${sentence(headline)}${result.partial ? ` ${missing}` : ''}`,
+  };
+}
+
+/** Default builders by tool name. */
 export const SPEECH_BUILDERS = Object.freeze({
   set_layer_visibility: setLayerVisibility,
   fly_to_location: flyToLocation,
@@ -407,6 +421,7 @@ export const SPEECH_BUILDERS = Object.freeze({
   get_entity_context: getEntityContext,
   get_current_view_state: getCurrentViewState,
   annotate_map: annotateMap,
+  analyst_query: analystQuery,
 });
 
 /**

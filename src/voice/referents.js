@@ -12,7 +12,8 @@
 
 import { presentResult } from './resultDisplay.js';
 
-const MAX_REFERENTS = 12;
+/** The numbered rows visible in the voice card and therefore resolvable later. */
+export const MAX_DISPLAYED_REFERENTS = 5;
 
 function finite(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -47,7 +48,7 @@ export function referentsFromResult(name, result) {
 }
 
 /** Numbered referent records ({n, id, label, layerId, lat, lon}). */
-export function normalizeReferents(entries, max = MAX_REFERENTS) {
+export function normalizeReferents(entries, max = MAX_DISPLAYED_REFERENTS) {
   return (Array.isArray(entries) ? entries : [])
     .slice(0, max)
     .map(normalize)
@@ -55,7 +56,7 @@ export function normalizeReferents(entries, max = MAX_REFERENTS) {
     .map((entry, index) => ({ ...entry, n: index + 1 }));
 }
 
-export function createReferentRegistry({ max = MAX_REFERENTS } = {}) {
+export function createReferentRegistry({ max = MAX_DISPLAYED_REFERENTS } = {}) {
   let list = [];
   let generation = 0;
   return {

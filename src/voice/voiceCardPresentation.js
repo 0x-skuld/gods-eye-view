@@ -1,6 +1,6 @@
 import { planStepLabel, progressStepLabel, spokenLabel } from './speech.js';
 import { presentResult } from './resultDisplay.js';
-import { normalizeReferents } from './referents.js';
+import { MAX_DISPLAYED_REFERENTS, normalizeReferents } from './referents.js';
 
 /**
  * Pure presentation of the voice card nested in the voice control: captions,
@@ -14,7 +14,6 @@ import { normalizeReferents } from './referents.js';
 
 const MAX_STEPS = 6;
 const MAX_LINES = 6;
-const MAX_REFERENTS = 5;
 const MAX_NOTES = 6;
 const MAX_CAPTION = 220;
 
@@ -205,7 +204,10 @@ export function reduceVoiceCard(state, event) {
         ...next,
         result: {
           display: shown.display,
-          referents: normalizeReferents(shown.referents),
+          referents: normalizeReferents(
+            shown.referents,
+            MAX_DISPLAYED_REFERENTS,
+          ),
         },
         announce: spokenLabel(shown.display.title, 64),
       });
@@ -278,7 +280,7 @@ export function voiceCardView(state) {
         .map((line) => spokenLabel(line, 80))
         .slice(0, MAX_LINES),
       referents: (state.result?.referents || [])
-        .slice(0, MAX_REFERENTS)
+        .slice(0, MAX_DISPLAYED_REFERENTS)
         .map((ref) => ({ n: ref.n, label: spokenLabel(ref.label, 48) })),
       notes,
     },

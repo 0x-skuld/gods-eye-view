@@ -311,8 +311,8 @@ export function createGevActionRunner({
     : SPEECH_BUILDERS;
   const _layerEnabledAt = new Map();
   let analystEngine;
-  const resolveRegionRing = (name) =>
-    annotationResolver.resolveRegionRingForQuery(name, undefined, placeSearch);
+  const resolveRegionRing = (name, signal) =>
+    annotationResolver.resolveRegionRingForQuery(name, signal, placeSearch);
   const ensureAnalystEngine = () =>
     (analystEngine ||= createAnalystEngine(
       analystProviders(viewer, dataManager, {
@@ -1014,6 +1014,7 @@ export function createGevActionRunner({
         args,
         _layerEnabledAt,
         current,
+        runOptions.signal,
       );
     }
 
@@ -1162,7 +1163,9 @@ export function createGevActionRunner({
     }
 
     if (name === 'track_entity') {
-      return trackEntity(viewer, dataManager, styleManager, args);
+      return trackEntity(viewer, dataManager, styleManager, args, {
+        isCurrent: current,
+      });
     }
 
     if (name === 'stop_tracking') {
@@ -2182,7 +2185,20 @@ export function formatTrackedEntityLabel(found, query = '') {
 }
 
 /** Finds and tracks/selects an entity by spoken query across layer families. */
-async function trackEntity(viewer, dataManager, styleManager, args = {}) {
+async function trackEntity(
+  viewer,
+  dataManager,
+  styleManager,
+  args = {},
+  { isCurrent = () => true } = {},
+) {
+  const cancelled = () => ({
+    ok: false,
+    cancelled: true,
+    action: 'track_entity',
+    error: 'Tracking request was superseded by a newer voice turn',
+  });
+  if (!isCurrent()) return cancelled();
   const query = String(args.query || '').trim();
   if (!query) throw new Error('track_entity needs a query');
 
@@ -2217,6 +2233,7 @@ async function trackEntity(viewer, dataManager, styleManager, args = {}) {
         error: 'The strongest fire has no usable position',
       };
     }
+    if (!isCurrent()) return cancelled();
     return runManagedVoiceNavigation(
       styleManager,
       'fire',
@@ -2258,6 +2275,8 @@ async function trackEntity(viewer, dataManager, styleManager, args = {}) {
     if (!module || typeof module.findByQuery !== 'function') continue;
     const found = module.findByQuery(query);
     if (!found) continue;
+
+    if (!isCurrent()) return cancelled();
 
     if (
       family.kind === 'vessel' &&
@@ -3453,7 +3472,12 @@ async function getTargetContext(
  * @param {object} result The general engine's result, reused for scope text.
  * @returns {object|null} A unified-count payload, or null.
  */
-async function aircraftProximityWindowForQuery(dataManager, args, result) {
+async function aircraftProximityWindowForQuery(
+  dataManager,
+  args,
+  result,
+  isCurrent = () => true,
+) {
   const spec = normalizeAnalystSpec(args, args?.layers || []);
   if (!spec) return null;
   const scope = args?.scope;
@@ -3461,9 +3485,8 @@ async function aircraftProximityWindowForQuery(dataManager, args, result) {
   const layers = Array.isArray(args.layers) ? args.layers : [];
   if (!layers.some((layer) => layer === 'flights' || layer === 'military'))
     return null;
-  const snapshot = dataManager?.layers
-    ?.get('military-awareness')
-    ?.module?.getContextSnapshot?.();
+  const awareness = dataManager?.layers?.get('military-awareness')?.module;
+  const snapshot = awareness?.getAircraftQuerySnapshot?.();
   const subject = snapshot?.subject;
   if (!subject?.position) return null;
   // An explicit centre only qualifies when it IS the subject; otherwise the
@@ -3473,17 +3496,28 @@ async function aircraftProximityWindowForQuery(dataManager, args, result) {
   const radiusM = Number.isFinite(scope.km)
     ? scope.km * 1000
     : snapshot.radiusM || 250_000;
-  const window = dataManager.layers
-    .get('military-awareness')
-    .module.collectAircraftProximityWindow(subject.position, {
-      radiusM,
-      subject,
-    });
-  if (!window) return null;
+  // A different radius is a different question. Let the general analyst
+  // engine answer it instead of relabelling the panel's 250 km snapshot.
+  if (
+    Number.isFinite(snapshot.radiusM) &&
+    Math.abs(radiusM - snapshot.radiusM) > 1
+  )
+    return null;
   const label = subject.label || subject.id || 'the selected contact';
   const radiusKm = Math.round(radiusM / 1000);
   const wanted = layers.filter(
     (layer) => layer === 'flights' || layer === 'military',
+  );
+  // Provenance belongs to the Awareness evaluation, not the current layer
+  // registry. The panel deliberately retains a cohort between render-cadence
+  // refreshes, so a live registry read here could already describe a newer
+  // source state than the count and items the operator is looking at.
+  const retainedProvenance = wanted
+    .map((key) => snapshot.cohorts?.[key]?.provenance)
+    .filter(Boolean);
+  const feedProvenance = feedProvenanceEnvelope(retainedProvenance);
+  const sourceSnapshotsById = new Map(
+    feedProvenance.layers.map((layer) => [layer.id, layer]),
   );
   // The cohort is the panel's; each contact is joined to its loaded analyst
   // record so the same filters, ranking and item shape apply as everywhere
@@ -3495,35 +3529,33 @@ async function aircraftProximityWindowForQuery(dataManager, args, result) {
       .get(key)
       ?.module?.getAnalystRecords?.(ANALYST_RECORD_CAP) || [])
       if (record?.icao24) records.set(record.icao24, record);
-    const rows = window[key === 'flights' ? 'flights' : 'military'].map(
-      (item) => {
-        const record = records.get(item.icao24);
-        let lat = record?.lat;
-        let lon = record?.lon;
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-          const carto = item.position
-            ? Cesium.Cartographic.fromCartesian(item.position)
-            : null;
-          lat = carto ? Cesium.Math.toDegrees(carto.latitude) : null;
-          lon = carto ? Cesium.Math.toDegrees(carto.longitude) : null;
-        }
-        const row = {
-          ...(record || {
-            id: item.id,
-            icao24: item.icao24,
-            callsign: item.callsign ?? null,
-            altitudeM: item.altitudeM ?? null,
-            speedMps: item.velocityMps ?? null,
-            aircraftClass: item.aircraftClass ?? null,
-          }),
-          lat,
-          lon,
-        };
-        if (Number.isFinite(item.distance))
-          distanceKm.set(row, Math.round(item.distance / 100) / 10);
-        return row;
-      },
-    );
+    const rows = (snapshot.cohorts?.[key]?.items || []).map((item) => {
+      const record = records.get(item.icao24);
+      let lat = record?.lat;
+      let lon = record?.lon;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        const carto = item.position
+          ? Cesium.Cartographic.fromCartesian(item.position)
+          : null;
+        lat = carto ? Cesium.Math.toDegrees(carto.latitude) : null;
+        lon = carto ? Cesium.Math.toDegrees(carto.longitude) : null;
+      }
+      const row = {
+        ...(record || {
+          id: item.id,
+          icao24: item.icao24,
+          callsign: item.callsign ?? null,
+          altitudeM: item.altitudeM ?? null,
+          speedMps: item.velocityMps ?? null,
+          aircraftClass: item.aircraftClass ?? null,
+        }),
+        lat,
+        lon,
+      };
+      if (Number.isFinite(item.distance))
+        distanceKm.set(row, Math.round(item.distance / 100) / 10);
+      return row;
+    });
     return { key, rows };
   });
   const selection = await selectAnalystRows(groups, {
@@ -3533,39 +3565,106 @@ async function aircraftProximityWindowForQuery(dataManager, args, result) {
     limit: Math.round(clampNumber(args.limit, 1, 50, 12)),
     layerKeys: wanted,
     distanceOf: (row) => distanceKm.get(row),
+    isCurrent,
   });
-  if (!selection) return null;
+  if (!selection || !isCurrent()) return null;
   const items = selection.items.map(compactAnalystItem);
-  return {
+  const complete = wanted.every((key) => {
+    const cohort = snapshot.cohorts?.[key];
+    return Number.isFinite(cohort?.count) && cohort.complete !== false;
+  });
+  const genericLayers = new Map(
+    (result?.coverage?.layersQueried || []).map((layer) => [
+      layer.layerKey,
+      layer,
+    ]),
+  );
+  const layersQueried = wanted.map((key) => {
+    const cohort = snapshot.cohorts?.[key] || {};
+    const generic = genericLayers.get(key) || {};
+    const sourceSnapshot = sourceSnapshotsById.get(key);
+    const returned = Number.isFinite(cohort.count)
+      ? cohort.count
+      : cohort.items?.length || 0;
+    return {
+      layerKey: key,
+      ...(generic.status ? { status: generic.status } : {}),
+      ...(generic.note ? { note: generic.note } : {}),
+      ...(generic.window ? { window: generic.window } : {}),
+      returned,
+      total: cohort.complete === false ? null : returned,
+      truncated: cohort.complete === false,
+      ...(cohort.source ? { source: cohort.source } : {}),
+      ...(sourceSnapshot
+        ? {
+            feedState: sourceSnapshot.feedState,
+            source: sourceSnapshot.source,
+            lastUpdate: sourceSnapshot.lastUpdate,
+            enabled: sourceSnapshot.enabled,
+            error: sourceSnapshot.error,
+          }
+        : {}),
+    };
+  });
+  const coverage = {
+    layersQueried,
+    records: {
+      returned: selection.count,
+      total: complete ? selection.count : null,
+      truncated: !complete,
+    },
+    scope: `window:${radiusKm}km@${label}`,
+    followUp: false,
+    feedProvenance,
+    note: `Contacts panel snapshot${snapshot.evaluatedAt ? ` at ${new Date(snapshot.evaluatedAt).toISOString()}` : ''} — the same retained cohort supplies the card, speech, and follow-up memory${complete ? '' : '; the count is a lower bound because at least one layer reached its retained limit'}.`,
+  };
+  const answer = {
     ok: true,
     action: 'analyst_query',
     count: selection.count,
-    complete: true,
+    complete,
     scopeLabel: `within ${radiusKm} km of ${label}`,
     listed: items.length,
     items,
     summary: selection.summary,
+    ...(result?.partial
+      ? { partial: true, unanswered: [...(result.unanswered || [])] }
+      : {}),
     display: {
       scope: `within ${radiusKm} km of ${label} (Contacts window)`,
     },
-    coverage: {
-      layersQueried: result?.coverage?.layersQueried || [],
-      scope: `window:${radiusKm}km@${label}`,
-      followUp: false,
-      note: 'Contacts window engine — the same computation and cohort the Contacts panel displays, so an unfiltered count matches the panel exactly — counts cover loaded data; the flights layer loads by viewport.',
-    },
+    coverage,
     // (D) The answer always says whose window it is and which engine produced it.
     window: {
       engine: 'contacts-window',
       centeredOn: label,
       radiusKm,
-      flights: window.flights.length,
-      military: window.military.length,
-      aircraft: window.aircraft,
+      flights: snapshot.cohorts?.flights?.count ?? 'unknown',
+      military: snapshot.cohorts?.military?.count ?? 'unknown',
+      aircraft:
+        Number.isFinite(snapshot.cohorts?.flights?.count) &&
+        Number.isFinite(snapshot.cohorts?.military?.count)
+          ? snapshot.cohorts.flights.count + snapshot.cohorts.military.count
+          : 'unknown',
+      complete,
+      evaluatedAt: snapshot.evaluatedAt || null,
     },
-    ...(activeContactsWindow(dataManager)
-      ? { contactsWindow: activeContactsWindow(dataManager) }
+    ...(snapshot.contactsWindow
+      ? { contactsWindow: { ...snapshot.contactsWindow } }
       : {}),
+    feedProvenance,
+    feedState: feedProvenance.overall,
+  };
+  return {
+    answer,
+    memory: {
+      matched: selection.matched,
+      layerKeys: wanted,
+      coverage,
+      unanswered: [...(result?.unanswered || [])],
+      scopeLabel: answer.scopeLabel,
+      scopeDetail: answer.display.scope,
+    },
   };
 }
 
@@ -4698,7 +4797,9 @@ async function runAnalystQuery(
   args = {},
   _layerEnabledAt,
   isCurrent = () => true,
+  signal = undefined,
 ) {
+  let entityWindow = null;
   const result = await analystEngine.query(
     {
       layers: Array.isArray(args.layers) ? args.layers : undefined,
@@ -4709,7 +4810,20 @@ async function runAnalystQuery(
       limit: args.limit,
       followUp: Boolean(args.followUp),
     },
-    { isCurrent },
+    {
+      isCurrent,
+      signal,
+      beforeCommit: async (candidate) => {
+        const projected = await aircraftProximityWindowForQuery(
+          dataManager,
+          args,
+          candidate,
+          isCurrent,
+        );
+        entityWindow = projected?.answer || null;
+        return projected?.memory || null;
+      },
+    },
   );
   if (!result.ok) {
     const refusal = {
@@ -4755,22 +4869,8 @@ async function runAnalystQuery(
   // differ. The generic record/scope engine still owns explicit regions and
   // arbitrary points — only "how many aircraft around <this contact>" is
   // unified, because that is the question the panel is already answering.
-  const entityWindow = await aircraftProximityWindowForQuery(
-    dataManager,
-    args,
-    result,
-  );
   if (entityWindow) {
-    const provenance = feedProvenanceEnvelope(
-      layerSnapshots(dataManager.getAll?.() || []).filter(
-        (layer) => layer.enabled && ['flights', 'military'].includes(layer.id),
-      ),
-    );
-    return {
-      ...entityWindow,
-      feedProvenance: provenance,
-      feedState: provenance.overall,
-    };
+    return entityWindow;
   }
 
   const contactsWindow = activeContactsWindow(dataManager);
