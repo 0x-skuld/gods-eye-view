@@ -130,9 +130,12 @@ export function panelRuntime(config) {
     });
   }
 
-  // The app's own paths: relative ones, and absolute ones on this page's
-  // site, matched by scheme and host since a host may use its own scheme.
+  // The app's own paths: relative ones, absolute ones on this page's site
+  // (matched by scheme and host, since a host may use its own scheme), and
+  // ones under the app's address in the page, an https address for code
+  // that needs one (`config.appBaseUrl`).
   const page = new URL(document.baseURI);
+  const appOrigin = new URL(config.appBaseUrl).origin;
   function appPath(value) {
     let url;
     try {
@@ -140,20 +143,33 @@ export function panelRuntime(config) {
     } catch {
       return null;
     }
-    if (url.protocol !== page.protocol || url.host !== page.host) return null;
-    return url.pathname + url.search;
+    const own =
+      url.origin === appOrigin ||
+      (url.protocol === page.protocol && url.host === page.host);
+    return own ? url.pathname + url.search : null;
   }
-  const blobUrls = new Map();
-  /** A blob: URL holding an app file, for elements that load by URL. */
+  const fileUrls = new Map();
+  /**
+   * A data: URL holding an app file, for elements that load by URL. Hosts
+   * allow data: images where some refuse blob: ones.
+   */
   function appObjectUrl(path) {
-    if (!blobUrls.has(path))
-      blobUrls.set(
+    if (!fileUrls.has(path))
+      fileUrls.set(
         path,
         appFetch(path)
           .then((response) => response.blob())
-          .then((blob) => URL.createObjectURL(blob)),
+          .then(
+            (blob) =>
+              new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(blob);
+              }),
+          ),
       );
-    return blobUrls.get(path);
+    return fileUrls.get(path);
   }
 
   function installRequests() {
@@ -311,12 +327,15 @@ export function panelRuntime(config) {
         URL.createObjectURL(new Blob([BOOT], { type: 'text/javascript' })),
         options,
       );
-      appObjectUrl(path).then((script) =>
-        worker.postMessage({
-          __gevScript: script,
-          module: options?.type === 'module',
-        }),
-      );
+      appFetch(path)
+        .then((response) => response.blob())
+        .then((blob) => URL.createObjectURL(blob))
+        .then((script) =>
+          worker.postMessage({
+            __gevScript: script,
+            module: options?.type === 'module',
+          }),
+        );
       return worker;
     };
     window.Worker.prototype = NativeWorker.prototype;
@@ -398,6 +417,7 @@ export function panelRuntime(config) {
    */
   async function startApp(url) {
     window.GEV_EMBED_INLINE = true;
+    window.GEV_APP_BASE_URL = config.appBaseUrl;
     try {
       history.replaceState(
         null,
@@ -452,6 +472,21 @@ export function panelRuntime(config) {
       })),
     );
     for (const { type, text } of scripts) await runScript(text, type);
+    // Browsers cap live 3D contexts across a conversation's panels and take
+    // one back when there are too many; say so rather than show no map.
+    document.addEventListener(
+      'webglcontextlost',
+      () => {
+        const notice = document.createElement('div');
+        notice.id = 'status';
+        notice.textContent =
+          "This panel lost its 3D graphics, likely because other God's Eye " +
+          "View panels in this conversation hold them. Use Open in God's " +
+          'Eye View above, or show it in a new conversation.';
+        document.body.appendChild(notice);
+      },
+      { capture: true, once: true },
+    );
   }
 
   // Tool results: the first view starts the app, later ones move it.

@@ -41,6 +41,12 @@ export const MCP_APP_MIME_TYPE = 'text/html;profile=mcp-app';
 const MCP_APPS_PROTOCOL_VERSION = '2026-01-26';
 const PANEL_HEIGHT_PX = 520;
 const LOAD_TIMEOUT_MS = 90_000;
+/**
+ * The app's address inside the panel, for code that needs an https address
+ * (the page's own may use a host's scheme). The panel loads its paths
+ * through the MCP server; the name never resolves.
+ */
+const PANEL_APP_BASE_URL = 'https://app.gods-eye-view.invalid/';
 /** The panel-only tool the panel loads the app through. */
 const PANEL_REQUEST_TOOL = 'panel_request';
 
@@ -51,6 +57,7 @@ const PANEL_REQUEST_TOOL = 'panel_request';
  */
 function panelHtml(runtime) {
   const config = {
+    appBaseUrl: PANEL_APP_BASE_URL,
     loadTimeoutMs: LOAD_TIMEOUT_MS,
     panelBase: PANEL_BASE,
     panelHeight: PANEL_HEIGHT_PX,
