@@ -136,6 +136,15 @@ stylesheet, Cesium's script, and Cesium's workers combined into one script
 that Cesium runs from memory (`CESIUM_WORKERS`). Rebuild it after changing
 the app.
 
+Hosts differ in ways the panel works around, all inside the panel only:
+images and stylesheet files arrive as `data:` URLs, since some hosts refuse
+`blob:` images; code that needs an https address for the app gets
+`GEV_APP_BASE_URL`, since some hosts serve the page from their own scheme;
+the globe keeps drawing from a timer when the host reports the panel hidden
+and stops animation frames; and 2D canvases are kept in memory
+(`willReadFrequently`), since a host that treats the panel as off screen may
+drop their GPU contents and show the overlays as black over the globe.
+
 Tools declare a UI resource with `defineTool({ ui: { resourceUri } })`, and
 an app-only tool with `ui: { visibility: ['app'] }`;
 `createMcpServer({ resources })` serves `resources/list` and

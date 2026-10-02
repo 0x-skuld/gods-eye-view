@@ -154,7 +154,7 @@ export function panelRuntime(config) {
    * A data: URL holding an app file, for elements that load by URL. Hosts
    * allow data: images where some refuse blob: ones.
    */
-  function appObjectUrl(path) {
+  function appFileUrl(path) {
     if (!fileUrls.has(path))
       fileUrls.set(
         path,
@@ -293,7 +293,7 @@ export function panelRuntime(config) {
         return true;
       };
 
-    // Images name app files by URL; give them the file as a blob: URL.
+    // Images name app files by URL; give them the file as a data: URL.
     const image = Object.getOwnPropertyDescriptor(
       HTMLImageElement.prototype,
       'src',
@@ -303,7 +303,7 @@ export function panelRuntime(config) {
       set(value) {
         const path = appPath(value);
         if (path === null) return image.set.call(this, value);
-        appObjectUrl(path).then(
+        appFileUrl(path).then(
           (url) => image.set.call(this, url),
           () => this.dispatchEvent(new Event('error')),
         );
@@ -365,7 +365,7 @@ export function panelRuntime(config) {
       for (const element of root?.querySelectorAll?.('[data-gev-src]') ?? []) {
         const path = appPath(element.getAttribute('data-gev-src'));
         element.removeAttribute('data-gev-src');
-        appObjectUrl(path).then((url) => element.setAttribute('src', url));
+        appFileUrl(path).then((url) => element.setAttribute('src', url));
       }
     };
     const innerHtml = Object.getOwnPropertyDescriptor(
@@ -395,15 +395,13 @@ export function panelRuntime(config) {
             if (element.nodeName !== 'IMG') continue;
             const path = appPath(element.getAttribute('src'));
             if (path !== null)
-              appObjectUrl(path).then((url) =>
-                element.setAttribute('src', url),
-              );
+              appFileUrl(path).then((url) => element.setAttribute('src', url));
           }
         }
     }).observe(document.documentElement, { childList: true, subtree: true });
   }
 
-  /** Replace url() references to app files in CSS with blob: URLs. */
+  /** Replace url() references to app files in CSS with data: URLs. */
   async function cssWithFiles(text, baseUrl) {
     const found = new Map();
     for (const match of text.matchAll(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g)) {
@@ -413,7 +411,7 @@ export function panelRuntime(config) {
       if (path !== null && !found.has(reference))
         found.set(
           reference,
-          appObjectUrl(path).catch(() => null),
+          appFileUrl(path).catch(() => null),
         );
     }
     let result = text;
@@ -447,13 +445,10 @@ export function panelRuntime(config) {
   }
 
   function runScript(text, type) {
-    return new Promise((resolve) => {
-      const script = document.createElement('script');
-      if (type) script.type = type;
-      script.textContent = text;
-      document.body.appendChild(script);
-      resolve();
-    });
+    const script = document.createElement('script');
+    if (type) script.type = type;
+    script.textContent = text;
+    document.body.appendChild(script);
   }
 
   /**
@@ -507,7 +502,7 @@ export function panelRuntime(config) {
         document.body.insertBefore(document.adoptNode(node), status);
     }
     for (const [image, path] of images)
-      appObjectUrl(path).then((url) => image.setAttribute('src', url));
+      appFileUrl(path).then((url) => image.setAttribute('src', url));
     const scripts = await Promise.all(
       [...built.querySelectorAll('script')].map(async (script) => ({
         type: script.type,
@@ -516,9 +511,9 @@ export function panelRuntime(config) {
           : script.textContent,
       })),
     );
-    for (const { type, text } of scripts) await runScript(text, type);
-    // Browsers cap live 3D contexts across a conversation's panels and take
-    // one back when there are too many; say so rather than show no map.
+    for (const { type, text } of scripts) runScript(text, type);
+    // Browsers cap live 3D contexts across pages and take one back when
+    // there are too many; say so rather than show no map.
     document.addEventListener(
       'webglcontextlost',
       () => {
@@ -594,8 +589,7 @@ export function panelRuntime(config) {
       showDisplayMode(message.params);
   });
 
-  // Fullscreen, where the host offers it: the globe gets the room, and some
-  // hosts only keep a panel on screen up to date outside the conversation.
+  // Fullscreen, where the host offers it, gives the globe the room.
   let displayMode = 'inline';
   const showDisplayMode = (context) => {
     if (context?.displayMode) displayMode = context.displayMode;

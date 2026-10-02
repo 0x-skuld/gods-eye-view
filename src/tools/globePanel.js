@@ -48,7 +48,7 @@ const LOAD_TIMEOUT_MS = 90_000;
  */
 const PANEL_APP_BASE_URL = 'https://app.gods-eye-view.invalid/';
 /** The panel-only tool the panel loads the app through. */
-const PANEL_REQUEST_TOOL = 'panel_request';
+export const PANEL_REQUEST_TOOL = 'panel_request';
 
 /**
  * The panel page: its status line, the Open in God's Eye View button, and

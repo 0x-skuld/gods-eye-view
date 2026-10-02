@@ -7,6 +7,7 @@
  */
 
 import { defineTool, ToolError } from '../catalog.js';
+import { PANEL_REQUEST_TOOL } from '../globePanel.js';
 
 /** Bytes of response body per call, before base64. */
 export const PANEL_PART_BYTES = 512 * 1024;
@@ -83,7 +84,7 @@ function checkedPath(path) {
 }
 
 export const panelRequest = defineTool({
-  name: 'panel_request',
+  name: PANEL_REQUEST_TOOL,
   title: "God's Eye View panel request",
   description:
     "Loads a file or data for the God's Eye View panel from the app's " +

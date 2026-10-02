@@ -49,8 +49,6 @@ export function isEmbeddedInline() {
 // frames; see keepPanelRendering.
 const PANEL_FRAME_MS = 33;
 const MISSED_FRAMES_MS = 250;
-const RENDER_RESTARTS = 3;
-const RENDER_RESTART_MS = 1000;
 
 /** A render error's details, including the plain objects workers report. */
 function describeError(error) {
@@ -80,11 +78,10 @@ export function keepPanelRendering(
     frameRequest = windowRef.requestAnimationFrame(onFrame);
   };
   frameRequest = windowRef.requestAnimationFrame(onFrame);
-  // Cesium stops drawing after a render error. Report it in full, and
-  // start again a few times in case it does not repeat.
+  // Cesium stops drawing after a render error, and so does the timer.
+  // Report the error in full: workers report plain objects, which Cesium
+  // prints as [object Object].
   let failed = false;
-  let restarts = 0;
-  let restart = null;
   const removeErrorListener = viewer.scene?.renderError?.addEventListener(
     (_scene, error) => {
       failed = true;
@@ -92,12 +89,6 @@ export function keepPanelRendering(
         "[God's Eye View panel] render error:",
         describeError(error),
       );
-      if (restarts >= RENDER_RESTARTS) return;
-      restarts += 1;
-      restart = windowRef.setTimeout(() => {
-        failed = false;
-        viewer.useDefaultRenderLoop = true;
-      }, RENDER_RESTART_MS);
     },
   );
   const timer = windowRef.setInterval(() => {
@@ -112,7 +103,6 @@ export function keepPanelRendering(
   }, PANEL_FRAME_MS);
   return () => {
     windowRef.clearInterval(timer);
-    windowRef.clearTimeout?.(restart);
     windowRef.cancelAnimationFrame(frameRequest);
     removeErrorListener?.();
   };
