@@ -233,6 +233,7 @@ test('resources are listed and read, and tools name their UI resource', async ()
   });
   assert.deepEqual((await call('tools/list')).tools[0]._meta, {
     ui: { resourceUri: 'ui://fixture/view' },
+    'ui/resourceUri': 'ui://fixture/view',
   });
   assert.deepEqual((await call('resources/list')).resources, [
     {

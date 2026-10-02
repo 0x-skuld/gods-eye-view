@@ -40,7 +40,14 @@ export function toMcpTools(catalog, { descriptions = {}, decorate } = {}) {
       inputSchema: tool.inputSchema,
       annotations: { title, ...tool.annotations },
       ...(tool.ui
-        ? { _meta: { ui: { resourceUri: tool.ui.resourceUri } } }
+        ? {
+            // The flat key is the earlier form of the same field, which some
+            // hosts still read; the MCP Apps SDK sends both.
+            _meta: {
+              ui: { resourceUri: tool.ui.resourceUri },
+              'ui/resourceUri': tool.ui.resourceUri,
+            },
+          }
         : {}),
     };
     return decorate
