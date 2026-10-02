@@ -15,7 +15,7 @@ const mcpOff = Object.freeze({ mcp: false });
 
 export const TOOL_SURFACES = Object.freeze({
   // Voice runs inside the app, so a link to it adds nothing.
-  show_on_globe: voiceOff,
+  show_in_gods_eye_view: voiceOff,
   // Voice has an app action of the same name.
   next_satellite_pass: voiceOff,
   // Voice receives text only, so tools that answer with an image are off.

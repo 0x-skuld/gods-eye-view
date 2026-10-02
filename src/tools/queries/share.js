@@ -77,16 +77,16 @@ function appBase(services) {
   }
 }
 
-export const showOnGlobe = defineTool({
-  name: 'show_on_globe',
-  title: 'Show on the globe',
+export const showInGodsEyeView = defineTool({
+  name: 'show_in_gods_eye_view',
+  title: "Show in God's Eye View",
   description:
-    "Shows a view of God's Eye View's globe: in clients that display apps, " +
-    'the live globe in the conversation; everywhere, a link that opens it. ' +
-    'Pass the view another answer returned, or describe one: an area framed from above ' +
-    'or a camera position, with chosen data layers, visual style and map, ' +
-    'optionally following an aircraft or satellite and with marks drawn on ' +
-    'the globe.',
+    "Shows a view in God's Eye View: in clients that display apps, the live " +
+    "God's Eye View globe in the conversation; everywhere, a link that opens " +
+    'it. Pass the view another answer returned, or describe one: an area ' +
+    'framed from above or a camera position, with chosen data layers, visual ' +
+    'style and map, optionally following an aircraft or satellite and with ' +
+    'marks drawn on the map.',
   inputSchema: {
     type: 'object',
     properties: VIEW_ARGUMENTS,

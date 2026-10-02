@@ -1,7 +1,7 @@
 /**
- * The globe panel: an MCP Apps view (`io.modelcontextprotocol/ui`) that shows
+ * The God's Eye View panel: an MCP Apps view (`io.modelcontextprotocol/ui`) that shows
  * God's Eye View inside a conversation. The panel is a small page that loads
- * the app in embed mode and sends it each view the show_on_globe tool
+ * the app in embed mode and sends it each view the show_in_gods_eye_view tool
  * returns; see docs/TOOLS.md.
  */
 
@@ -33,7 +33,7 @@ function panelHtml(appOrigin) {
 </style>
 </head>
 <body>
-<div id="status">Waiting for a view of the globe…</div>
+<div id="status">Waiting for a view…</div>
 <button id="open" type="button" hidden>Open in God's Eye View</button>
 <script>
 (() => {
@@ -82,7 +82,7 @@ function panelHtml(appOrigin) {
       frame.allow = 'fullscreen';
       frame.src = embedUrl(url);
       document.body.appendChild(frame);
-      status.textContent = 'Loading the globe…';
+      status.textContent = "Loading God's Eye View…";
       return;
     }
     if (frameReady) postView(view);
@@ -148,7 +148,7 @@ export function createGlobePanelResource({ appUrl }) {
     uri: GLOBE_PANEL_URI,
     name: 'globe',
     title: "God's Eye View globe",
-    description: 'The live globe, showing the view a tool returns.',
+    description: "Live God's Eye View, showing the view a tool returns.",
     mimeType: MCP_APP_MIME_TYPE,
     text: panelHtml(appOrigin),
     _meta: {

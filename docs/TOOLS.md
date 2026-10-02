@@ -104,9 +104,9 @@ tilted camera over an area looks at its center from behind; camera fields
 given with an area override its framing. `resolveViewArguments` turns them
 into a view.
 
-### The globe panel
+### The God's Eye View panel
 
-`show_on_globe` names an MCP Apps view (`io.modelcontextprotocol/ui`):
+`show_in_gods_eye_view` names an MCP Apps view (`io.modelcontextprotocol/ui`):
 `_meta.ui.resourceUri` is `ui://gods-eye-view/globe`, a `text/html;profile=mcp-app`
 resource from `createGlobePanelResource({ appUrl })` in
 `src/tools/globePanel.js`. Clients that display apps render it inside the
@@ -250,4 +250,4 @@ public feeds the sources already use.
 | `situation_brief` | `weather` | Weather, earthquakes, fires, aircraft, ships and cyclones for an area, by section |
 | `military_awareness` | `military` | Military and other aircraft, ships and military installations within 250 km of a point, by section |
 | `get_hud_caption` | `weather`, `summary` | The app's heads-up display caption for an area |
-| `show_on_globe` | `app` | A view on the globe: the live globe panel in clients with MCP Apps, and a link everywhere; takes another answer's view or an area or camera, layers, style, map, marks and something to follow |
+| `show_in_gods_eye_view` | `app` | A view in God's Eye View: the live panel in clients with MCP Apps, and a link everywhere; takes another answer's view or an area or camera, layers, style, map, marks and something to follow |

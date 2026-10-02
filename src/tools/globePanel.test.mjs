@@ -23,12 +23,12 @@ test('the globe panel is an MCP Apps resource that may frame only the app', () =
   assert.match(resource.text, /protocolVersion: "2026-01-26"/);
 });
 
-test('show_on_globe names the panel and shows a view another answer returned', async () => {
+test('show_in_gods_eye_view names the panel and shows a view another answer returned', async () => {
   const catalog = composeCatalog({
     tools: coreTools,
     services: { app: { baseUrl: 'http://localhost:5173/' } },
   });
-  assert.deepEqual(catalog.get('show_on_globe').ui, {
+  assert.deepEqual(catalog.get('show_in_gods_eye_view').ui, {
     resourceUri: GLOBE_PANEL_URI,
   });
   const earlier = {
@@ -46,7 +46,7 @@ test('show_on_globe names the panel and shows a view another answer returned', a
     annotations: [],
     url: 'http://localhost:5173/#v=2',
   };
-  const shown = await catalog.call('show_on_globe', {
+  const shown = await catalog.call('show_in_gods_eye_view', {
     view: earlier,
     layers: ['ais-live-vessels', 'military'],
     style: 'thermal',
@@ -55,7 +55,7 @@ test('show_on_globe names the panel and shows a view another answer returned', a
   assert.deepEqual(shown.data.view.layers, ['ais-live-vessels', 'military']);
   assert.equal(shown.data.view.style, 'thermal');
   await assert.rejects(
-    catalog.call('show_on_globe', { view: { camera: { lat: 'x' } } }),
+    catalog.call('show_in_gods_eye_view', { view: { camera: { lat: 'x' } } }),
     (error) => error.code === 'invalid_arguments',
   );
 });
