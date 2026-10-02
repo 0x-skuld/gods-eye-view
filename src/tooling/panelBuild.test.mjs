@@ -74,6 +74,7 @@ test('the dev server serves the panel build and nothing outside it', async () =>
     const script = await get('/panel/assets/a.js');
     assert.equal(script.headers['Content-Type'], 'text/javascript');
     assert.equal((await get('/panel/missing.js')).status, 404);
+    assert.equal((await get('/panel/%ZZ')).status, 400);
     assert.deepEqual(await get('/panel/..%2Fsecret.txt'), { passed: true });
     assert.deepEqual(await get('/other'), { passed: true });
   } finally {

@@ -110,7 +110,10 @@ export function panelRuntime(config) {
         headers: part.headers,
       };
     })();
-    if (shared) held.set(path, loading);
+    if (shared) {
+      held.set(path, loading);
+      loading.catch(() => held.delete(path));
+    }
     const result = loading.then(respond);
     if (!init.signal) return result;
     return Promise.race([
@@ -152,25 +155,28 @@ export function panelRuntime(config) {
   const fileUrls = new Map();
   /**
    * A data: URL holding an app file, for elements that load by URL. Hosts
-   * allow data: images where some refuse blob: ones.
+   * allow data: images where some refuse blob: ones. Files of the panel
+   * build never change and are kept; others, such as live camera frames
+   * that change address on every refresh, are not.
    */
   function appFileUrl(path) {
-    if (!fileUrls.has(path))
-      fileUrls.set(
-        path,
-        appFetch(path)
-          .then((response) => response.blob())
-          .then(
-            (blob) =>
-              new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = () => reject(reader.error);
-                reader.readAsDataURL(blob);
-              }),
-          ),
+    if (fileUrls.has(path)) return fileUrls.get(path);
+    const loading = appFetch(path)
+      .then((response) => response.blob())
+      .then(
+        (blob) =>
+          new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(blob);
+          }),
       );
-    return fileUrls.get(path);
+    if (path.startsWith(config.panelBase)) {
+      fileUrls.set(path, loading);
+      loading.catch(() => fileUrls.delete(path));
+    }
+    return loading;
   }
 
   function installRequests() {

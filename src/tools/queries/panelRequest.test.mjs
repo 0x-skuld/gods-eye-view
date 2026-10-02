@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { composeCatalog, coreTools } from '../index.js';
-import { PANEL_PART_BYTES } from './panelRequest.js';
+import {
+  PANEL_PART_BYTES,
+  PANEL_RESPONSE_LIMIT_BYTES,
+} from './panelRequest.js';
 
 const fromBase64 = (text) => Buffer.from(text, 'base64');
 const gunzip = async (bytes) =>
@@ -93,7 +96,10 @@ test('a request body and method pass through; settings and other sites do not', 
   for (const path of [
     '/api/setup/status',
     '/api/setup',
+    '/api/%73etup/status',
     '//evil.example/x',
+    '/\\evil.example/secret',
+    '/\\/evil.example/secret',
     'http://evil.example/',
   ])
     await assert.rejects(
@@ -106,4 +112,58 @@ test('a request body and method pass through; settings and other sites do not', 
     (error) => error.code === 'invalid_arguments',
   );
   assert.equal(requests.length, 1);
+});
+
+test('the path is requested as the parser reads it, without following redirects', async () => {
+  const { catalog, requests } = catalogWith(() => new Response('ok'));
+  await catalog.call('panel_request', { path: '/panel/a/../b.js?x=1' });
+  assert.equal(requests[0].path, '/panel/b.js?x=1');
+  assert.equal(requests[0].redirect, 'manual');
+  assert.ok(requests[0].signal instanceof AbortSignal);
+});
+
+test('a response larger than the panel may load is refused while reading', async () => {
+  const chunk = new Uint8Array(1024 * 1024);
+  let sent = 0;
+  const { catalog } = catalogWith(
+    () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            sent += chunk.length;
+            controller.enqueue(chunk);
+          },
+        }),
+      ),
+  );
+  await assert.rejects(
+    catalog.call('panel_request', { path: '/huge' }),
+    (error) => error.code === 'unavailable' && /too large/.test(error.message),
+  );
+  assert.ok(sent <= PANEL_RESPONSE_LIMIT_BYTES + 2 * chunk.length, `${sent}`);
+});
+
+test('large responses read in turn keep their own parts', async () => {
+  const bodies = [1, 2].map((fill) =>
+    new Uint8Array(PANEL_PART_BYTES + 5).fill(fill),
+  );
+  let index = 0;
+  const { catalog } = catalogWith(
+    () =>
+      new Response(bodies[index++], {
+        headers: { 'content-type': 'image/png' },
+      }),
+  );
+  const first = (await catalog.call('panel_request', { path: '/a.png' })).data;
+  const second = (await catalog.call('panel_request', { path: '/b.png' })).data;
+  for (const [start, fill] of [
+    [first, 1],
+    [second, 2],
+  ]) {
+    const { data } = await catalog.call('panel_request', {
+      id: start.id,
+      offset: start.nextOffset,
+    });
+    assert.deepEqual([...fromBase64(data.body)], [1, 1, 1, 1, 1].fill(fill));
+  }
 });

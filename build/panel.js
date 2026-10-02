@@ -74,7 +74,14 @@ export function panelBuildPlugin({ outDir = PANEL_OUT_DIR } = {}) {
         const { readFile } = await import('node:fs/promises');
         const { extname, resolve, sep } = await import('node:path');
         const root = resolve(server.config.root, outDir);
-        const relative = decodeURIComponent(pathname.slice(PANEL_BASE.length));
+        let relative;
+        try {
+          relative = decodeURIComponent(pathname.slice(PANEL_BASE.length));
+        } catch {
+          res.statusCode = 400;
+          res.end('Bad path');
+          return;
+        }
         const file = resolve(root, relative || 'index.html');
         if (file !== root && !file.startsWith(root + sep)) return next();
         try {
