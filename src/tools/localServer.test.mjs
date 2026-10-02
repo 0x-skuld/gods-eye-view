@@ -4,7 +4,7 @@ import { PassThrough } from 'node:stream';
 import { createLocalMcpServer } from '../../server/mcp/server.js';
 import { createApiFetch } from '../../server/mcp/services.js';
 import { parseArgs, serveStdio } from '../../server/mcp/stdio.js';
-import { coreTools } from './index.js';
+import { coreTools, toolsForSurface } from './index.js';
 
 const usgs = {
   type: 'FeatureCollection',
@@ -70,7 +70,7 @@ test('the stdio server answers newline-delimited requests using only its data so
   // Every Core tool's services are composed locally.
   assert.deepEqual(
     byId.get(2).result.tools.map((tool) => tool.name),
-    coreTools.map((tool) => tool.name),
+    toolsForSurface(coreTools, 'mcp').map((tool) => tool.name),
   );
   assert.equal(
     byId.get(3).result.content[0].text,

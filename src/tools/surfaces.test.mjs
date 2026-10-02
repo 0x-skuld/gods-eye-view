@@ -11,17 +11,32 @@ import {
 
 const names = (tools) => tools.map((tool) => tool.name);
 
-test('MCP offers every tool and voice leaves out the table entries', () => {
-  assert.deepEqual(names(toolsForSurface(coreTools, 'mcp')), names(coreTools));
+test('each surface offers the tools the table does not turn off', () => {
+  for (const surface of ['mcp', 'voice']) {
+    const offered = names(toolsForSurface(coreTools, surface));
+    const expected = names(coreTools).filter(
+      (name) => TOOL_SURFACES[name]?.[surface] !== false,
+    );
+    assert.deepEqual(offered, expected, surface);
+  }
+  const mcp = names(toolsForSurface(coreTools, 'mcp'));
+  for (const name of [
+    'open_in_gods_eye_view',
+    'situation_brief',
+    'aircraft_in_area',
+  ])
+    assert.ok(mcp.includes(name), name);
+  for (const name of [
+    'search_places',
+    'plan_route',
+    'get_weather',
+    'get_hud_caption',
+  ])
+    assert.ok(!mcp.includes(name), name);
   const voice = names(toolsForSurface(coreTools, 'voice'));
-  assert.equal(
-    voice.length,
-    coreTools.length - Object.keys(TOOL_SURFACES).length,
-  );
-  for (const name of Object.keys(TOOL_SURFACES))
-    assert.ok(!voice.includes(name), name);
   assert.ok(voice.includes('get_weather'));
   assert.ok(voice.includes('military_awareness'));
+  assert.ok(!voice.includes('aircraft_in_area'));
 });
 
 test('overrides turn a tool on or off for one surface', () => {
@@ -44,7 +59,8 @@ test('every table entry names a core tool and a known surface', () => {
   const names = new Set(coreTools.map((tool) => tool.name));
   for (const [name, entry] of Object.entries(TOOL_SURFACES)) {
     assert.ok(names.has(name), name);
-    assert.deepEqual(Object.keys(entry), ['voice']);
+    for (const key of Object.keys(entry))
+      assert.ok(['voice', 'mcp'].includes(key), `${name}: ${key}`);
   }
 });
 
