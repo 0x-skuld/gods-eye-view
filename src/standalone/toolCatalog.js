@@ -16,7 +16,7 @@ export function loadToolCatalog() {
           tools: coreTools,
           services: createToolServices({
             fetchImpl: (...args) => globalThis.fetch(...args),
-            appUrl: globalThis.location.origin,
+            appUrl: new URL(globalThis.document.baseURI).origin,
           }),
         }),
         'voice',

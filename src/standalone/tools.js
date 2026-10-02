@@ -8,7 +8,7 @@ export function createStandaloneTools(options) {
     sceneDataPacks: {
       sources: {
         assets: createAssetDirectorySource({
-          baseUrl: new URL('/scene-assets/', window.location.href).href,
+          baseUrl: new URL('/scene-assets/', document.baseURI).href,
         }),
       },
     },

@@ -529,7 +529,13 @@ export class ShareLinkManager {
     if (this._destroyed || this._initialRestorePending) return;
     const params = this._buildHashParams();
     if (!params) return;
-    history.replaceState(null, '', `#${params.toString()}`);
+    // The hash belongs to this page's address, not the document base the
+    // app may load under.
+    history.replaceState(
+      null,
+      '',
+      new URL(`#${params.toString()}`, window.location.href).href,
+    );
   }
 
   /** Build a deterministic snapshot without mutating history. */

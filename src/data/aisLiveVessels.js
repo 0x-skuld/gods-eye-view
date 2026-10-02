@@ -5,6 +5,9 @@ import { createAisStreamSource } from '../sources/live/standalone.js';
 const aisLiveVesselsLayer = createApplicationVessels({
   source: createAisStreamSource({
     apiUrl: import.meta.env?.VITE_AIS_LIVE_API_URL || '/api/ais-live',
+    // The app's server, also when a panel page loads the app under <base>.
+    origin: () =>
+      new URL(globalThis.document?.baseURI ?? 'http://localhost').origin,
   }),
   options: {
     maxRows: import.meta.env?.VITE_AIS_LIVE_MAX_ROWS,

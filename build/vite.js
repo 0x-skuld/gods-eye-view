@@ -8,6 +8,39 @@ export const PANEL_CORS_ORIGINS = Object.freeze([
   /^https:\/\/[a-z0-9]+\.claudemcpcontent\.com$/,
 ]);
 
+/**
+ * Vite plugin answering cross-origin reads from PANEL_CORS_ORIGINS on every
+ * path. It runs ahead of the API middlewares, which Vite's own `cors` option
+ * would not cover.
+ */
+function panelCorsPlugin() {
+  const install = (server) => {
+    server.middlewares.use((req, res, next) => {
+      const origin = req.headers.origin;
+      if (
+        !origin ||
+        !PANEL_CORS_ORIGINS.some((allowed) => allowed.test(origin))
+      )
+        return next();
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      if (req.method !== 'OPTIONS') return next();
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        req.headers['access-control-request-headers'] || '',
+      );
+      res.statusCode = 204;
+      res.end();
+    });
+  };
+  return {
+    name: 'panel-cors',
+    configureServer: install,
+    configurePreviewServer: install,
+  };
+}
+
 /** Build browser assets with explicit inputs; never load environment or providers. */
 export function createBrowserViteConfig({
   plugins = [],
@@ -20,6 +53,7 @@ export function createBrowserViteConfig({
 } = {}) {
   return {
     plugins: [
+      panelCorsPlugin(),
       cesium(),
       applicationHtmlPlugin(),
       ...plugins,
@@ -52,7 +86,7 @@ export function createBrowserViteConfig({
       },
       // Cross-origin reads: local pages, as Vite allows by default, plus the
       // MCP Apps panels that load the app into a conversation (Claude's
-      // sandbox origins). Development and preview only.
+      // sandbox origins); see panelCorsPlugin. Development and preview only.
       cors: { origin: PANEL_CORS_ORIGINS },
       // These headers protect the document containing Provider Settings.
       // Embed-mode documents are framable instead; see embed-framing.js.

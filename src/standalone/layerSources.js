@@ -29,6 +29,9 @@ export function createStandaloneLayerSources() {
     military: createAdsbLolSource(),
     vessels: createAisStreamSource({
       apiUrl: import.meta.env?.VITE_AIS_LIVE_API_URL || '/api/ais-live',
+      // The app's server, also when a panel page loads the app under <base>.
+      origin: () =>
+        new URL(globalThis.document?.baseURI ?? 'http://localhost').origin,
     }),
     cctv: createCctvSource(),
     radio: createRadioSource(),
