@@ -38,6 +38,7 @@ function panelHtml(appOrigin) {
 <script>
 (() => {
   const APP_ORIGIN = ${JSON.stringify(appOrigin)};
+  const LOAD_TIMEOUT_MS = 20000;
   const status = document.getElementById('status');
   const open = document.getElementById('open');
   let nextId = 1;
@@ -83,6 +84,12 @@ function panelHtml(appOrigin) {
       frame.src = embedUrl(url);
       document.body.appendChild(frame);
       status.textContent = "Loading God's Eye View…";
+      // Say so, rather than wait forever, when the app cannot load here.
+      setTimeout(() => {
+        if (!frameReady)
+          status.textContent =
+            "God's Eye View did not load here. Use Open in God's Eye View above.";
+      }, LOAD_TIMEOUT_MS);
       return;
     }
     if (frameReady) postView(view);
@@ -119,17 +126,22 @@ function panelHtml(appOrigin) {
     );
   });
 
+  // The handshake the MCP Apps SDK's App.connect performs: hosts validate
+  // these parameters, and keep a view hidden until it is initialized.
   request('ui/initialize', {
-    protocolVersion: ${JSON.stringify(MCP_APPS_PROTOCOL_VERSION)},
-    clientInfo: { name: 'gods-eye-view-globe', version: '1' },
-    capabilities: {},
     appCapabilities: { availableDisplayModes: ['inline', 'fullscreen'] },
+    appInfo: { name: 'gods-eye-view', title: "God's Eye View", version: '1.0.0' },
+    protocolVersion: ${JSON.stringify(MCP_APPS_PROTOCOL_VERSION)},
   }).then(() => {
-    notify('ui/notifications/initialized', {});
+    send({ method: 'ui/notifications/initialized' });
     notify('ui/notifications/size-changed', {
       width: document.body.clientWidth,
       height: ${PANEL_HEIGHT_PX},
     });
+  }, (error) => {
+    status.textContent =
+      "This client did not accept the God's Eye View panel" +
+      (error && error.message ? ': ' + error.message : '.');
   });
 })();
 </script>

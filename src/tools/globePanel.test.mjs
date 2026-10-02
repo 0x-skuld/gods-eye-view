@@ -21,6 +21,9 @@ test('the globe panel is an MCP Apps resource that may frame only the app', () =
   assert.match(resource.text, /'ui\/initialize'/);
   assert.match(resource.text, /'ui\/notifications\/tool-result'/);
   assert.match(resource.text, /protocolVersion: "2026-01-26"/);
+  // The MCP Apps SDK's initialize parameters; hosts reject anything else.
+  assert.match(resource.text, /appInfo: \{ name: 'gods-eye-view'/);
+  assert.doesNotMatch(resource.text, /clientInfo/);
 });
 
 test('show_in_gods_eye_view names the panel and shows a view another answer returned', async () => {
