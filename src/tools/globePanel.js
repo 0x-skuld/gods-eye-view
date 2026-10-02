@@ -221,9 +221,16 @@ function panelHtml(appOrigin) {
    * styles and markup are copied in, and its scripts run here with the app
    * in inline embed mode.
    */
-  async function startApp() {
+  async function startApp(url) {
     window.GEV_EMBED_INLINE = true;
     redirectRequests();
+    // Start at the first view, as its link would, instead of the default
+    // place; the app reads the view from this page's address.
+    try {
+      history.replaceState(null, '', location.href.split('#')[0] + new URL(url).hash);
+    } catch {
+      // The view still arrives once the app is ready.
+    }
     const response = await fetch(APP_ORIGIN + '/?embed=1');
     if (!response.ok) throw new Error('the app answered ' + response.status);
     const page = new DOMParser().parseFromString(await response.text(), 'text/html');
@@ -256,7 +263,7 @@ function panelHtml(appOrigin) {
     if (started) return;
     started = true;
     status.textContent = "Loading God's Eye View…";
-    startApp().catch((error) => {
+    startApp(url).catch((error) => {
       status.textContent =
         "God's Eye View could not load here: " + (error && error.message) + '.';
     });
