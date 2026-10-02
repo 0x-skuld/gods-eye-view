@@ -31,6 +31,9 @@ test('the globe panel is an MCP Apps resource that loads the app through its ser
   // The MCP Apps SDK's initialize parameters; hosts reject anything else.
   assert.match(resource.text, /appInfo: \{/);
   assert.doesNotMatch(resource.text, /clientInfo/);
+  // Fullscreen where the host offers it.
+  assert.match(resource.text, /'ui\/request-display-mode'/);
+  assert.match(resource.text, /<button id="expand" type="button" hidden>/);
   assert.doesNotMatch(resource.text, /<iframe|createElement\('base'\)/);
   const script = resource.text.match(/<script>([\s\S]*)<\/script>/)[1];
   assert.doesNotThrow(() => new Function(script));

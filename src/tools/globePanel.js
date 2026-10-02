@@ -75,18 +75,22 @@ function panelHtml(runtime) {
 <meta charset="utf-8">
 <title>God's Eye View</title>
 <style>
-  html, body { margin: 0; height: ${PANEL_HEIGHT_PX}px; background: #05070a; color: #b8c4cc;
-    font: 13px/1.4 system-ui, sans-serif; overflow: hidden; }
+  html, body { margin: 0; height: 100%; min-height: ${PANEL_HEIGHT_PX}px; background: #05070a;
+    color: #b8c4cc; font: 13px/1.4 system-ui, sans-serif; overflow: hidden; }
   #status { position: absolute; inset: 0; z-index: 10000; display: flex; align-items: center;
     justify-content: center; padding: 0 24px; text-align: center; }
-  #open { position: absolute; right: 10px; top: 10px; z-index: 10001; padding: 6px 10px; border: 1px solid #3a4a55;
-    border-radius: 6px; background: rgba(5, 7, 10, 0.75); color: #dfe8ee; font: inherit; cursor: pointer; }
-  #open[hidden] { display: none; }
+  #actions { position: absolute; right: 10px; top: 10px; z-index: 10001; display: flex; gap: 6px; }
+  #actions button { padding: 6px 10px; border: 1px solid #3a4a55; border-radius: 6px;
+    background: rgba(5, 7, 10, 0.75); color: #dfe8ee; font: inherit; cursor: pointer; }
+  #actions button[hidden] { display: none; }
 </style>
 </head>
 <body>
 <div id="status">Waiting for a view…</div>
+<div id="actions">
+<button id="expand" type="button" hidden>Expand</button>
 <button id="open" type="button" hidden>Open in God's Eye View</button>
+</div>
 <script>${script}</script>
 </body>
 </html>

@@ -13,6 +13,7 @@
 export function panelRuntime(config) {
   const status = document.getElementById('status');
   const open = document.getElementById('open');
+  const expand = document.getElementById('expand');
   const say = (text) => {
     if (status.isConnected) status.textContent = text;
   };
@@ -340,6 +341,40 @@ export function panelRuntime(config) {
     };
     window.Worker.prototype = NativeWorker.prototype;
 
+    // Markup the app adds as HTML text would request its images from this
+    // page's site at once; hold their addresses until the files are here.
+    const htmlWithHeldImages = (html) =>
+      String(html).replace(
+        /(<(?:img|source)\b[^>]*?\s)src=(["'])([^"']*)\2/gi,
+        (tag, before, quote, value) =>
+          appPath(value) === null
+            ? tag
+            : `${before}data-gev-src=${quote}${value}${quote}`,
+      );
+    const fillHeldImages = (root) => {
+      for (const element of root?.querySelectorAll?.('[data-gev-src]') ?? []) {
+        const path = appPath(element.getAttribute('data-gev-src'));
+        element.removeAttribute('data-gev-src');
+        appObjectUrl(path).then((url) => element.setAttribute('src', url));
+      }
+    };
+    const innerHtml = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      'innerHTML',
+    );
+    Object.defineProperty(Element.prototype, 'innerHTML', {
+      ...innerHtml,
+      set(value) {
+        innerHtml.set.call(this, htmlWithHeldImages(value));
+        fillHeldImages(this);
+      },
+    });
+    const insertHtml = Element.prototype.insertAdjacentHTML;
+    Element.prototype.insertAdjacentHTML = function (position, html) {
+      insertHtml.call(this, position, htmlWithHeldImages(html));
+      fillHeldImages(this.parentNode ?? this);
+    };
+
     // Markup and styles the app adds later name app files too.
     new MutationObserver((records) => {
       for (const record of records)
@@ -545,6 +580,26 @@ export function panelRuntime(config) {
       return;
     }
     if (message.method === 'ui/notifications/tool-result') show(message.params);
+    if (message.method === 'ui/notifications/host-context-changed')
+      showDisplayMode(message.params);
+  });
+
+  // Fullscreen, where the host offers it: the globe gets the room, and some
+  // hosts only keep a panel on screen up to date outside the conversation.
+  let displayMode = 'inline';
+  const showDisplayMode = (context) => {
+    if (context?.displayMode) displayMode = context.displayMode;
+    if (context?.availableDisplayModes)
+      expand.hidden = !context.availableDisplayModes.includes('fullscreen');
+    expand.textContent = displayMode === 'fullscreen' ? 'Collapse' : 'Expand';
+  };
+  expand.addEventListener('click', () => {
+    request('ui/request-display-mode', {
+      mode: displayMode === 'fullscreen' ? 'inline' : 'fullscreen',
+    }).then(
+      (result) => showDisplayMode({ displayMode: result?.mode }),
+      () => {},
+    );
   });
 
   open.addEventListener('click', () => {
@@ -565,7 +620,8 @@ export function panelRuntime(config) {
     },
     protocolVersion: config.protocolVersion,
   }).then(
-    () => {
+    (result) => {
+      showDisplayMode(result?.hostContext);
       send({ method: 'ui/notifications/initialized' });
       notify('ui/notifications/size-changed', {
         width: document.body.clientWidth,
