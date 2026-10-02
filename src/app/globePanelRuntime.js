@@ -341,6 +341,16 @@ export function panelRuntime(config) {
     };
     window.Worker.prototype = NativeWorker.prototype;
 
+    // Some hosts drop the GPU contents of a panel's 2D canvases while they
+    // consider the panel off screen, and the overlays then cover the globe
+    // in black. Keep 2D canvases in memory instead, which hosts do not drop.
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (type, options) {
+      return type === '2d'
+        ? getContext.call(this, type, { ...options, willReadFrequently: true })
+        : getContext.call(this, type, options);
+    };
+
     // Markup the app adds as HTML text would request its images from this
     // page's site at once; hold their addresses until the files are here.
     const htmlWithHeldImages = (html) =>
