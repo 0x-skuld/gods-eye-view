@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { composeCatalog, coreTools } from '../index.js';
 import { LiveSourceError } from '../../sources/live/contract.js';
+import { createAisStreamSource } from '../../sources/live/standalone.js';
+import { AISSTREAM_CACHE_MAX } from '../../../server/providers/vessels/ais-store.js';
 
 const vessel = (id, latitude, longitude, extra = {}) => ({
   id,
@@ -178,4 +180,24 @@ test('a missing AIS key surfaces as an unavailable feed', async () => {
       error.code === 'unavailable' &&
       error.message === 'AISSTREAM_API_KEY not set',
   );
+});
+
+test('vessel searches ask for every vessel the server retains', async () => {
+  const requested = [];
+  const source = createAisStreamSource({
+    origin: () => 'http://localhost',
+    fetchImpl: async (url) => {
+      requested.push(new URL(url).searchParams.get('maxRows'));
+      return Response.json({ rows: [], source: 'AISStream', status: 'live' });
+    },
+  });
+  const catalog = composeCatalog({
+    tools: coreTools,
+    services: { vessels: source },
+  });
+  await catalog.call('find_vessel', { mmsi: '366999712' });
+  await catalog.call('vessels_in_area', { area: bay });
+  assert.equal(requested.length, 2);
+  for (const maxRows of requested)
+    assert.ok(Number(maxRows) >= AISSTREAM_CACHE_MAX, maxRows);
 });

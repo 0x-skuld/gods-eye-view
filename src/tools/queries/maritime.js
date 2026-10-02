@@ -22,6 +22,7 @@ const MMSI_SCHEMA = Object.freeze({
   description: 'Maritime Mobile Service Identity, such as "366999712".',
 });
 const MAX_TRACK_POINTS = 200;
+const ALL_VESSELS = 1_000_000;
 
 const round = (value, digits) =>
   Number.isFinite(value) ? Number(value.toFixed(digits)) : null;
@@ -43,6 +44,15 @@ function vesselRow(record, from) {
     observed_at: isoTime(record.observedAtMs),
     ...(from ? { distance_km: round(distanceKm(from, point), 1) } : {}),
   };
+}
+
+/**
+ * Every vessel the source retains. The source's default is the newest few
+ * thousand, which can leave out a vessel the server still holds; asking for
+ * more than any server keeps lets the server return all of them.
+ */
+function readVessels(services, signal) {
+  return services.vessels.getSnapshot({ maxRows: ALL_VESSELS }, { signal });
 }
 
 function snapshotInfo(snapshot) {
@@ -79,7 +89,7 @@ export const vesselsInArea = defineTool({
   async run(args, { services, signal }) {
     const area = await resolveArea(args.area, { services, signal });
     const center = areaCenter(area);
-    const snapshot = await services.vessels.getSnapshot({}, { signal });
+    const snapshot = await readVessels(services, signal);
     const wanted = args.type?.toLowerCase();
     const rows = snapshot.records
       .filter(
@@ -130,7 +140,7 @@ export const findVessel = defineTool({
       imo: (record) => String(record.imo).replace(/^IMO/i, '') === wanted,
       name: (record) => String(record.name).toUpperCase().includes(wanted),
     }[key];
-    const snapshot = await services.vessels.getSnapshot({}, { signal });
+    const snapshot = await readVessels(services, signal);
     const rows = snapshot.records
       .filter(matches)
       .map((record) => vesselRow(record));
