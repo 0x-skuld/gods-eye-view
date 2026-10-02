@@ -2038,7 +2038,8 @@
       "src/data/infrastructureOverlayEntry.js",
       "src/sources/infrastructureData.js",
       "src/tools/functions.js",
-      "src/voice/actionSchemas.js"
+      "src/voice/actionSchemas.js",
+      "src/view/index.js"
     ],
     "external": [
       "hls.js",
@@ -3131,7 +3132,8 @@
       "src/data/layerSnapshot.js",
       "src/data/feedState.js",
       "src/loadingFeedback.js",
-      "src/data/installationFeedback.js"
+      "src/data/installationFeedback.js",
+      "src/view/index.js"
     ],
     "external": ["satellite.js"]
   },
@@ -3211,5 +3213,14 @@
       "src/sources/eventPacks.js"
     ],
     "external": ["@mapbox/vector-tile", "pbf"]
+  },
+  "view": {
+    "exports": ["./view"],
+    "modules": [
+      "src/view/index.js",
+      "src/data/layerState.js",
+      "src/data/layerStateTokenReservations.json"
+    ],
+    "external": []
   }
 }

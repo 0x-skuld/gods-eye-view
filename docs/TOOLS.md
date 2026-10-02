@@ -79,6 +79,22 @@ the GBFS source. `createGeocodePlaceService` resolves place names through `/api/
 `createPlaceSearchService` searches `/api/google/*` and reports when no search key
 is configured; `createRouteService` plans routes through `/api/route`.
 
+## Views
+
+`gods-eye-view/view` (`src/view/index.js`) describes what the app shows,
+independent of how it is shown: a camera (lat, lon, altitude, heading,
+pitch), data layers, visual style, map imagery, and an aircraft, military
+aircraft or satellite to follow. `createView` builds and bounds one,
+`viewToParams` and `viewFromParams` write and read it in the share-link
+format the app restores, and `viewUrl` gives the address that opens it. The
+style names are the ones share links use. Ships cannot be followed from a
+link yet.
+
+Tools take a view as `VIEW_ARGUMENTS`: an `area` to frame from above, or a
+`camera`, plus `layers`, `style`, `map` and `follow`; camera fields given
+with an area override its framing. `resolveViewArguments` turns them into a
+view.
+
 ## The `area` argument
 
 Location-scoped tools take `area` as exactly one of a `place` name, a `bbox`
@@ -187,4 +203,4 @@ public feeds the sources already use.
 | `situation_brief` | `weather` | Weather, earthquakes, fires, aircraft, ships and cyclones for an area, by section |
 | `military_awareness` | `military` | Military and other aircraft, ships and military installations within 250 km of a point, by section |
 | `get_hud_caption` | `weather`, `summary` | The app's heads-up display caption for an area |
-| `open_in_gods_eye_view` | `app` | A share link looking straight down on an area, with chosen layers on |
+| `open_in_gods_eye_view` | `app` | A share link to a view: an area or camera, layers, style, map, and an aircraft or satellite to follow |

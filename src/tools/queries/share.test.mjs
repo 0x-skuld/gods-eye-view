@@ -22,6 +22,7 @@ test('links open the app looking straight down on the area', async () => {
     alt: '9091',
     heading: '0',
     pitch: '-90',
+    roll: '0',
   });
   assert.equal(
     result.summary,
@@ -37,11 +38,11 @@ test('altitude is bounded for tiny and planet-sized areas', async () => {
   const tiny = await catalog.call('open_in_gods_eye_view', {
     area: { lat: 0, lon: 0, radius_km: 0.1 },
   });
-  assert.equal(tiny.data.altitude_m, 500);
+  assert.equal(tiny.data.view.camera.altitude_m, 500);
   const world = await catalog.call('open_in_gods_eye_view', {
     area: { bbox: [-180, -85, 180, 85] },
   });
-  assert.equal(world.data.altitude_m, 15000000);
+  assert.equal(world.data.view.camera.altitude_m, 15000000);
   const broken = composeCatalog({
     tools: coreTools,
     services: { app: { baseUrl: 'not a url' } },
@@ -64,7 +65,7 @@ test('links turn on the requested layers with the app share-link codec', async (
     area: { lat: 30.27, lon: -97.74, radius_km: 10 },
     layers: ['earthquakes', 'flights', 'flights'],
   });
-  assert.deepEqual(result.data.layers, ['earthquakes', 'flights']);
+  assert.deepEqual(result.data.view.layers, ['earthquakes', 'flights']);
   const params = new URLSearchParams(new URL(result.data.url).hash.slice(1));
   assert.deepEqual(decodeLayerStateParams(params).enabledLayerIds.sort(), [
     'earthquakes',
@@ -76,5 +77,39 @@ test('links turn on the requested layers with the app share-link codec', async (
       layers: ['not-a-layer'],
     }),
     /must be one of/,
+  );
+});
+
+test('links carry a camera, style, map and an entity to follow', async () => {
+  const { viewFromParams } = await import('../../view/index.js');
+  const catalog = composeCatalog({
+    tools: coreTools,
+    services: { app: { baseUrl: 'http://localhost:4173/' } },
+  });
+  const result = await catalog.call('open_in_gods_eye_view', {
+    area: { lat: 25, lon: 121, radius_km: 200 },
+    camera: { pitch_deg: -40, heading_deg: 350 },
+    layers: ['ais-live-vessels'],
+    style: 'thermal',
+    map: 'esri-imagery',
+    follow: { kind: 'military_aircraft', id: 'AE1234' },
+  });
+  const params = new URLSearchParams(new URL(result.data.url).hash.slice(1));
+  assert.equal(params.get('style'), 'flir');
+  assert.deepEqual(viewFromParams(params), result.data.view);
+  assert.deepEqual(result.data.view.layers, ['ais-live-vessels', 'military']);
+  assert.deepEqual(result.data.view.follow, {
+    kind: 'military_aircraft',
+    id: 'ae1234',
+  });
+  assert.equal(result.data.view.camera.pitch_deg, -40);
+  const camera = await catalog.call('open_in_gods_eye_view', {
+    camera: { lat: 48.8584, lon: 2.2945, altitude_m: 1200, pitch_deg: -30 },
+  });
+  assert.equal(camera.data.view.camera.altitude_m, 1200);
+  assert.match(camera.summary, /^Open 48\.858, 2\.295 in God's Eye View: /);
+  await assert.rejects(
+    catalog.call('open_in_gods_eye_view', { layers: ['flights'] }),
+    /Give an area, or a camera with lat and lon/,
   );
 });

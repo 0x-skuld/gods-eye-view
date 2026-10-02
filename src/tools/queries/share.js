@@ -1,10 +1,6 @@
-/** A link that opens God's Eye View on an area. */
+/** Links that open God's Eye View at a view. */
 
-import {
-  REGISTERED_LAYER_IDS,
-  createDefaultLayerState,
-  encodeLayerStateParams,
-} from '../../data/layerState.js';
+import { VIEW_PROPERTIES, createView, viewUrl } from '../../view/index.js';
 import { defineTool, ToolError } from '../catalog.js';
 import { AREA_SCHEMA, areaCenter, areaRadiusKm, resolveArea } from '../area.js';
 
@@ -13,65 +9,86 @@ const MAX_ALTITUDE_M = 15_000_000;
 // A top-down view sees roughly this many meters of ground per meter of altitude.
 const GROUND_PER_ALTITUDE = 0.55;
 
-export const openInGodsEyeView = defineTool({
-  name: 'open_in_gods_eye_view',
-  title: "Open in God's Eye View",
-  description:
-    "A link that opens God's Eye View looking straight down on an area, " +
-    'optionally with chosen data layers turned on.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      area: AREA_SCHEMA,
-      layers: {
-        type: 'array',
-        maxItems: REGISTERED_LAYER_IDS.length,
-        items: { type: 'string', enum: [...REGISTERED_LAYER_IDS] },
-        description: 'Layers to turn on, such as "flights" or "earthquakes".',
-      },
-    },
-    required: ['area'],
-    additionalProperties: false,
-  },
-  requires: ['app'],
-  async run(args, { services, signal }) {
-    let base;
-    try {
-      base = new URL(services.app.baseUrl);
-    } catch {
-      throw new ToolError('unavailable', "The app's address is not configured");
-    }
+/** Tool arguments that describe a view: an area to frame, or a camera. */
+export const VIEW_ARGUMENTS = Object.freeze({
+  area: AREA_SCHEMA,
+  ...VIEW_PROPERTIES,
+});
+
+/**
+ * The view described by tool arguments. An area frames the camera straight
+ * down over it; camera fields given alongside it override the framing.
+ */
+export async function resolveViewArguments(args, { services, signal }) {
+  let camera = { ...args.camera };
+  let label = null;
+  if (args.area) {
     const area = await resolveArea(args.area, { services, signal });
     const center = areaCenter(area);
-    const altitude = Math.round(
-      Math.min(
+    label = area.label;
+    camera = {
+      lat: center.lat,
+      lon: center.lon,
+      altitude_m: Math.min(
         MAX_ALTITUDE_M,
         Math.max(
           MIN_ALTITUDE_M,
           (areaRadiusKm(area) * 1000) / GROUND_PER_ALTITUDE,
         ),
       ),
+      ...camera,
+    };
+  }
+  if (!Number.isFinite(camera.lat) || !Number.isFinite(camera.lon))
+    throw new ToolError(
+      'invalid_arguments',
+      'Give an area, or a camera with lat and lon',
     );
-    // The share-link camera and layer fields; the app restores its defaults
-    // for everything else.
-    const params = new URLSearchParams({
-      v: '2',
-      lat: center.lat.toFixed(4),
-      lon: center.lon.toFixed(4),
-      alt: String(altitude),
-      heading: '0',
-      pitch: '-90',
+  const view = createView({
+    camera,
+    layers: args.layers,
+    style: args.style ?? null,
+    map: args.map ?? null,
+    follow: args.follow ?? null,
+  });
+  return {
+    view,
+    label:
+      label ?? `${view.camera.lat.toFixed(3)}, ${view.camera.lon.toFixed(3)}`,
+  };
+}
+
+function appBase(services) {
+  try {
+    return new URL(services.app.baseUrl).href;
+  } catch {
+    throw new ToolError('unavailable', "The app's address is not configured");
+  }
+}
+
+export const openInGodsEyeView = defineTool({
+  name: 'open_in_gods_eye_view',
+  title: "Open in God's Eye View",
+  description:
+    "A link that opens God's Eye View at a view: an area framed from above " +
+    'or a camera position, with chosen data layers, visual style and map, ' +
+    'optionally following an aircraft or satellite.',
+  inputSchema: {
+    type: 'object',
+    properties: VIEW_ARGUMENTS,
+    additionalProperties: false,
+  },
+  requires: ['app'],
+  async run(args, { services, signal }) {
+    const base = appBase(services);
+    const { view, label } = await resolveViewArguments(args, {
+      services,
+      signal,
     });
-    const layers = [...new Set(args.layers || [])];
-    if (layers.length)
-      encodeLayerStateParams(params, {
-        ...createDefaultLayerState(),
-        enabledLayerIds: layers,
-      });
-    base.hash = params.toString();
+    const url = viewUrl(base, view);
     return {
-      summary: `Open ${area.label} in God's Eye View: ${base.href}`,
-      data: { url: base.href, center, altitude_m: altitude, layers },
+      summary: `Open ${label} in God's Eye View: ${url}`,
+      data: { url, view },
     };
   },
 });
