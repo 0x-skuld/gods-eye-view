@@ -200,3 +200,79 @@ test('the HTTP transport accepts one JSON message per POST', async () => {
   assert.equal(get.status, 405);
   assert.equal(get.headers.get('allow'), 'POST');
 });
+
+test('resources are listed and read, and tools name their UI resource', async () => {
+  const shown = defineTool({
+    name: 'show',
+    title: 'Show',
+    description: 'Shows something in a view.',
+    inputSchema: { type: 'object', properties: {} },
+    ui: { resourceUri: 'ui://fixture/view' },
+    run: async () => ({ summary: 'shown', data: {} }),
+  });
+  const withUi = createMcpServer({
+    catalog: composeCatalog({ tools: [shown] }),
+    name: 'fixture',
+    version: '1',
+    resources: [
+      {
+        uri: 'ui://fixture/view',
+        name: 'view',
+        mimeType: 'text/html;profile=mcp-app',
+        text: '<!doctype html><p>view</p>',
+        _meta: { ui: { csp: { frameDomains: ['https://a.example'] } } },
+      },
+    ],
+  });
+  const call = async (method, params) =>
+    (await withUi.handle({ jsonrpc: '2.0', id: 1, method, params })).result ??
+    (await withUi.handle({ jsonrpc: '2.0', id: 1, method, params })).error;
+  assert.deepEqual((await call('initialize', {})).capabilities, {
+    tools: { listChanged: false },
+    resources: { listChanged: false },
+  });
+  assert.deepEqual((await call('tools/list')).tools[0]._meta, {
+    ui: { resourceUri: 'ui://fixture/view' },
+  });
+  assert.deepEqual((await call('resources/list')).resources, [
+    {
+      uri: 'ui://fixture/view',
+      name: 'view',
+      mimeType: 'text/html;profile=mcp-app',
+      _meta: { ui: { csp: { frameDomains: ['https://a.example'] } } },
+    },
+  ]);
+  assert.deepEqual(
+    (await call('resources/read', { uri: 'ui://fixture/view' })).contents,
+    [
+      {
+        uri: 'ui://fixture/view',
+        mimeType: 'text/html;profile=mcp-app',
+        text: '<!doctype html><p>view</p>',
+        _meta: { ui: { csp: { frameDomains: ['https://a.example'] } } },
+      },
+    ],
+  );
+  assert.equal(
+    (await call('resources/read', { uri: 'ui://fixture/other' })).code,
+    -32002,
+  );
+  // A server without resources does not advertise them.
+  assert.equal(
+    (await server.handle({ jsonrpc: '2.0', id: 1, method: 'initialize' }))
+      .result.capabilities.resources,
+    undefined,
+  );
+  assert.throws(
+    () =>
+      defineTool({
+        name: 'bad',
+        title: 'Bad',
+        description: 'Points at a web page.',
+        inputSchema: { type: 'object' },
+        ui: { resourceUri: 'https://a.example' },
+        run: async () => ({ summary: '', data: {} }),
+      }),
+    /ui:\/\/ resourceUri/,
+  );
+});

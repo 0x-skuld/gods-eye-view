@@ -891,5 +891,6 @@
   "src/tools/places.test.mjs",
   "src/view/index.test.mjs",
   "src/tools/views.test.mjs",
-  "src/app/embed.test.mjs"
+  "src/app/embed.test.mjs",
+  "src/tools/globePanel.test.mjs"
 ]

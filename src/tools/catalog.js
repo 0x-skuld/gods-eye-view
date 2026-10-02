@@ -74,6 +74,7 @@ export function defineTool({
   inputSchema,
   annotations = {},
   requires = [],
+  ui = null,
   run,
 }) {
   if (!TOOL_NAME.test(String(name)))
@@ -92,6 +93,11 @@ export function defineTool({
   )
     throw new TypeError(`${name}.requires must list service names`);
   if (typeof run !== 'function') throw new TypeError(`${name} needs run()`);
+  if (
+    ui !== null &&
+    !(typeof ui?.resourceUri === 'string' && ui.resourceUri.startsWith('ui://'))
+  )
+    throw new TypeError(`${name}.ui needs a ui:// resourceUri`);
   return Object.freeze({
     name,
     kind,
@@ -103,6 +109,7 @@ export function defineTool({
       ...annotations,
     }),
     requires: Object.freeze([...requires]),
+    ui: ui ? Object.freeze({ resourceUri: ui.resourceUri }) : null,
     run,
   });
 }

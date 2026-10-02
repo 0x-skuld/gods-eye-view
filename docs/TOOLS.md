@@ -104,6 +104,22 @@ tilted camera over an area looks at its center from behind; camera fields
 given with an area override its framing. `resolveViewArguments` turns them
 into a view.
 
+### The globe panel
+
+`show_on_globe` names an MCP Apps view (`io.modelcontextprotocol/ui`):
+`_meta.ui.resourceUri` is `ui://gods-eye-view/globe`, a `text/html;profile=mcp-app`
+resource from `createGlobePanelResource({ appUrl })` in
+`src/tools/globePanel.js`. Clients that display apps render it inside the
+conversation. The panel completes the MCP Apps handshake (`ui/initialize`,
+`ui/notifications/initialized`, `ui/notifications/size-changed`), and for
+each `ui/notifications/tool-result` carrying a view it loads the app in embed
+mode the first time and posts later views to that same app, so the globe
+changes without reloading. Its resource allows framing only the app's origin
+(`csp.frameDomains`), and its "Open in God's Eye View" button asks the host
+to open the link (`ui/open-link`). Tools declare a UI resource with
+`defineTool({ ui: { resourceUri } })`; `createMcpServer({ resources })`
+serves `resources/list` and `resources/read`.
+
 ### Embed mode
 
 `?embed=1` shows only the globe: clean view, with the HUD, panels, welcome
@@ -234,4 +250,4 @@ public feeds the sources already use.
 | `situation_brief` | `weather` | Weather, earthquakes, fires, aircraft, ships and cyclones for an area, by section |
 | `military_awareness` | `military` | Military and other aircraft, ships and military installations within 250 km of a point, by section |
 | `get_hud_caption` | `weather`, `summary` | The app's heads-up display caption for an area |
-| `open_in_gods_eye_view` | `app` | A share link to a view: an area or camera, layers, style, map, and an aircraft or satellite to follow |
+| `show_on_globe` | `app` | A view on the globe: the live globe panel in clients with MCP Apps, and a link everywhere; takes another answer's view or an area or camera, layers, style, map, marks and something to follow |

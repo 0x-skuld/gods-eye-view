@@ -40,7 +40,7 @@ import {
   getTransitVehicles,
 } from './queries/mobility.js';
 import { placesNearby, planRoute, searchPlaces } from './queries/places.js';
-import { openInGodsEyeView } from './queries/share.js';
+import { showOnGlobe } from './queries/share.js';
 import { findAlprCameras } from './queries/surveillance.js';
 import {
   findCctvCameras,
@@ -121,5 +121,5 @@ export const coreTools = Object.freeze([
   situationBrief,
   militaryAwareness,
   getHudCaption,
-  openInGodsEyeView,
+  showOnGlobe,
 ]);

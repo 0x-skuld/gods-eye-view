@@ -1,5 +1,15 @@
 # God's Eye View Current State
 
+## The globe in conversations — October 2, 2026
+
+Tool answers that can be seen on the globe include a view: camera, layers,
+style, map, marks and an aircraft or satellite to follow, written in the
+share-link format (`gods-eye-view/view`). `show_on_globe` shows a view as the
+live globe inside clients that display MCP Apps, and as a link everywhere.
+`?embed=1` shows the app as the globe alone and takes new views from the page
+that frames it. MCP leads with the tools that find what to show. See
+[tools and the MCP server](TOOLS.md).
+
 ## Tools and local MCP server — October 1, 2026
 
 `gods-eye-view/tools` defines queries that answer questions from the app's data,

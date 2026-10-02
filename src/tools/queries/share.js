@@ -2,11 +2,18 @@
 
 import { VIEW_PROPERTIES, createView, viewUrl } from '../../view/index.js';
 import { defineTool, ToolError } from '../catalog.js';
+import { GLOBE_PANEL_URI } from '../globePanel.js';
 import { AREA_SCHEMA, resolveArea } from '../area.js';
 import { cameraForArea, cameraLookingAt } from '../views.js';
 
 /** Tool arguments that describe a view: an area to frame, or a camera. */
 export const VIEW_ARGUMENTS = Object.freeze({
+  view: Object.freeze({
+    type: 'object',
+    description:
+      'A view another answer returned (its data.view), shown as it is; ' +
+      'other arguments given with it change that part of it.',
+  }),
   area: AREA_SCHEMA,
   ...VIEW_PROPERTIES,
 });
@@ -16,7 +23,10 @@ export const VIEW_ARGUMENTS = Object.freeze({
  * down over it; camera fields given alongside it override the framing.
  */
 export async function resolveViewArguments(args, { services, signal }) {
-  let camera = { ...args.camera };
+  const base = args.view && typeof args.view === 'object' ? args.view : {};
+  let camera = args.area
+    ? { ...args.camera }
+    : { ...base.camera, ...args.camera };
   let label = null;
   if (args.area) {
     const area = await resolveArea(args.area, { services, signal });
@@ -36,16 +46,22 @@ export async function resolveViewArguments(args, { services, signal }) {
   if (!Number.isFinite(camera.lat) || !Number.isFinite(camera.lon))
     throw new ToolError(
       'invalid_arguments',
-      'Give an area, or a camera with lat and lon',
+      'Give a view, an area, or a camera with lat and lon',
     );
-  const view = createView({
-    camera,
-    layers: args.layers,
-    style: args.style ?? null,
-    map: args.map ?? null,
-    follow: args.follow ?? null,
-    annotations: args.annotations ?? [],
-  });
+  let view;
+  try {
+    view = createView({
+      camera,
+      layers: args.layers ?? base.layers,
+      style: args.style ?? base.style ?? null,
+      map: args.map ?? base.map ?? null,
+      follow: args.follow ?? base.follow ?? null,
+      annotations: args.annotations ?? base.annotations ?? [],
+    });
+  } catch (error) {
+    // A view passed through can hold anything; report it as bad arguments.
+    throw new ToolError('invalid_arguments', error.message);
+  }
   return {
     view,
     label:
@@ -61,11 +77,13 @@ function appBase(services) {
   }
 }
 
-export const openInGodsEyeView = defineTool({
-  name: 'open_in_gods_eye_view',
-  title: "Open in God's Eye View",
+export const showOnGlobe = defineTool({
+  name: 'show_on_globe',
+  title: 'Show on the globe',
   description:
-    "A link that opens God's Eye View at a view: an area framed from above " +
+    "Shows a view of God's Eye View's globe: in clients that display apps, " +
+    'the live globe in the conversation; everywhere, a link that opens it. ' +
+    'Pass the view another answer returned, or describe one: an area framed from above ' +
     'or a camera position, with chosen data layers, visual style and map, ' +
     'optionally following an aircraft or satellite and with marks drawn on ' +
     'the globe.',
@@ -75,6 +93,7 @@ export const openInGodsEyeView = defineTool({
     additionalProperties: false,
   },
   requires: ['app'],
+  ui: { resourceUri: GLOBE_PANEL_URI },
   async run(args, { services, signal }) {
     const base = appBase(services);
     const { view, label } = await resolveViewArguments(args, {

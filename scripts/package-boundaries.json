@@ -3139,7 +3139,8 @@
       "src/loadingFeedback.js",
       "src/data/installationFeedback.js",
       "src/view/index.js",
-      "src/tools/views.js"
+      "src/tools/views.js",
+      "src/tools/globePanel.js"
     ],
     "external": ["satellite.js"]
   },
