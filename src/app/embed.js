@@ -49,6 +49,19 @@ export function isEmbeddedInline() {
 // frames; see keepPanelRendering.
 const PANEL_FRAME_MS = 33;
 const MISSED_FRAMES_MS = 250;
+const RENDER_RESTARTS = 3;
+const RENDER_RESTART_MS = 1000;
+
+/** A render error's details, including the plain objects workers report. */
+function describeError(error) {
+  if (error instanceof Error)
+    return `${error.name}: ${error.message}\n${error.stack}`;
+  try {
+    return JSON.stringify(error, Object.getOwnPropertyNames(error ?? {}));
+  } catch {
+    return String(error);
+  }
+}
 
 /**
  * Keep the globe drawing in an inline panel. Some hosts report a panel on
@@ -67,14 +80,41 @@ export function keepPanelRendering(
     frameRequest = windowRef.requestAnimationFrame(onFrame);
   };
   frameRequest = windowRef.requestAnimationFrame(onFrame);
+  // Cesium stops drawing after a render error. Report it in full, and
+  // start again a few times in case it does not repeat.
+  let failed = false;
+  let restarts = 0;
+  let restart = null;
+  const removeErrorListener = viewer.scene?.renderError?.addEventListener(
+    (_scene, error) => {
+      failed = true;
+      console.error(
+        "[God's Eye View panel] render error:",
+        describeError(error),
+      );
+      if (restarts >= RENDER_RESTARTS) return;
+      restarts += 1;
+      restart = windowRef.setTimeout(() => {
+        failed = false;
+        viewer.useDefaultRenderLoop = true;
+      }, RENDER_RESTART_MS);
+    },
+  );
   const timer = windowRef.setInterval(() => {
-    if (now() - lastFrame < MISSED_FRAMES_MS || viewer.isDestroyed?.()) return;
+    if (
+      failed ||
+      now() - lastFrame < MISSED_FRAMES_MS ||
+      viewer.isDestroyed?.()
+    )
+      return;
     viewer.resize();
     viewer.render();
   }, PANEL_FRAME_MS);
   return () => {
     windowRef.clearInterval(timer);
+    windowRef.clearTimeout?.(restart);
     windowRef.cancelAnimationFrame(frameRequest);
+    removeErrorListener?.();
   };
 }
 

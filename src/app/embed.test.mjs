@@ -246,3 +246,44 @@ test('a panel keeps drawing from a timer while animation frames stop', () => {
   assert.equal(tick, null);
   assert.equal(frame, null);
 });
+
+test('a panel reports a render error in full and starts drawing again', () => {
+  let listener = null;
+  const timeouts = [];
+  const windowRef = {
+    requestAnimationFrame: () => 1,
+    cancelAnimationFrame() {},
+    setInterval: () => 1,
+    clearInterval() {},
+    setTimeout: (fn) => (timeouts.push(fn), timeouts.length),
+    clearTimeout() {},
+  };
+  const viewer = {
+    useDefaultRenderLoop: false,
+    scene: {
+      renderError: {
+        addEventListener: (fn) => ((listener = fn), () => (listener = null)),
+      },
+    },
+  };
+  const logged = [];
+  const original = console.error;
+  console.error = (...args) => logged.push(args.join(' '));
+  try {
+    const stop = keepPanelRendering(viewer, { windowRef, now: () => 0 });
+    for (let attempt = 0; attempt < 5; attempt++)
+      listener(viewer.scene, {
+        name: 'RuntimeError',
+        message: 'worker failed',
+      });
+    assert.match(logged[0], /render error: .*"message":"worker failed"/);
+    // Only a few restarts, so an error that repeats does not spin.
+    assert.equal(timeouts.length, 3);
+    timeouts[0]();
+    assert.equal(viewer.useDefaultRenderLoop, true);
+    stop();
+    assert.equal(listener, null);
+  } finally {
+    console.error = original;
+  }
+});
