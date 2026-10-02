@@ -3,7 +3,7 @@
 import { VIEW_PROPERTIES, createView, viewUrl } from '../../view/index.js';
 import { defineTool, ToolError } from '../catalog.js';
 import { AREA_SCHEMA, resolveArea } from '../area.js';
-import { cameraForArea } from '../views.js';
+import { cameraForArea, cameraLookingAt } from '../views.js';
 
 /** Tool arguments that describe a view: an area to frame, or a camera. */
 export const VIEW_ARGUMENTS = Object.freeze({
@@ -21,7 +21,17 @@ export async function resolveViewArguments(args, { services, signal }) {
   if (args.area) {
     const area = await resolveArea(args.area, { services, signal });
     label = area.label;
-    camera = { ...cameraForArea(area), ...camera };
+    const framed = cameraForArea(area);
+    // A tilted view of an area looks at its center from behind, unless the
+    // caller placed the camera itself.
+    camera =
+      camera.lat === undefined && camera.lon === undefined
+        ? cameraLookingAt(framed, {
+            altitudeM: camera.altitude_m ?? framed.altitude_m,
+            headingDeg: camera.heading_deg ?? 0,
+            pitchDeg: camera.pitch_deg ?? -90,
+          })
+        : { ...framed, ...camera };
   }
   if (!Number.isFinite(camera.lat) || !Number.isFinite(camera.lon))
     throw new ToolError(
@@ -34,6 +44,7 @@ export async function resolveViewArguments(args, { services, signal }) {
     style: args.style ?? null,
     map: args.map ?? null,
     follow: args.follow ?? null,
+    annotations: args.annotations ?? [],
   });
   return {
     view,
@@ -56,7 +67,8 @@ export const openInGodsEyeView = defineTool({
   description:
     "A link that opens God's Eye View at a view: an area framed from above " +
     'or a camera position, with chosen data layers, visual style and map, ' +
-    'optionally following an aircraft or satellite.',
+    'optionally following an aircraft or satellite and with marks drawn on ' +
+    'the globe.',
   inputSchema: {
     type: 'object',
     properties: VIEW_ARGUMENTS,

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { composeCatalog, coreTools } from './index.js';
 import { viewFromParams } from '../view/index.js';
-import { cameraForArea, suggestView } from './views.js';
+import { cameraForArea, cameraLookingAt, suggestView } from './views.js';
 import { resolveArea } from './area.js';
 
 const app = { baseUrl: 'https://maps.example/' };
@@ -99,4 +99,30 @@ test('the flood and the brief frame what they describe', async () => {
     area: { lat: 30, lon: -97, radius_km: 50 },
   });
   assert.deepEqual(brief.data.view.layers, ['earthquakes', 'flights']);
+});
+
+test('a tilted camera sits behind the point it looks at', () => {
+  const target = { lat: 25, lon: 121 };
+  assert.deepEqual(cameraLookingAt(target, { altitudeM: 1000 }), {
+    lat: 25,
+    lon: 121,
+    altitude_m: 1000,
+    heading_deg: 0,
+    pitch_deg: -90,
+  });
+  // Looking north at 45 degrees from 10 km up: about 10 km south.
+  const north = cameraLookingAt(target, {
+    altitudeM: 10000,
+    headingDeg: 0,
+    pitchDeg: -45,
+  });
+  assert.ok(Math.abs(north.lat - (25 - 10000 / 111195)) < 1e-3);
+  assert.ok(Math.abs(north.lon - 121) < 1e-9);
+  // Looking east: the camera is to the west.
+  const east = cameraLookingAt(target, {
+    altitudeM: 10000,
+    headingDeg: 90,
+    pitchDeg: -45,
+  });
+  assert.ok(east.lon < 121 && Math.abs(east.lat - 25) < 1e-9);
 });

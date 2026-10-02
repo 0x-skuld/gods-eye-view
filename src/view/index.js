@@ -63,6 +63,26 @@ const FOLLOWABLE = Object.freeze({
 
 export const VIEW_FOLLOW_KINDS = Object.freeze(Object.keys(FOLLOWABLE));
 
+/** Annotation kinds the app draws, as in its annotate_map action. */
+export const VIEW_ANNOTATION_TYPES = Object.freeze([
+  'pin',
+  'highlight',
+  'area',
+  'arrow',
+  'route',
+  'label',
+]);
+const ANNOTATION_COLORS = Object.freeze([
+  'primary',
+  'amber',
+  'cyan',
+  'green',
+  'red',
+]);
+const MAX_ANNOTATIONS = 24;
+const MAX_ANNOTATION_PARAM_CHARS = 6000;
+const ANNOTATION_PARAM = 'an';
+
 const MIN_ALTITUDE_M = 50;
 const MAX_ALTITUDE_M = 20_000_000;
 
@@ -103,6 +123,43 @@ export const VIEW_PROPERTIES = Object.freeze({
     enum: [...VIEW_MAPS],
     description: 'Map imagery; photoreal is Google 3D tiles.',
   }),
+  annotations: Object.freeze({
+    type: 'array',
+    maxItems: MAX_ANNOTATIONS,
+    description:
+      'Marks drawn on the globe: a pin, highlight, area or label at a place ' +
+      'name (target) or lat/lon, an arrow between two points, or a route ' +
+      'through points.',
+    items: {
+      type: 'object',
+      properties: {
+        type: { type: 'string', enum: [...VIEW_ANNOTATION_TYPES] },
+        target: { type: 'string', minLength: 1, maxLength: 200 },
+        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { type: 'number', minimum: -180, maximum: 180 },
+        toLatitude: { type: 'number', minimum: -90, maximum: 90 },
+        toLongitude: { type: 'number', minimum: -180, maximum: 180 },
+        points: {
+          type: 'array',
+          minItems: 2,
+          maxItems: 12,
+          items: {
+            type: 'object',
+            properties: {
+              latitude: { type: 'number', minimum: -90, maximum: 90 },
+              longitude: { type: 'number', minimum: -180, maximum: 180 },
+            },
+            required: ['latitude', 'longitude'],
+            additionalProperties: false,
+          },
+        },
+        label: { type: 'string', maxLength: 120 },
+        color: { type: 'string', enum: [...ANNOTATION_COLORS] },
+      },
+      required: ['type'],
+      additionalProperties: false,
+    },
+  }),
   follow: Object.freeze({
     type: 'object',
     description:
@@ -119,6 +176,59 @@ export const VIEW_PROPERTIES = Object.freeze({
 });
 
 const round = (value, digits) => Number(value.toFixed(digits));
+const latitude = (value) =>
+  Number.isFinite(value) && Math.abs(value) <= 90 ? value : undefined;
+const longitude = (value) =>
+  Number.isFinite(value) && Math.abs(value) <= 180 ? value : undefined;
+const text = (value, max) =>
+  typeof value === 'string' && value.trim()
+    ? value.trim().slice(0, max)
+    : undefined;
+
+/**
+ * One annotation with only the fields the app draws, or null when it has
+ * nothing to place. Unknown fields and out-of-range values are dropped.
+ */
+function annotationOf(input) {
+  if (!input || !VIEW_ANNOTATION_TYPES.includes(input.type)) return null;
+  const points = Array.isArray(input.points)
+    ? input.points
+        .slice(0, 12)
+        .map((point) => ({
+          latitude: latitude(point?.latitude),
+          longitude: longitude(point?.longitude),
+        }))
+        .filter(
+          (point) =>
+            point.latitude !== undefined && point.longitude !== undefined,
+        )
+    : [];
+  // Coordinates are kept or dropped in pairs; half a position places nothing.
+  const pair = (lat, lon) =>
+    latitude(lat) !== undefined && longitude(lon) !== undefined
+      ? [lat, lon]
+      : [undefined, undefined];
+  const [lat, lon] = pair(input.latitude, input.longitude);
+  const [toLat, toLon] = pair(input.toLatitude, input.toLongitude);
+  const entry = Object.fromEntries(
+    Object.entries({
+      type: input.type,
+      target: text(input.target, 200),
+      latitude: lat,
+      longitude: lon,
+      toLatitude: toLat,
+      toLongitude: toLon,
+      points: points.length >= 2 ? points : undefined,
+      label: text(input.label, 120),
+      color: ANNOTATION_COLORS.includes(input.color) ? input.color : undefined,
+    }).filter(([, value]) => value !== undefined),
+  );
+  const placed =
+    entry.target !== undefined ||
+    entry.points !== undefined ||
+    (entry.latitude !== undefined && entry.longitude !== undefined);
+  return placed ? Object.freeze(entry) : null;
+}
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 /**
@@ -132,6 +242,7 @@ export function createView({
   style = null,
   map = null,
   follow = null,
+  annotations = [],
 } = {}) {
   if (!Number.isFinite(camera?.lat) || !Number.isFinite(camera?.lon))
     throw new TypeError('A view needs a camera lat and lon');
@@ -167,6 +278,12 @@ export function createView({
           id: String(follow.id).toLowerCase(),
         })
       : null,
+    annotations: Object.freeze(
+      (Array.isArray(annotations) ? annotations : [])
+        .slice(0, MAX_ANNOTATIONS)
+        .map(annotationOf)
+        .filter(Boolean),
+    ),
   });
 }
 
@@ -194,7 +311,26 @@ export function viewToParams(view) {
       };
     encodeLayerStateParams(params, state);
   }
+  if (view.annotations.length) {
+    const encoded = JSON.stringify(view.annotations);
+    if (encoded.length <= MAX_ANNOTATION_PARAM_CHARS)
+      params.set(ANNOTATION_PARAM, encoded);
+  }
   return params;
+}
+
+/** The annotations a share link carries, or an empty list. */
+export function annotationsFromParams(params) {
+  const raw = params.get(ANNOTATION_PARAM);
+  if (!raw || raw.length > MAX_ANNOTATION_PARAM_CHARS) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.slice(0, MAX_ANNOTATIONS).map(annotationOf).filter(Boolean)
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 /** The view a set of share-link hash parameters restores, or null. */
@@ -226,6 +362,7 @@ export function viewFromParams(params) {
     style: STYLES_BY_URL_NAME[params.get('style')] ?? null,
     map: VIEW_MAPS.includes(map) ? map : null,
     follow,
+    annotations: annotationsFromParams(params),
   });
 }
 

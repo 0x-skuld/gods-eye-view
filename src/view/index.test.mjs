@@ -77,3 +77,52 @@ test('views use the same style names as the app share links', async () => {
   assert.match(source, /const STYLE_TO_URL = STYLE_URL_NAMES;/);
   assert.equal(STYLE_URL_NAMES.retro, 'crt');
 });
+
+test('annotations travel in the link, keeping only what the app draws', async () => {
+  const { annotationsFromParams } = await import('./index.js');
+  const view = createView({
+    camera: { lat: 25, lon: 121 },
+    annotations: [
+      { type: 'pin', target: 'Taipei 101', label: 'Taipei 101', color: 'red' },
+      {
+        type: 'arrow',
+        latitude: 24,
+        longitude: 119,
+        toLatitude: 25,
+        toLongitude: 121,
+      },
+      {
+        type: 'route',
+        points: [
+          { latitude: 1, longitude: 2 },
+          { latitude: 3, longitude: 4 },
+        ],
+        screenX: 0.5,
+      },
+      { type: 'pin' },
+      { type: 'sparkle', target: 'x' },
+      { type: 'label', latitude: 200, longitude: 0, target: 'Here' },
+    ],
+  });
+  assert.equal(view.annotations.length, 4);
+  assert.equal(view.annotations[2].screenX, undefined);
+  assert.deepEqual(view.annotations[3], { type: 'label', target: 'Here' });
+  const params = viewToParams(view);
+  assert.ok(params.has('an'));
+  assert.deepEqual(viewFromParams(params), view);
+  assert.deepEqual(
+    annotationsFromParams(new URLSearchParams('an=not json')),
+    [],
+  );
+  const many = createView({
+    camera: { lat: 0, lon: 0 },
+    annotations: Array.from({ length: 30 }, () => ({
+      type: 'label',
+      target: 'x'.repeat(200),
+      label: 'y'.repeat(120),
+    })),
+  });
+  assert.equal(many.annotations.length, 24);
+  // Too long for a link: the view keeps them, the link leaves them out.
+  assert.equal(viewToParams(many).has('an'), false);
+});

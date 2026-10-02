@@ -28,6 +28,43 @@ export function cameraForArea(area) {
   };
 }
 
+const EARTH_RADIUS_M = 6_371_008.8;
+
+/**
+ * The camera position for looking at a point from `altitudeM` with a heading
+ * and a tilt: straight above it when looking down, otherwise pulled back
+ * along the heading so the point stays in the middle of the view.
+ */
+export function cameraLookingAt(
+  target,
+  { altitudeM, headingDeg = 0, pitchDeg = -90 },
+) {
+  const camera = {
+    lat: target.lat,
+    lon: target.lon,
+    altitude_m: altitudeM,
+    heading_deg: headingDeg,
+    pitch_deg: pitchDeg,
+  };
+  if (pitchDeg <= -89.5) return camera;
+  // Ground distance from the camera to the point it looks at, on flat ground.
+  const back = altitudeM / Math.tan((-Math.min(pitchDeg, -5) * Math.PI) / 180);
+  const heading = (headingDeg * Math.PI) / 180;
+  const lat =
+    target.lat -
+    ((back * Math.cos(heading)) / EARTH_RADIUS_M) * (180 / Math.PI);
+  const lon =
+    target.lon -
+    ((back * Math.sin(heading)) /
+      (EARTH_RADIUS_M * Math.cos((target.lat * Math.PI) / 180))) *
+      (180 / Math.PI);
+  return {
+    ...camera,
+    lat: Math.max(-90, Math.min(90, lat)),
+    lon: ((((lon + 180) % 360) + 360) % 360) - 180,
+  };
+}
+
 /** The app's address, or null when it is not configured. */
 function appUrl(services) {
   try {
