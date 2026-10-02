@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createMapillaryProvider, mapillaryImageUrl } from './index.js';
+import { sequenceIdFromPick } from './coverage.js';
 import { validateProviders } from '../../registry.js';
 import { PROVIDER_COLORS } from '../../policy.js';
 
@@ -91,4 +92,29 @@ test('nearestImage honours the imagery filter and reports key status', async () 
   assert.equal(await none.nearestImage({ lat: 1, lon: 2 }), null);
   assert.deepEqual(await flat.status(), { configured: true });
   assert.equal(flat.coverageStats().keyRequired, false);
+});
+
+test('any part of a multi-part sequence picks the whole sequence', () => {
+  assert.equal(sequenceIdFromPick('mly:seq:abc'), 'abc');
+  assert.equal(sequenceIdFromPick('mly:seq:abc~2'), 'abc');
+  assert.equal(sequenceIdFromPick('mly:img:abc'), null);
+  assert.equal(sequenceIdFromPick(null), null);
+});
+
+test('nearestImage picks the closest image, not the first the API returned', async () => {
+  const at = (id, lon, lat) => ({
+    id,
+    is_pano: false,
+    captured_at: 10,
+    geometry: { type: 'Point', coordinates: [lon, lat] },
+  });
+  const source = fakeSource({
+    nearest: [
+      at('far', 2.0004, 1), // ~45 m east
+      at('near', 2.00005, 1), // ~5 m east
+      at('mid', 2, 1.0002), // ~22 m north
+    ],
+  });
+  const instance = createMapillaryProvider({ source }).create(fakeContext());
+  assert.equal(await instance.nearestImage({ lat: 1, lon: 2 }), 'near');
 });

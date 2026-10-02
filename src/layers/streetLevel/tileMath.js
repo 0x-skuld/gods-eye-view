@@ -12,6 +12,8 @@ function clampLat(lat) {
 /** Tile column for a longitude at zoom z. */
 export function lonToTileX(lon, z) {
   const n = 2 ** z;
+  // 180° is the east edge of the last column, not the west edge of the first.
+  if (lon >= 180) return n - 1;
   const wrapped = ((((lon + 180) % 360) + 360) % 360) - 180;
   return Math.min(n - 1, Math.max(0, Math.floor(((wrapped + 180) / 360) * n)));
 }
@@ -91,13 +93,38 @@ export function countTilesForBbox(bbox, z) {
 }
 
 /**
- * Enumerate the tiles at zoom z covering a bbox, ordered from the centre of
+ * Enumerate the tiles at zoom z covering a bbox (west > east means it crosses
+ * the date line), ordered from the centre of
  * the box outwards so a progressive renderer fills in what the user is most
  * likely looking at first. `limit` caps the list; the result reports whether
  * the cap was hit.
  * @returns {{tiles: Array<{x:number,y:number,z:number}>, truncated: boolean, total: number}}
  */
 export function tilesForBbox(bbox, z, { limit = Infinity } = {}) {
+  // A box across the date line comes as west > east: split it at ±180°.
+  if (Array.isArray(bbox) && Number(bbox[0]) > Number(bbox[2])) {
+    const [west, south, east, north] = bbox.map(Number);
+    const n = 2 ** z;
+    const tiles = [
+      ...tilesForBbox([west, south, 180, north], z).tiles,
+      ...tilesForBbox([-180, south, east, north], z).tiles,
+    ];
+    const x0 = lonToTileX(west, z);
+    const x1 = lonToTileX(east, z) + n;
+    const cx = ((x0 + x1) / 2) % n;
+    const cy = (latToTileY(north, z) + latToTileY(south, z)) / 2;
+    const dx = (x) => Math.min(Math.abs(x - cx), n - Math.abs(x - cx));
+    tiles.sort(
+      (a, b) =>
+        dx(a.x) ** 2 + (a.y - cy) ** 2 - (dx(b.x) ** 2 + (b.y - cy) ** 2),
+    );
+    const truncated = tiles.length > limit;
+    return {
+      tiles: truncated ? tiles.slice(0, limit) : tiles,
+      truncated,
+      total: tiles.length,
+    };
+  }
   const box = normalizeBbox(bbox);
   if (!box) return { tiles: [], truncated: false, total: 0 };
   const x0 = lonToTileX(box.west, z);

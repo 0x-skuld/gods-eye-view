@@ -366,7 +366,13 @@ export class StreetLevelControls {
         el.sinceRange.setAttribute('aria-valuetext', view.since.label);
       }
     }
-    if (el.legend && el.legend.childElementCount !== view.legend.length) {
+    // Rebuild when the swatches change, not only their count: one provider
+    // can replace another with the same number of entries.
+    const legendKey = view.legend
+      .map((entry) => `${entry.key}:${entry.color}:${entry.label}`)
+      .join('|');
+    if (el.legend && this._legendKey !== legendKey) {
+      this._legendKey = legendKey;
       el.legend.replaceChildren(
         ...view.legend.map((entry) => {
           const item = document.createElement('li');
@@ -406,7 +412,11 @@ export class StreetLevelControls {
       if (viewer.link) el.imageLink.href = viewer.link;
       if (viewer.linkLabel) el.imageLink.textContent = viewer.linkLabel;
     }
-    if (state.street.open) this.layer.resizeViewer?.();
+    // Size changes reach the viewer through the ResizeObserver; resizing on
+    // every render ran each frame while a panorama was dragged. Opening is the
+    // one moment the element may not have reported a size yet.
+    if (state.street.open && !this._viewerWasOpen) this.layer.resizeViewer?.();
+    this._viewerWasOpen = state.street.open === true;
   }
 
   _renderMeta(view) {

@@ -221,7 +221,7 @@ export function createStreetLevelLayer({
   }
 
   function deactivate(entry) {
-    if (state.street.providerId === entry.def.id) parts.viewerHost.unmount();
+    parts.viewerHost.unmount(entry.def.id);
     entry.instance.deactivate();
     parts.credits.hide(state.viewer, entry.def);
   }

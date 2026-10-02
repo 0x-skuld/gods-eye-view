@@ -1,4 +1,4 @@
-import { createCoverage } from './coverage.js';
+import { createCoverage, sequenceIdFromPick } from './coverage.js';
 import { createSequences } from './sequences.js';
 import { createMapillaryViewer } from './viewer.js';
 import { passesImageryFilter } from '../../filter.js';
@@ -168,8 +168,9 @@ export function createMapillaryProvider({ source }) {
         },
 
         handlePick(pickId) {
-          if (pickId.startsWith(PICK_PREFIX.sequence)) {
-            parts.sequences.select(pickId.slice(PICK_PREFIX.sequence.length));
+          const sequenceId = sequenceIdFromPick(pickId);
+          if (sequenceId) {
+            parts.sequences.select(sequenceId);
             return true;
           }
           if (pickId.startsWith(PICK_PREFIX.image)) {
@@ -195,7 +196,17 @@ export function createMapillaryProvider({ source }) {
             radius: NEAREST_RADIUS_M,
             limit: NEAREST_LIMIT,
           });
-          const hit = images.find((record) =>
+          // The API returns the images in the radius in no particular order.
+          const metres = (record) => {
+            const [lon2, lat2] = (record.computed_geometry || record.geometry)
+              ?.coordinates || [NaN, NaN];
+            const dx = (lon2 - lon) * 111_320 * Math.cos((lat * Math.PI) / 180);
+            const dy = (lat2 - lat) * 110_540;
+            const d = Math.hypot(dx, dy);
+            return Number.isFinite(d) ? d : Infinity;
+          };
+          const byDistance = [...images].sort((a, b) => metres(a) - metres(b));
+          const hit = byDistance.find((record) =>
             passesImageryFilter(
               {
                 isPano: record.is_pano === true,

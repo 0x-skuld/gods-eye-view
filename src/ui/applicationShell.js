@@ -933,7 +933,7 @@ export class StyleManager extends ShellFacade {
     return this._runExplicitNavigation('camera', () => focus(cameraId));
   }
 
-  /** Compose camera panel controls from the existing camera port and application actions. */
+  /** Compose the Street Level panel controls from its layer and application actions. */
   _initStreetLevelPanel() {
     const { streetLevelLayer } = this.services;
     this._streetLevelControls?.destroy();
@@ -959,6 +959,7 @@ export class StyleManager extends ShellFacade {
     this._streetLevelControls.connect();
   }
 
+  /** Compose camera panel controls from the existing camera port and application actions. */
   _initCctvPanel() {
     const { cctvLayer } = this.services;
     this._cctvControls?.destroy();
@@ -1506,6 +1507,7 @@ export class StyleManager extends ShellFacade {
    * @returns {void}
    */
   _onPanelResized(panelId) {
+    if (panelId === 'cctv-panel') this._syncCctvPanelViewport();
     if (panelId === 'street-level-panel')
       this._streetLevelControls?.onPanelResized();
   }

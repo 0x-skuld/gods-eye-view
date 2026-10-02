@@ -416,9 +416,6 @@ export class PanelPositionControls {
       // storage unavailable
     }
     this._layoutRightPanels();
-    if (panelId === 'cctv-panel') {
-      this._syncCctvPanelViewport();
-    }
     this._onPanelResized?.(panelId);
   }
 
@@ -629,9 +626,7 @@ export class PanelPositionControls {
           swallowNextClick = false;
         }, 0);
         this._savePanelPosition(panelId, panelEl);
-        if (panelId === 'cctv-panel') {
-          this._syncCctvPanelViewport();
-        }
+        this._onPanelResized?.(panelId);
       };
 
       this._cancelDrag = cancel;
@@ -716,9 +711,6 @@ export class PanelPositionControls {
     const onUp = () => {
       cancel();
       this._savePanelPosition(panelId, panelEl);
-      if (panelId === 'cctv-panel') {
-        this._syncCctvPanelViewport();
-      }
       this._onPanelResized?.(panelId);
     };
 

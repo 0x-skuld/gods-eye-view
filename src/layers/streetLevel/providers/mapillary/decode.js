@@ -21,15 +21,16 @@ export function decodeCoverageTile(bytes, address, { images = false } = {}) {
     for (let i = 0; i < sequenceLayer.length; i++) {
       const feature = sequenceLayer.feature(i);
       const props = feature.properties || {};
-      const coordinates = [];
-      for (const ring of feature.loadGeometry()) {
-        for (const point of ring) {
-          coordinates.push(
-            tileLocalToLonLat(point.x, point.y, sequenceLayer.extent, x, y, z),
-          );
-        }
+      // A sequence with a capture gap is a multi-line: keep each part as its
+      // own line, so no straight segment is drawn across the gap.
+      const parts = [];
+      for (const line of feature.loadGeometry()) {
+        const part = line.map((point) =>
+          tileLocalToLonLat(point.x, point.y, sequenceLayer.extent, x, y, z),
+        );
+        if (part.length >= 2) parts.push(part);
       }
-      if (coordinates.length < 2) continue;
+      if (!parts.length) continue;
       result.sequences.push({
         id: String(props.id ?? feature.id ?? `${x}/${y}/${i}`),
         imageId: props.image_id != null ? String(props.image_id) : null,
@@ -39,7 +40,7 @@ export function decodeCoverageTile(bytes, address, { images = false } = {}) {
         quality: Number.isFinite(props.quality_score)
           ? props.quality_score
           : null,
-        coordinates,
+        parts,
       });
     }
   }

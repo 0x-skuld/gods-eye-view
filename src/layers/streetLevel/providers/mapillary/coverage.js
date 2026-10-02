@@ -47,6 +47,32 @@ function sequenceColor({ selected = false } = {}) {
     : Cesium.Color.fromCssColorString(COLORS.coverage).withAlpha(0.92);
 }
 
+/** Separates a multi-part sequence's part index from its id in pick ids. */
+const PART_SEPARATOR = '~';
+
+/** Pick ids for every part of a sequence; the first part is unsuffixed. */
+function partIds(sequence) {
+  return sequence.parts.map((_, index) =>
+    index
+      ? `${PICK_PREFIX.sequence}${sequence.id}${PART_SEPARATOR}${index}`
+      : `${PICK_PREFIX.sequence}${sequence.id}`,
+  );
+}
+
+/**
+ * Sequence id for a picked line, whichever part was hit: `mly:seq:<id>` and
+ * `mly:seq:<id>~<part>` both give `<id>`; null for any other pick.
+ * @param {string} pickId
+ * @returns {string|null}
+ */
+export function sequenceIdFromPick(pickId) {
+  if (typeof pickId !== 'string' || !pickId.startsWith(PICK_PREFIX.sequence))
+    return null;
+  const rest = pickId.slice(PICK_PREFIX.sequence.length);
+  const cut = rest.indexOf(PART_SEPARATOR);
+  return cut === -1 ? rest : rest.slice(0, cut);
+}
+
 /**
  * Camera-driven coverage: z0–5 `overview` points from orbit down to 60 km,
  * then z11–14 sequence polylines clamped to terrain and 3D tiles. Decoded
@@ -84,64 +110,55 @@ export function createCoverage({ state, source }) {
     );
   }
 
-  function sequenceInstance(sequence, geometry) {
-    return new Cesium.GeometryInstance({
-      geometry,
-      id: `${PICK_PREFIX.sequence}${sequence.id}`,
-      attributes: {
-        color: Cesium.ColorGeometryInstanceAttribute.fromColor(
-          sequenceColor({
-            selected: sequence.id === state.sequence.selectedId,
-          }),
-        ),
-      },
-    });
-  }
-
   /**
    * Primitives for a tile's sequences, in draw batches: ground primitives
    * draped on the globe, plus (in terrain mode) plain polylines at the cast
-   * bare-earth heights for every sequence whose heights are cached.
+   * heights for every part whose heights are cached. Each part of a sequence
+   * with a capture gap is its own line.
    */
   function buildSequencePrimitives(sequences) {
     const ground = terrainMode() ? state.context.groundCaster : null;
     const meshAt = ground ? state.context.meshSampler?.meshAt : undefined;
     const draped = [];
     const cast = [];
+    let drawn = 0;
     for (const sequence of sequences) {
       if (!passesImageryFilter(sequence, filter())) continue;
-      const flat = ground?.castLine(sequence.coordinates, { meshAt });
-      let positions;
-      try {
-        positions = flat
-          ? Cesium.Cartesian3.fromDegreesArrayHeights(flat)
-          : Cesium.Cartesian3.fromDegreesArray(sequence.coordinates.flat());
-      } catch {
-        continue;
-      }
-      if (positions.length < 2) continue;
-      if (flat)
-        cast.push(
-          sequenceInstance(
-            sequence,
-            new Cesium.PolylineGeometry({
+      drawn++;
+      const color = Cesium.ColorGeometryInstanceAttribute.fromColor(
+        sequenceColor({ selected: sequence.id === state.sequence.selectedId }),
+      );
+      const ids = partIds(sequence);
+      sequence.parts.forEach((coordinates, index) => {
+        const flat = ground?.castLine(coordinates, { meshAt });
+        let positions;
+        try {
+          positions = flat
+            ? Cesium.Cartesian3.fromDegreesArrayHeights(flat)
+            : Cesium.Cartesian3.fromDegreesArray(coordinates.flat());
+        } catch {
+          return;
+        }
+        if (positions.length < 2) return;
+        const geometry = flat
+          ? new Cesium.PolylineGeometry({
               positions,
               width: COVERAGE_LINE_WIDTH_PX,
               vertexFormat: Cesium.PolylineColorAppearance.VERTEX_FORMAT,
               arcType: Cesium.ArcType.NONE,
-            }),
-          ),
-        );
-      else
-        draped.push(
-          sequenceInstance(
-            sequence,
-            new Cesium.GroundPolylineGeometry({
+            })
+          : new Cesium.GroundPolylineGeometry({
               positions,
               width: COVERAGE_LINE_WIDTH_PX,
-            }),
-          ),
+            });
+        (flat ? cast : draped).push(
+          new Cesium.GeometryInstance({
+            geometry,
+            id: ids[index],
+            attributes: { color },
+          }),
         );
+      });
     }
     const primitives = [];
     for (let i = 0; i < draped.length; i += SEQUENCE_PRIMITIVE_BATCH)
@@ -165,7 +182,7 @@ export function createCoverage({ state, source }) {
           allowPicking: true,
         }),
       });
-    return { primitives, count: draped.length + cast.length, draped };
+    return { primitives, count: drawn, draped };
   }
 
   /**
@@ -179,7 +196,7 @@ export function createCoverage({ state, source }) {
     const { signal } = entry.castAbort;
     const lines = entry.sequenceList
       .filter((sequence) => passesImageryFilter(sequence, filter()))
-      .map((sequence) => sequence.coordinates);
+      .flatMap((sequence) => sequence.parts);
     const caster = state.context.groundCaster;
     caster.prepareLines(lines, { signal }).then(() => {
       const attached = [...state.coverage.tiles.values()].includes(entry);
@@ -200,9 +217,8 @@ export function createCoverage({ state, source }) {
     if (entry.meshCells) return entry.meshCells;
     const cells = new Map();
     for (const sequence of entry.sequenceList)
-      for (const [lon, lat] of densifyLine(
-        sequence.coordinates,
-        MESH_DENSIFY_DEG,
+      for (const [lon, lat] of sequence.parts.flatMap((part) =>
+        densifyLine(part, MESH_DENSIFY_DEG),
       ))
         cells.set(
           `${Math.round(lon / MESH_CELL_DEG)},${Math.round(lat / MESH_CELL_DEG)}`,
@@ -414,8 +430,13 @@ export function createCoverage({ state, source }) {
       const bytes = await fetching;
       // A refresh that still wants this tile must not throw the bytes away;
       // only an abort (tile no longer wanted, or zoom changed) does.
+      // A retire, clear or newer request for this tile owns it now.
+      const current = () =>
+        state.coverage.pending.get(key) === controller &&
+        !state.coverage.tiles.has(key);
       if (
         controller.signal.aborted ||
+        !current() ||
         kind !== state.coverage.kind ||
         tile.z !== state.coverage.zoom
       )
@@ -449,13 +470,21 @@ export function createCoverage({ state, source }) {
       state.coverage.lastError = null;
       requestRender();
     } catch (error) {
-      if (controller.signal.aborted) return;
+      if (
+        controller.signal.aborted ||
+        state.coverage.pending.get(key) !== controller
+      )
+        return;
       state.coverage.lastError = error?.message || 'Coverage tile failed';
       if (error?.keyRequired) state.keyRequired = true;
     } finally {
-      state.coverage.pending.delete(key);
-      state.coverage.loading = Math.max(0, state.coverage.loading - 1);
-      if (!state.coverage.pending.size) purgeStale();
+      // Only the request that still owns the key settles it: a superseded one
+      // must not drop a newer request's entry or its loading count.
+      if (state.coverage.pending.get(key) === controller) {
+        state.coverage.pending.delete(key);
+        state.coverage.loading = Math.max(0, state.coverage.loading - 1);
+        if (!state.coverage.pending.size) purgeStale();
+      }
       notify();
     }
   }
@@ -615,26 +644,27 @@ export function createCoverage({ state, source }) {
     return null;
   }
 
-  /** Recolour one sequence in place (selection highlight). */
+  /** Recolour one sequence, every part of it, in place (selection highlight). */
   function recolorSequence(id, selected) {
-    const instanceId = `${PICK_PREFIX.sequence}${id}`;
+    const value = sequenceColor({ selected });
     for (const entry of state.coverage.tiles.values()) {
       const sequence = entry.sequences.get(id);
       if (!sequence) continue;
-      for (const { primitive } of entry.primitives || []) {
-        if (!primitive.ready) continue;
-        try {
-          const attributes =
-            primitive.getGeometryInstanceAttributes(instanceId);
-          if (attributes)
-            attributes.color = Cesium.ColorGeometryInstanceAttribute.toValue(
-              sequenceColor({ selected }),
-              attributes.color,
-            );
-        } catch {
-          /* instance not in this primitive */
+      for (const instanceId of partIds(sequence))
+        for (const { primitive } of entry.primitives || []) {
+          if (!primitive.ready) continue;
+          try {
+            const attributes =
+              primitive.getGeometryInstanceAttributes(instanceId);
+            if (attributes)
+              attributes.color = Cesium.ColorGeometryInstanceAttribute.toValue(
+                value,
+                attributes.color,
+              );
+          } catch {
+            /* instance not in this primitive */
+          }
         }
-      }
     }
     requestRender();
   }

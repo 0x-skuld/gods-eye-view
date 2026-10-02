@@ -87,3 +87,43 @@ test('unmounting while a mount is in flight does not leave it active', async () 
   assert.equal(adapter.calls.unmount, 1);
   assert.equal(state.street.open, false);
 });
+
+test('a prewarmed viewer is released when the layer goes off, or at once if it went off mid-load', async () => {
+  const adapter = fakeAdapter();
+  let release = null;
+  adapter.prewarm = () =>
+    new Promise((resolve) => {
+      release = resolve;
+    });
+  const { state, host } = harness(adapter);
+  const entry = state.providers.get('mapillary');
+  entry.on = true;
+
+  // Warmed, then the layer is switched off: unmount releases the warm viewer.
+  const warming = host.prewarm([entry]);
+  release();
+  await warming;
+  assert.equal(adapter.calls.unmount, 0);
+  host.unmount();
+  assert.equal(adapter.calls.unmount, 1, 'the WebGL viewer is destroyed');
+
+  // Switched off while the library was still loading: released on arrival.
+  const late = host.prewarm([entry]);
+  state.enabled = false;
+  release();
+  await late;
+  assert.equal(adapter.calls.unmount, 2);
+});
+
+test('switching one provider off releases only its viewer', async () => {
+  const adapter = fakeAdapter();
+  adapter.prewarm = async () => {};
+  const { state, host } = harness(adapter);
+  const entry = state.providers.get('mapillary');
+  entry.on = true;
+  await host.prewarm([entry]);
+  host.unmount('panoramax');
+  assert.equal(adapter.calls.unmount, 0, 'another provider leaves it alone');
+  host.unmount('mapillary');
+  assert.equal(adapter.calls.unmount, 1);
+});

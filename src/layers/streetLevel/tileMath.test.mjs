@@ -85,3 +85,27 @@ test('overviewZoomForHeight covers the globe above the sequence ceiling', () => 
   assert.equal(overviewZoomForHeight(10_000_000), 1);
   assert.equal(overviewZoomForHeight(25_000_000), 0);
 });
+
+test('longitude 180 is the last column, so a world view keeps the eastern hemisphere', () => {
+  assert.equal(lonToTileX(180, 1), 1);
+  assert.equal(lonToTileX(179.99, 1), 1);
+  assert.equal(lonToTileX(-180, 1), 0);
+  const columns = new Set(
+    tilesForBbox([-180, -85, 180, 85], 1).tiles.map((tile) => tile.x),
+  );
+  assert.deepEqual([...columns].sort(), [0, 1]);
+});
+
+test('a box across the date line takes tiles on both sides of it, not the far side of the globe', () => {
+  const { tiles } = tilesForBbox([179, -1, -179, 1], 8);
+  const columns = new Set(tiles.map((tile) => tile.x));
+  assert.ok(columns.has(255), 'west of the line');
+  assert.ok(columns.has(0), 'east of the line');
+  assert.ok(
+    [...columns].every((x) => x <= 1 || x >= 254),
+    'nothing from the middle of the map',
+  );
+  // The limit keeps the tiles nearest the line.
+  const limited = tilesForBbox([170, -1, -170, 1], 8, { limit: 4 }).tiles;
+  assert.ok(limited.every((tile) => tile.x <= 8 || tile.x >= 247));
+});

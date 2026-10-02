@@ -219,3 +219,22 @@ test('castLine refines heights with sampled mesh and densifies finer', async () 
   const unsampled = caster.castLine(line, { meshAt: () => undefined });
   assert.ok(unsampled[2] > 100 && unsampled[2] < 110);
 });
+
+test('a full cache is cleared before a request counts its corners, so the request still casts', async () => {
+  const caster = createGroundCaster({
+    terrain: fakeTerrain(),
+    step: 0.001,
+    maxCorners: 8,
+    cacheMax: 5,
+  });
+  // One cell's four corners are cached...
+  assert.equal(await caster.prepare([[10.0005, 50.0005]]), true);
+  // ...then a line over that cell and the next needs two more. Clearing after
+  // counting would have kept only the two new corners and lost the first cell.
+  const line = [
+    [10.0002, 50.0005],
+    [10.0018, 50.0005],
+  ];
+  assert.equal(await caster.prepareLines([line]), true);
+  assert.ok(caster.castLine(line), 'the whole line casts');
+});

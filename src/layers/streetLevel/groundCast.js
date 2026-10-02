@@ -133,13 +133,14 @@ export function densifyLine(coords, maxStep = GROUND_CAST_DENSIFY_DEG) {
 
 /**
  * A bare-earth height cache over the terrain service.
- * @param {{terrain: {resolveEllipsoidalGround: Function}, step?: number, lift?: number, maxCorners?: number}} options
+ * @param {{terrain: {resolveEllipsoidalGround: Function}, step?: number, lift?: number, maxCorners?: number, cacheMax?: number}} options
  */
 export function createGroundCaster({
   terrain,
   step = GROUND_CAST_STEP_DEG,
   lift = GROUND_CAST_LIFT_M,
   maxCorners = GROUND_CAST_MAX_CORNERS,
+  cacheMax = GROUND_CAST_CACHE_MAX,
 }) {
   if (typeof terrain?.resolveEllipsoidalGround !== 'function')
     throw new TypeError('Ground casting requires a terrain service');
@@ -169,6 +170,9 @@ export function createGroundCaster({
 
   async function resolve(points, signal) {
     if (signal?.aborted) return false;
+    // Make room first: clearing after counting would drop corners this
+    // request already treated as cached.
+    if (heights.size + maxCorners > cacheMax) heights.clear();
     const missing = missingCorners(points);
     if (!missing.length) return true;
     if (missing.length > maxCorners) return false;
@@ -178,7 +182,6 @@ export function createGroundCaster({
         lat: Number((j * step).toFixed(6)),
       })),
     );
-    if (heights.size + missing.length > GROUND_CAST_CACHE_MAX) heights.clear();
     let complete = true;
     missing.forEach(([key], n) => {
       const result = results?.[n];

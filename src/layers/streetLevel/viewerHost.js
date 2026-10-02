@@ -9,6 +9,12 @@ export function createViewerHost({ state, parts }) {
   /** @type {{id: string, promise: Promise<object>}|null} */
   let mounting = null;
   let openSeq = 0;
+  /**
+   * Adapters stood up by `prewarm` that are not the active one: each holds a
+   * live viewer (a WebGL context for MapillaryJS) until `unmount` releases it.
+   * @type {Map<string, object>}
+   */
+  const warmed = new Map();
 
   function notify() {
     state.notify?.();
@@ -84,6 +90,7 @@ export function createViewerHost({ state, parts }) {
         throw new Error('Street-level viewer was closed');
       }
       active = { id: entry.def.id, adapter, unsubscribe };
+      warmed.delete(entry.def.id);
       adapter.setRenderMode?.(state.street.renderMode);
       return adapter;
     })();
@@ -193,22 +200,44 @@ export function createViewerHost({ state, parts }) {
     const host = state.street.host;
     if (!host || !state.enabled) return;
     for (const entry of entries) {
+      const adapter = entry.instance.viewer;
+      if (!adapter.prewarm || !entry.on) continue;
       try {
-        await entry.instance.viewer.prewarm?.(host);
+        await adapter.prewarm(host);
       } catch {
         /* the real open reports errors */
       }
+      if (active?.id === entry.def.id) continue;
+      // Switched off while it loaded: release it now rather than keep it.
+      if (!state.enabled || !entry.on) adapter.unmount();
+      else warmed.set(entry.def.id, adapter);
     }
   }
 
-  /** Tear the mounted adapter down (layer disabled or destroyed). */
-  function unmount() {
-    close();
-    mounting = null;
-    if (!active) return;
-    active.unsubscribe();
-    active.adapter.unmount();
-    active = null;
+  /**
+   * Tear viewers down: every one (layer disabled or destroyed), or only the
+   * given provider's, active or prewarmed (that provider switched off).
+   * @param {string} [providerId]
+   */
+  function unmount(providerId) {
+    if (
+      !providerId ||
+      active?.id === providerId ||
+      mounting?.id === providerId
+    ) {
+      close();
+      mounting = null;
+      if (active) {
+        active.unsubscribe();
+        active.adapter.unmount();
+        active = null;
+      }
+    }
+    for (const [id, adapter] of warmed) {
+      if (providerId && id !== providerId) continue;
+      warmed.delete(id);
+      adapter.unmount();
+    }
   }
 
   return {
