@@ -201,6 +201,15 @@ export const findAircraft = defineTool({
       )
       .filter((record) => !seen.has(record.id) && seen.add(record.id))
       .map((record) => aircraftRow(record));
+    // Each feed that answered, with its own freshness and coverage.
+    const answered = feeds.flatMap(({ name }, index) =>
+      settled[index].status === 'fulfilled'
+        ? [{ feed: name, ...snapshotInfo(settled[index].value) }]
+        : [],
+    );
+    const stale = answered
+      .filter((feed) => feed.freshness === 'stale')
+      .map((feed) => feed.feed);
     return {
       summary:
         (rows.length
@@ -208,8 +217,16 @@ export const findAircraft = defineTool({
           : `No aircraft with ${key} ${wanted} is currently reported.`) +
         (unavailable.length
           ? ` The ${unavailable.join(' and ')} feed did not answer.`
+          : '') +
+        (stale.length
+          ? ` The ${stale.join(' and ')} feed data may be stale.`
           : ''),
-      data: { ...capRows(rows, args.limit), unavailable_feeds: unavailable },
+      data: {
+        ...capRows(rows, args.limit),
+        unavailable_feeds: unavailable,
+        stale_feeds: stale,
+        feeds: answered,
+      },
     };
   },
 });
