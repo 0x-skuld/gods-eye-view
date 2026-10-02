@@ -1,5 +1,6 @@
 import { applicationHtmlPlugin } from './application-html.js';
 import cesium from 'vite-plugin-cesium';
+import { embedFramingPlugin } from './embed-framing.js';
 
 /** Build browser assets with explicit inputs; never load environment or providers. */
 export function createBrowserViteConfig({
@@ -12,7 +13,12 @@ export function createBrowserViteConfig({
   command,
 } = {}) {
   return {
-    plugins: [cesium(), applicationHtmlPlugin(), ...plugins],
+    plugins: [
+      cesium(),
+      applicationHtmlPlugin(),
+      ...plugins,
+      embedFramingPlugin(),
+    ],
     ...(publicDir === undefined ? {} : { publicDir }),
     // A production build must not clean the dependency cache a running dev
     // server is still serving optimized module URLs from.
@@ -39,6 +45,7 @@ export function createBrowserViteConfig({
         deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/ENVIRONMENT'],
       },
       // These headers protect the document containing Provider Settings.
+      // Embed-mode documents are framable instead; see embed-framing.js.
       headers: {
         'X-Frame-Options': 'DENY',
         'Content-Security-Policy': "frame-ancestors 'none'",

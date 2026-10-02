@@ -28,7 +28,11 @@
   "vite-build": {
     "runtime": "node",
     "exports": ["./build/vite", "./build/html"],
-    "modules": ["build/vite.js", "build/application-html.js"],
+    "modules": [
+      "build/vite.js",
+      "build/application-html.js",
+      "build/embed-framing.js"
+    ],
     "external": ["vite-plugin-cesium"]
   },
   "live-providers": {
@@ -2039,7 +2043,8 @@
       "src/sources/infrastructureData.js",
       "src/tools/functions.js",
       "src/voice/actionSchemas.js",
-      "src/view/index.js"
+      "src/view/index.js",
+      "src/app/embed.js"
     ],
     "external": [
       "hls.js",

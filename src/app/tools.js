@@ -4,6 +4,7 @@ import { initDrawTool } from '../annotations/drawTool.js';
 import { initImageryBoxTool } from '../ui/imageryBoxTool.js';
 import { createRecentImageryPanel } from '../ui/recentImagery.js';
 import { initGevVoiceCommands } from '../voice/gevRealtime.js';
+import { installViews } from './embed.js';
 import { installScopeMask, destroyScopeMask } from '../scopeMask.js';
 import {
   installRenderGovernor,
@@ -176,5 +177,14 @@ export function createApplicationTools({
       delete window.__gevVoiceCommands;
   });
   debug.voiceCommands = voiceCommands;
+  defer(
+    installViews({
+      shell: styleManager,
+      viewer,
+      dataManager,
+      run: (name, args) => voiceCommands.runner(name, args, { signal }),
+      signal,
+    }),
+  );
   return { sceneDirector, annotations, voiceCommands };
 }

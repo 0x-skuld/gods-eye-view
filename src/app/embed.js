@@ -1,0 +1,198 @@
+/**
+ * Embed mode and views in the running app.
+ *
+ * With `?embed=1` the app shows only the globe: clean view, with the HUD,
+ * welcome and setup prompts hidden. A page that frames it changes what it
+ * shows by posting `{ type: 'gev:view', id, view }`; the app applies the view
+ * through its own actions and answers `{ type: 'gev:view-applied', id, ok,
+ * steps }`. It announces `{ type: 'gev:ready' }` once it can take views.
+ *
+ * Annotations in a share link are drawn once the link has been restored,
+ * embedded or not.
+ */
+
+import * as Cesium from 'cesium';
+import { announceNavigationAuthority } from '../navigationPolicy.js';
+import { annotationsFromParams, createView } from '../view/index.js';
+
+export const EMBED_VIEW_MESSAGE = 'gev:view';
+export const EMBED_APPLIED_MESSAGE = 'gev:view-applied';
+export const EMBED_READY_MESSAGE = 'gev:ready';
+
+const FOLLOW_LAYERS = {
+  aircraft: 'flights',
+  military_aircraft: 'military',
+  satellite: 'satellites',
+};
+const FOLLOW_ATTEMPTS = 20;
+const FOLLOW_RETRY_MS = 1000;
+const FLIGHT_SECONDS = 2;
+
+/** Whether this page was opened in embed mode. */
+export function isEmbedded(location = globalThis.location) {
+  return new URLSearchParams(location?.search || '').get('embed') === '1';
+}
+
+const delay = (ms, signal) =>
+  new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+
+/** Fly the camera to a view's camera and resolve when the flight ends. */
+function flyTo(viewer, camera) {
+  announceNavigationAuthority('embed-view');
+  return new Promise((resolve) => {
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(
+        camera.lon,
+        camera.lat,
+        camera.altitude_m,
+      ),
+      orientation: {
+        heading: Cesium.Math.toRadians(camera.heading_deg),
+        pitch: Cesium.Math.toRadians(camera.pitch_deg),
+        roll: 0,
+      },
+      duration: FLIGHT_SECONDS,
+      complete: () => resolve(true),
+      cancel: () => resolve(false),
+    });
+  });
+}
+
+/**
+ * Make the app show a view: style and map, exactly the view's layers,
+ * annotations, the camera, and the followed entity. Each step runs through the
+ * app's own actions (`run(name, args)`); a failed step is reported and the
+ * rest still run. Resolves to the steps and whether each succeeded.
+ */
+export async function applyView(
+  view,
+  { viewer, dataManager, run, signal, retryMs = FOLLOW_RETRY_MS },
+) {
+  const steps = [];
+  const act = async (name, args) => {
+    let result = null;
+    try {
+      result = await run(name, args);
+    } catch (error) {
+      result = { ok: false, error: error?.message || String(error) };
+    }
+    steps.push({
+      step: name,
+      ok: result?.ok !== false,
+      ...(result?.error ? { error: result.error } : {}),
+    });
+    return result;
+  };
+  if (view.style) await act('set_visual_style', { style: view.style });
+  if (view.map) await act('set_map_stack', { stack: view.map });
+  const wanted = new Set(view.layers);
+  for (const layer of dataManager.getAll()) {
+    if (layer.enabled && !wanted.has(layer.id))
+      await act('set_layer_visibility', { layerId: layer.id, enabled: false });
+  }
+  for (const layerId of view.layers) {
+    if (!dataManager.isEnabled(layerId))
+      await act('set_layer_visibility', { layerId, enabled: true });
+  }
+  if (!view.follow) await act('stop_tracking', {});
+  // Annotations go first: drawing them may frame the marks, and the view's
+  // own camera should have the last word.
+  await act('clear_annotations', {});
+  if (view.annotations.length)
+    await act('annotate_map', { annotations: [...view.annotations] });
+  steps.push({ step: 'camera', ok: await flyTo(viewer, view.camera) });
+  if (view.follow) {
+    // The followed entity appears once its layer has data; retry until then.
+    const args = {
+      query: view.follow.id,
+      layerId: FOLLOW_LAYERS[view.follow.kind],
+    };
+    let followed = false;
+    for (let attempt = 0; attempt < FOLLOW_ATTEMPTS && !followed; attempt++) {
+      if (signal?.aborted) break;
+      try {
+        followed = (await run('track_entity', args))?.ok === true;
+      } catch {
+        followed = false;
+      }
+      if (!followed) await delay(retryMs, signal);
+    }
+    steps.push({ step: 'follow', ok: followed });
+  }
+  return steps;
+}
+
+/**
+ * Install embed mode when the page asks for it, and draw any annotations the
+ * opening link carries. Returns a function that removes the message handler.
+ */
+export function installViews({
+  shell,
+  viewer,
+  dataManager,
+  run,
+  signal,
+  location = globalThis.location,
+  windowRef = globalThis.window,
+}) {
+  const ready = Promise.resolve(shell.initialRestorePromise).catch(() => {});
+  const linked = annotationsFromParams(
+    new URLSearchParams(String(location?.hash || '').replace(/^#/, '')),
+  );
+  if (linked.length)
+    void ready.then(() => {
+      if (!signal?.aborted) void run('annotate_map', { annotations: linked });
+    });
+  if (!isEmbedded(location)) return () => {};
+
+  windowRef.document.body.classList.add('ui-embed');
+  shell.setCleanView?.(true);
+  const parent = windowRef.parent;
+  const post = (message) => {
+    if (parent && parent !== windowRef) parent.postMessage(message, '*');
+  };
+  // Views apply one at a time, in the order they arrive.
+  let queue = ready;
+  const onMessage = (event) => {
+    if (event.source !== parent || event.data?.type !== EMBED_VIEW_MESSAGE)
+      return;
+    const { id = null } = event.data;
+    let view;
+    try {
+      view = createView(event.data.view);
+    } catch (error) {
+      post({
+        type: EMBED_APPLIED_MESSAGE,
+        id,
+        ok: false,
+        error: error.message,
+      });
+      return;
+    }
+    queue = queue.then(async () => {
+      if (signal?.aborted) return;
+      const steps = await applyView(view, { viewer, dataManager, run, signal });
+      post({
+        type: EMBED_APPLIED_MESSAGE,
+        id,
+        ok: steps.every((step) => step.ok),
+        steps,
+      });
+    });
+  };
+  windowRef.addEventListener('message', onMessage);
+  void ready.then(() => {
+    if (!signal?.aborted) post({ type: EMBED_READY_MESSAGE });
+  });
+  return () => windowRef.removeEventListener('message', onMessage);
+}

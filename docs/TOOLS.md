@@ -93,10 +93,32 @@ format the app restores, and `viewUrl` gives the address that opens it. The
 style names are the ones share links use. Ships cannot be followed from a
 link yet.
 
+A view can also carry `annotations`, the marks the app's `annotate_map`
+action draws (pins, highlights, areas, arrows, routes and labels at a place
+name or coordinates). Links carry them in the `an` parameter, and the app
+draws them once the link has been restored.
+
 Tools take a view as `VIEW_ARGUMENTS`: an `area` to frame from above, or a
-`camera`, plus `layers`, `style`, `map` and `follow`; camera fields given
-with an area override its framing. `resolveViewArguments` turns them into a
-view.
+`camera`, plus `layers`, `style`, `map`, `follow` and `annotations`. A
+tilted camera over an area looks at its center from behind; camera fields
+given with an area override its framing. `resolveViewArguments` turns them
+into a view.
+
+### Embed mode
+
+`?embed=1` shows only the globe: clean view, with the HUD, panels, welcome
+and setup prompts hidden; provider attribution stays. A page that frames it
+changes the view by posting `{ type: 'gev:view', id, view }` to the frame.
+The app applies it through its own actions (style, map, exactly the view's
+layers, annotations, the camera, then the followed entity, retried until its
+layer has it) and answers `{ type: 'gev:view-applied', id, ok, steps }`. It
+posts `{ type: 'gev:ready' }` once it can take views, and only its parent
+page can send them. See `src/app/embed.js`.
+
+The development and preview servers let other pages frame embed-mode
+documents only; every other document keeps `X-Frame-Options: DENY` and
+`frame-ancestors 'none'`. `GEV_EMBED_FRAME_ANCESTORS` restricts which pages
+may frame them (any by default).
 
 Answers that have something to show include `data.view`: the view that
 shows them, with the matching layers on, an area framed from above, and a
