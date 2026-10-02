@@ -40,6 +40,14 @@ function panelHtml(appOrigin) {
   const APP_ORIGIN = ${JSON.stringify(appOrigin)};
   const LOAD_TIMEOUT_MS = 20000;
   const status = document.getElementById('status');
+  // When the host's security policy blocks part of the panel, say what was
+  // blocked; otherwise a refused frame only shows as a load that never ends.
+  let blocked = null;
+  document.addEventListener('securitypolicyviolation', (event) => {
+    blocked = event.effectiveDirective + ' blocked ' + (event.blockedURI || 'a resource');
+    if (status.isConnected)
+      status.textContent = "God's Eye View could not load here: " + blocked + '.';
+  });
   const open = document.getElementById('open');
   let nextId = 1;
   const pending = new Map();
@@ -88,7 +96,9 @@ function panelHtml(appOrigin) {
       setTimeout(() => {
         if (!frameReady)
           status.textContent =
-            "God's Eye View did not load here. Use Open in God's Eye View above.";
+            "God's Eye View did not load here" +
+            (blocked ? ' (' + blocked + ')' : '') +
+            ". Use Open in God's Eye View above.";
       }, LOAD_TIMEOUT_MS);
       return;
     }
