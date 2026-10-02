@@ -105,23 +105,19 @@ export function createControls({ state: layerState, services, parts, source }) {
           truncated:
             !Number.isFinite(cohort.summary?.count) ||
             cohort.summary?.truncated === true,
-          items: (cohort.summary?.navigationNearest || []).map((item) => ({
-            ...item,
-          })),
+          // These records carry structured values such as Cartesian positions.
+          // A shallow spread would let a voice consumer mutate the retained
+          // Contacts cohort through the advertised read-only snapshot.
+          items: structuredClone(cohort.summary?.navigationNearest || []),
           source: cohort.source || null,
           provenance: cohort.provenance
-            ? {
-                ...cohort.provenance,
-                stats: cohort.provenance.stats
-                  ? { ...cohort.provenance.stats }
-                  : undefined,
-              }
+            ? structuredClone(cohort.provenance)
             : null,
           reason: cohort.summary?.reason || null,
         };
       }
       return {
-        subject: { ...layerState.results.subject },
+        subject: structuredClone(layerState.results.subject),
         evaluatedAt: layerState.results.evaluatedAt,
         radiusM: layerState.results.radiusM,
         cohorts,

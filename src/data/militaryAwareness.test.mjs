@@ -2608,17 +2608,18 @@ test('the voice query snapshot is a detached copy of the rendered aircraft cohor
     assert.equal(first.cohorts.flights.provenance.enabled, true);
     assert.equal(first.cohorts.flights.items[0].icao24, 'nearby');
     first.cohorts.flights.items[0].icao24 = 'mutated';
+    first.cohorts.flights.items[0].position.x = 99;
     first.cohorts.flights.provenance.source = 'mutated';
-    assert.equal(
-      militaryAwarenessLayer.getAircraftQuerySnapshot().cohorts.flights.items[0]
-        .icao24,
-      'nearby',
-    );
-    assert.notEqual(
-      militaryAwarenessLayer.getAircraftQuerySnapshot().cohorts.flights
-        .provenance.source,
-      'mutated',
-    );
+    first.cohorts.flights.provenance.stats.coverage = { radiusM: 1 };
+    first.subject.position.x = 77;
+    const second = militaryAwarenessLayer.getAircraftQuerySnapshot();
+    assert.equal(second.cohorts.flights.items[0].icao24, 'nearby');
+    assert.equal(second.cohorts.flights.items[0].position.x, nearbyPosition.x);
+    assert.notEqual(second.cohorts.flights.provenance.source, 'mutated');
+    assert.notDeepEqual(second.cohorts.flights.provenance.stats.coverage, {
+      radiusM: 1,
+    });
+    assert.equal(second.subject.position.x, subjectPosition.x);
   } finally {
     runtime.restore();
     restoreCollections();
