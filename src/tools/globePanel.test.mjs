@@ -24,7 +24,13 @@ test('the globe panel is an MCP Apps resource that runs the app inside itself', 
     'ws://localhost:5173',
   ]);
   assert.ok(csp.resourceDomains.includes('https://tile.googleapis.com'));
-  assert.deepEqual(csp.baseUriDomains, ['http://localhost:5173']);
+  // Hosts may refuse <base>; the panel sends the app's requests itself.
+  assert.equal(csp.baseUriDomains, undefined);
+  assert.deepEqual(resource._meta['openai/widgetCSP'], {
+    connect_domains: csp.connectDomains,
+    resource_domains: csp.resourceDomains,
+  });
+  assert.doesNotMatch(resource.text, /createElement\('base'\)/);
   assert.match(resource.text, /window\.GEV_EMBED_INLINE = true/);
   assert.match(resource.text, /fetch\(APP_ORIGIN \+ '\/\?embed=1'\)/);
   assert.doesNotMatch(resource.text, /<iframe|createElement\('iframe'\)/);

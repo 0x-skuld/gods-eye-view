@@ -96,31 +96,142 @@ function panelHtml(appOrigin) {
   const postView = (view) =>
     window.postMessage({ type: 'gev:view', id: nextId++, view }, '*');
 
+  // The panel page lives on the host's site, which serves none of the app.
+  // Hosts may refuse <base>, so the app's own addresses (relative ones, and
+  // absolute ones on this page's site) are sent to the app's server instead.
+  // The page's own site; location.origin is "null" in a srcdoc document.
+  const PAGE_ORIGIN = new URL(document.baseURI).origin;
+  const toApp = (value) => {
+    let url;
+    try {
+      url = new URL(String(value), document.baseURI);
+    } catch {
+      return value;
+    }
+    if (!/^https?:$/.test(url.protocol) || url.origin !== PAGE_ORIGIN)
+      return value;
+    return APP_ORIGIN + url.pathname + url.search + url.hash;
+  };
+  const isRemote = (value) => {
+    try {
+      return new URL(String(value), document.baseURI).origin === APP_ORIGIN;
+    } catch {
+      return false;
+    }
+  };
+
+  function redirectRequests() {
+    const nativeFetch = window.fetch;
+    window.fetch = (input, init) =>
+      nativeFetch.call(
+        window,
+        input instanceof Request
+          ? new Request(toApp(input.url), input)
+          : typeof input === 'string' || input instanceof URL
+            ? toApp(input)
+            : input,
+        init,
+      );
+    const nativeOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+      return nativeOpen.call(this, method, toApp(url), ...rest);
+    };
+    const nativeBeacon = navigator.sendBeacon?.bind(navigator);
+    if (nativeBeacon)
+      navigator.sendBeacon = (url, data) => nativeBeacon(toApp(url), data);
+    for (const [type, attribute] of [
+      [HTMLImageElement, 'src'],
+      [HTMLMediaElement, 'src'],
+      [HTMLSourceElement, 'src'],
+      [HTMLLinkElement, 'href'],
+    ]) {
+      const property = Object.getOwnPropertyDescriptor(type.prototype, attribute);
+      Object.defineProperty(type.prototype, attribute, {
+        ...property,
+        set(value) {
+          property.set.call(this, toApp(value));
+        },
+      });
+    }
+    // Workers must come from this page's site; one on the app's server
+    // starts through a small worker here that imports it.
+    const NativeWorker = window.Worker;
+    window.Worker = function Worker(url, options) {
+      const target = toApp(url);
+      if (!isRemote(target)) return new NativeWorker(url, options);
+      const source =
+        options && options.type === 'module'
+          ? 'import ' + JSON.stringify(String(target)) + ';'
+          : 'importScripts(' + JSON.stringify(String(target)) + ');';
+      return new NativeWorker(
+        URL.createObjectURL(new Blob([source], { type: 'text/javascript' })),
+        options,
+      );
+    };
+    window.Worker.prototype = NativeWorker.prototype;
+    // Styles the app adds while it runs name images by root-relative url().
+    const rewriteStyle = (style) => {
+      const text = style.textContent;
+      const next = text.replace(/url\\((['"]?)\\//g, 'url($1' + APP_ORIGIN + '/');
+      if (next !== text) style.textContent = next;
+    };
+    new MutationObserver((records) => {
+      for (const record of records) {
+        const target = record.target.nodeName === 'STYLE' ? [record.target] : [];
+        for (const node of [...target, ...record.addedNodes]) {
+          if (node.nodeName === 'STYLE') rewriteStyle(node);
+          // Markup the app adds as HTML text sets src without the setters.
+          if (node.nodeType !== 1) continue;
+          for (const element of [node, ...node.querySelectorAll('[src]')]) {
+            const value = element.getAttribute('src');
+            if (value && toApp(value) !== value)
+              element.setAttribute('src', toApp(value));
+          }
+        }
+      }
+    }).observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  }
+
+  /** Point an imported element's own addresses at the app's server. */
+  function absolutize(root) {
+    for (const element of [root, ...root.querySelectorAll('*')]) {
+      for (const attribute of ['src', 'href', 'poster']) {
+        const value = element.getAttribute(attribute);
+        if (value && !value.startsWith('#'))
+          element.setAttribute(attribute, new URL(value, APP_ORIGIN + '/').href);
+      }
+    }
+    return root;
+  }
+
   /**
    * Load God's Eye View into this page. Hosts may not frame other sites, so
-   * the panel runs the app itself: relative addresses resolve to the app's
-   * server through <base>, the app's styles and markup are copied in, and
-   * its scripts run here with the app in inline embed mode.
+   * the panel runs the app itself: its requests go to the app's server, its
+   * styles and markup are copied in, and its scripts run here with the app
+   * in inline embed mode.
    */
   async function startApp() {
     window.GEV_EMBED_INLINE = true;
-    const base = document.createElement('base');
-    base.href = APP_ORIGIN + '/';
-    document.head.prepend(base);
+    redirectRequests();
     const response = await fetch(APP_ORIGIN + '/?embed=1');
     if (!response.ok) throw new Error('the app answered ' + response.status);
     const page = new DOMParser().parseFromString(await response.text(), 'text/html');
     for (const node of page.head.querySelectorAll('link[rel="stylesheet"], style'))
-      document.head.appendChild(document.importNode(node, true));
+      document.head.appendChild(absolutize(document.importNode(node, true)));
     for (const node of [...page.body.childNodes]) {
-      if (node.nodeName !== 'SCRIPT')
-        document.body.insertBefore(document.importNode(node, true), status);
+      if (node.nodeName === 'SCRIPT') continue;
+      const copy = document.importNode(node, true);
+      document.body.insertBefore(copy.nodeType === 1 ? absolutize(copy) : copy, status);
     }
     for (const original of page.querySelectorAll('script')) {
       const script = document.createElement('script');
       if (original.type) script.type = original.type;
       if (original.getAttribute('src'))
-        script.src = new URL(original.getAttribute('src'), base.href).href;
+        script.src = new URL(original.getAttribute('src'), APP_ORIGIN + '/').href;
       else script.textContent = original.textContent;
       document.body.appendChild(script);
     }
@@ -229,9 +340,17 @@ export function createGlobePanelResource({ appUrl }) {
             socketOrigin(appOrigin),
             ...PROVIDER_ORIGINS,
           ],
-          baseUriDomains: [appOrigin],
         },
         prefersBorder: true,
+      },
+      // The same policy under the key OpenAI's clients read.
+      'openai/widgetCSP': {
+        connect_domains: [
+          appOrigin,
+          socketOrigin(appOrigin),
+          ...PROVIDER_ORIGINS,
+        ],
+        resource_domains: [appOrigin, ...PROVIDER_ORIGINS],
       },
     },
   });
