@@ -274,6 +274,42 @@ test('resources are listed and read, and tools name their UI resource', async ()
         ui: { resourceUri: 'https://a.example' },
         run: async () => ({ summary: '', data: {} }),
       }),
-    /ui:\/\/ resourceUri/,
+    /ui:\/\/ URI/,
   );
+  assert.throws(
+    () =>
+      defineTool({
+        name: 'bad',
+        title: 'Bad',
+        description: 'Visible to nobody.',
+        inputSchema: { type: 'object' },
+        ui: { visibility: ['user'] },
+        run: async () => ({ summary: '', data: {} }),
+      }),
+    /visibility/,
+  );
+});
+
+test('a tool only an app may call says so, and answers it without JSON text', async () => {
+  const loader = defineTool({
+    name: 'load',
+    title: 'Load',
+    description: 'Loads a file for the view.',
+    inputSchema: { type: 'object', properties: {} },
+    ui: { visibility: ['app'] },
+    run: async () => ({ summary: 'loaded', data: { body: 'abc' } }),
+  });
+  const appServer = createMcpServer({
+    catalog: composeCatalog({ tools: [loader] }),
+    name: 'fixture',
+    version: '1',
+  });
+  const call = async (method, params) =>
+    (await appServer.handle({ jsonrpc: '2.0', id: 1, method, params })).result;
+  assert.deepEqual((await call('tools/list')).tools[0]._meta, {
+    ui: { visibility: ['app'] },
+  });
+  const result = await call('tools/call', { name: 'load', arguments: {} });
+  assert.deepEqual(result.content, [{ type: 'text', text: 'loaded' }]);
+  assert.deepEqual(result.structuredContent, { body: 'abc' });
 });

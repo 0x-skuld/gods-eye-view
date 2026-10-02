@@ -5,42 +5,35 @@ import {
   MCP_APP_MIME_TYPE,
   createGlobePanelResource,
 } from './globePanel.js';
+import { panelRuntime } from '../app/globePanelRuntime.js';
 import { composeCatalog, coreTools } from './index.js';
 
-test('the globe panel is an MCP Apps resource that runs the app inside itself', () => {
-  const resource = createGlobePanelResource({
-    appUrl: 'http://localhost:5173/some/path',
-  });
+test('the globe panel is an MCP Apps resource that loads the app through its server', () => {
+  const resource = createGlobePanelResource({ runtime: panelRuntime });
   assert.equal(resource.uri, GLOBE_PANEL_URI);
   assert.equal(resource.mimeType, MCP_APP_MIME_TYPE);
   assert.equal(MCP_APP_MIME_TYPE, 'text/html;profile=mcp-app');
   const { csp } = resource._meta.ui;
-  // Hosts may not let a panel frame other sites, so it declares no frames
-  // and instead loads the app's code and data from the app's origin.
-  assert.equal(csp.frameDomains, undefined);
-  assert.equal(csp.resourceDomains[0], 'http://localhost:5173');
-  assert.deepEqual(csp.connectDomains.slice(0, 2), [
-    'http://localhost:5173',
-    'ws://localhost:5173',
-  ]);
+  // The panel reaches only map and font providers; the app's own files
+  // and data come through the MCP server, so no app address is declared.
+  assert.deepEqual(csp.connectDomains, csp.resourceDomains);
   assert.ok(csp.resourceDomains.includes('https://tile.googleapis.com'));
-  // Hosts may refuse <base>; the panel sends the app's requests itself.
+  assert.ok(
+    csp.resourceDomains.every((origin) => origin.startsWith('https://')),
+  );
+  assert.equal(csp.frameDomains, undefined);
   assert.equal(csp.baseUriDomains, undefined);
-  assert.deepEqual(resource._meta['openai/widgetCSP'], {
-    connect_domains: csp.connectDomains,
-    resource_domains: csp.resourceDomains,
-  });
-  assert.doesNotMatch(resource.text, /createElement\('base'\)/);
-  assert.match(resource.text, /window\.GEV_EMBED_INLINE = true/);
-  assert.match(resource.text, /fetch\(APP_ORIGIN \+ '\/\?embed=1'\)/);
-  assert.doesNotMatch(resource.text, /<iframe|createElement\('iframe'\)/);
-  assert.match(resource.text, /const APP_ORIGIN = "http:\/\/localhost:5173";/);
+  assert.match(resource.text, /"toolName":"panel_request"/);
+  assert.match(resource.text, /"panelBase":"\/panel\/"/);
   assert.match(resource.text, /'ui\/initialize'/);
   assert.match(resource.text, /'ui\/notifications\/tool-result'/);
-  assert.match(resource.text, /protocolVersion: "2026-01-26"/);
+  assert.match(resource.text, /"protocolVersion":"2026-01-26"/);
   // The MCP Apps SDK's initialize parameters; hosts reject anything else.
-  assert.match(resource.text, /appInfo: \{ name: 'gods-eye-view'/);
+  assert.match(resource.text, /appInfo: \{/);
   assert.doesNotMatch(resource.text, /clientInfo/);
+  assert.doesNotMatch(resource.text, /<iframe|createElement\('base'\)/);
+  const script = resource.text.match(/<script>([\s\S]*)<\/script>/)[1];
+  assert.doesNotThrow(() => new Function(script));
 });
 
 test('show_in_gods_eye_view names the panel and shows a view another answer returned', async () => {

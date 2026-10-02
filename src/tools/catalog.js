@@ -11,6 +11,8 @@ import { assertSupportedSchema, validateValue } from './schema.js';
 
 const TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 const KINDS = new Set(['query', 'action']);
+/** Who may call a tool, as MCP Apps names them: the model, the app's panel. */
+const VISIBILITY = new Set(['model', 'app']);
 
 /** Error codes a tool may report. Each is safe to show to a model or person. */
 export const TOOL_ERROR_CODES = Object.freeze([
@@ -93,11 +95,26 @@ export function defineTool({
   )
     throw new TypeError(`${name}.requires must list service names`);
   if (typeof run !== 'function') throw new TypeError(`${name} needs run()`);
-  if (
-    ui !== null &&
-    !(typeof ui?.resourceUri === 'string' && ui.resourceUri.startsWith('ui://'))
-  )
-    throw new TypeError(`${name}.ui needs a ui:// resourceUri`);
+  if (ui !== null) {
+    if (
+      ui?.resourceUri !== undefined &&
+      !(
+        typeof ui.resourceUri === 'string' && ui.resourceUri.startsWith('ui://')
+      )
+    )
+      throw new TypeError(`${name}.ui.resourceUri must be a ui:// URI`);
+    if (
+      ui?.visibility !== undefined &&
+      !(
+        Array.isArray(ui.visibility) &&
+        ui.visibility.length > 0 &&
+        ui.visibility.every((who) => VISIBILITY.has(who))
+      )
+    )
+      throw new TypeError(`${name}.ui.visibility must list model and/or app`);
+    if (ui?.resourceUri === undefined && ui?.visibility === undefined)
+      throw new TypeError(`${name}.ui needs a resourceUri or a visibility`);
+  }
   return Object.freeze({
     name,
     kind,
@@ -109,7 +126,14 @@ export function defineTool({
       ...annotations,
     }),
     requires: Object.freeze([...requires]),
-    ui: ui ? Object.freeze({ resourceUri: ui.resourceUri }) : null,
+    ui: ui
+      ? Object.freeze({
+          ...(ui.resourceUri ? { resourceUri: ui.resourceUri } : {}),
+          ...(ui.visibility
+            ? { visibility: Object.freeze([...ui.visibility]) }
+            : {}),
+        })
+      : null,
     run,
   });
 }

@@ -40,6 +40,7 @@ import {
   getTransitVehicles,
 } from './queries/mobility.js';
 import { placesNearby, planRoute, searchPlaces } from './queries/places.js';
+import { panelRequest } from './queries/panelRequest.js';
 import { showInGodsEyeView } from './queries/share.js';
 import { findAlprCameras } from './queries/surveillance.js';
 import {
@@ -122,4 +123,5 @@ export const coreTools = Object.freeze([
   militaryAwareness,
   getHudCaption,
   showInGodsEyeView,
+  panelRequest,
 ]);

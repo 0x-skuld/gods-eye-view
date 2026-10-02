@@ -41,11 +41,13 @@ export function toMcpTools(catalog, { descriptions = {}, decorate } = {}) {
       annotations: { title, ...tool.annotations },
       ...(tool.ui
         ? {
-            // The flat key is the earlier form of the same field, which some
-            // hosts still read; the MCP Apps SDK sends both.
             _meta: {
-              ui: { resourceUri: tool.ui.resourceUri },
-              'ui/resourceUri': tool.ui.resourceUri,
+              ui: { ...tool.ui },
+              // The flat key is the earlier form of the same field, which
+              // some hosts still read; the MCP Apps SDK sends both.
+              ...(tool.ui.resourceUri
+                ? { 'ui/resourceUri': tool.ui.resourceUri }
+                : {}),
             },
           }
         : {}),
@@ -111,12 +113,18 @@ export function createMcpServer({
         const result = await catalog.call(params.name, params.arguments ?? {}, {
           signal,
         });
+        // Only an app reads a tool the model cannot call, and apps read
+        // structuredContent.
+        const appOnly =
+          catalog.get(params.name).ui?.visibility?.includes('model') === false;
         return {
           // The data is repeated as JSON text for clients that do not read
           // structuredContent.
           content: [
             { type: 'text', text: result.summary },
-            { type: 'text', text: JSON.stringify(result.data) },
+            ...(appOnly
+              ? []
+              : [{ type: 'text', text: JSON.stringify(result.data) }]),
             ...(result.images || []).map((item) => ({
               type: 'image',
               data: item.data,

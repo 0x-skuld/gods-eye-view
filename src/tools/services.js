@@ -3,7 +3,7 @@
  * factories and the application request services. `fetchImpl` must resolve
  * the sources' relative `/api/...` paths; in a browser the page's own fetch
  * does, and elsewhere a caller supplies a resolving fetch. `appUrl` is the
- * address the app is served from.
+ * address the app is served from; `app.fetch` requests the app's own paths.
  */
 
 import { createAlprTileSource } from '../layers/alpr/source.js';
@@ -45,7 +45,7 @@ export function createToolServices({ fetchImpl, appUrl }) {
     throw new TypeError('A fetch implementation is required');
   const requests = createApplicationRequestServices({ fetchImpl });
   return {
-    app: { baseUrl: appUrl },
+    app: { baseUrl: appUrl, fetch: fetchImpl },
     earthquakes: createUsgsEarthquakeSource({ fetchImpl }),
     fires: createFirmsSource({ fetchImpl }),
     launches: createLaunchSource({ fetchImpl }),

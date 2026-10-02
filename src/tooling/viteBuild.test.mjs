@@ -12,8 +12,7 @@ test('explicit build inputs preserve browser-only defines, plugin order and loop
     googleApiKey: 'browser-fixture',
     cesiumToken: 'ion-fixture',
   });
-  assert.equal(config.plugins[0].name, 'panel-cors');
-  assert.equal(config.plugins[3], plugin);
+  assert.equal(config.plugins[2], plugin);
   assert.equal(config.server.host, 'localhost');
   assert.equal(config.server.port, 4173);
   assert.deepEqual(config.server.allowedHosts, [
@@ -43,45 +42,6 @@ test('explicit build inputs preserve browser-only defines, plugin order and loop
   );
 });
 
-test('panel origins may read every dev server path, other sites may not', () => {
-  let middleware;
-  createBrowserViteConfig().plugins[0].configureServer({
-    middlewares: { use: (fn) => (middleware = fn) },
-  });
-  const request = (origin, method = 'GET') => {
-    const headers = {};
-    let ended = false;
-    let passed = false;
-    middleware(
-      { method, headers: origin ? { origin } : {} },
-      {
-        setHeader: (name, value) => (headers[name] = value),
-        end: () => (ended = true),
-      },
-      () => (passed = true),
-    );
-    return { headers, ended, passed };
-  };
-  const panel = request('https://abc123.claudemcpcontent.com');
-  assert.equal(
-    panel.headers['Access-Control-Allow-Origin'],
-    'https://abc123.claudemcpcontent.com',
-  );
-  assert.equal(panel.passed, true);
-  assert.equal(
-    request('https://abc123.claudemcpcontent.com', 'OPTIONS').ended,
-    true,
-  );
-  assert.equal(
-    request('codex-sandbox://mcp-app-ab12.web-sandbox.oaiusercontent.com')
-      .headers['Access-Control-Allow-Origin'],
-    'codex-sandbox://mcp-app-ab12.web-sandbox.oaiusercontent.com',
-  );
-  const other = request('https://example.com');
-  assert.deepEqual(other.headers, {});
-  assert.equal(other.passed, true);
-});
-
 test('build helper does not discover environment values or construct local providers', () => {
   const before = process.env.GOOGLE_MAPS_API_KEY;
   process.env.GOOGLE_MAPS_API_KEY = 'environment-fixture';
@@ -92,8 +52,8 @@ test('build helper does not discover environment values or construct local provi
       undefined,
     );
     assert.deepEqual(
-      config.plugins.slice(3).map((plugin) => plugin.name),
-      ['embed-framing'],
+      config.plugins.slice(2).map((plugin) => plugin.name),
+      ['embed-framing', 'panel-build'],
     );
   } finally {
     if (before === undefined) delete process.env.GOOGLE_MAPS_API_KEY;
@@ -106,14 +66,15 @@ test('root config retains existing named exports and standalone provider order',
     assert.equal(compatibility[name], value, name);
   const config = standaloneConfig({ mode: 'test' });
   assert.deepEqual(
-    config.plugins.slice(3, -3).map((plugin) => plugin.name),
+    config.plugins.slice(2, -4).map((plugin) => plugin.name),
     providers.localProviderPlugins().map((plugin) => plugin.name),
   );
-  assert.equal(config.plugins.at(-4).name, 'gev-key-setup');
+  assert.equal(config.plugins.at(-5).name, 'gev-key-setup');
   // The local MCP route follows every provider and precedes the API fallback.
-  assert.equal(config.plugins.at(-3).name, 'local-mcp');
-  assert.equal(config.plugins.at(-2).name, 'api-not-found');
-  assert.equal(config.plugins.at(-1).name, 'embed-framing');
+  assert.equal(config.plugins.at(-4).name, 'local-mcp');
+  assert.equal(config.plugins.at(-3).name, 'api-not-found');
+  assert.equal(config.plugins.at(-2).name, 'embed-framing');
+  assert.equal(config.plugins.at(-1).name, 'panel-build');
 });
 
 test('build export resolves in Node and has no browser fallback', async () => {

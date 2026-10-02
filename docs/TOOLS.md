@@ -108,17 +108,38 @@ into a view.
 
 `show_in_gods_eye_view` names an MCP Apps view (`io.modelcontextprotocol/ui`):
 `_meta.ui.resourceUri` is `ui://gods-eye-view/globe`, a `text/html;profile=mcp-app`
-resource from `createGlobePanelResource({ appUrl })` in
-`src/tools/globePanel.js`. Clients that display apps render it inside the
-conversation. The panel completes the MCP Apps handshake (`ui/initialize`,
-`ui/notifications/initialized`, `ui/notifications/size-changed`), and for
-each `ui/notifications/tool-result` carrying a view it loads the app in embed
-mode the first time and posts later views to that same app, so the globe
-changes without reloading. Its resource allows framing only the app's origin
-(`csp.frameDomains`), and its "Open in God's Eye View" button asks the host
-to open the link (`ui/open-link`). Tools declare a UI resource with
-`defineTool({ ui: { resourceUri } })`; `createMcpServer({ resources })`
-serves `resources/list` and `resources/read`.
+resource from `createGlobePanelResource({ runtime })` in
+`src/tools/globePanel.js`, with the panel's script from
+`src/app/globePanelRuntime.js`. Clients that display apps render it inside
+the conversation. The panel completes the MCP Apps handshake
+(`ui/initialize`, `ui/notifications/initialized`,
+`ui/notifications/size-changed`), and for each
+`ui/notifications/tool-result` carrying a view it loads the app in inline
+embed mode the first time and posts later views to that same app, so the
+globe changes without reloading. Its "Open in God's Eye View" button asks
+the host to open the link (`ui/open-link`).
+
+Hosts serve panels from their own sites and may refuse other addresses;
+Codex, for one, refuses any address on the user's machine. So the panel
+never requests the app's server itself. It loads everything from the app's
+own paths through `panel_request`, a tool only the panel may call
+(`_meta.ui.visibility: ["app"]`): the MCP server requests the path from the
+app's server and returns the response, compressed and in parts when large.
+The same path works for a local server, a hosted one, and every host. Only
+map imagery, tiles and fonts load directly, from the providers the
+resource's `csp` lists. `panel_request` refuses `/api/setup`, which writes
+provider keys.
+
+The panel loads the app's panel build, which `npm run build:panel` writes to
+`dist/panel` and the servers serve at `/panel/`: one app script, one
+stylesheet, Cesium's script, and Cesium's workers combined into one script
+that Cesium runs from memory (`CESIUM_WORKERS`). Rebuild it after changing
+the app.
+
+Tools declare a UI resource with `defineTool({ ui: { resourceUri } })`, and
+an app-only tool with `ui: { visibility: ['app'] }`;
+`createMcpServer({ resources })` serves `resources/list` and
+`resources/read`.
 
 ### Embed mode
 
@@ -251,3 +272,4 @@ public feeds the sources already use.
 | `military_awareness` | `military` | Military and other aircraft, ships and military installations within 250 km of a point, by section |
 | `get_hud_caption` | `weather`, `summary` | The app's heads-up display caption for an area |
 | `show_in_gods_eye_view` | `app` | A view in God's Eye View: the live panel in clients with MCP Apps, and a link everywhere; takes another answer's view or an area or camera, layers, style, map, marks and something to follow |
+| `panel_request` | `app` | Panel only: loads a path from the app's server for the God's Eye View panel |

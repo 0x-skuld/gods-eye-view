@@ -31,7 +31,8 @@
     "modules": [
       "build/vite.js",
       "build/application-html.js",
-      "build/embed-framing.js"
+      "build/embed-framing.js",
+      "build/panel.js"
     ],
     "external": ["vite-plugin-cesium"]
   },
@@ -3140,7 +3141,8 @@
       "src/data/installationFeedback.js",
       "src/view/index.js",
       "src/tools/views.js",
-      "src/tools/globePanel.js"
+      "src/tools/globePanel.js",
+      "src/tools/queries/panelRequest.js"
     ],
     "external": ["satellite.js"]
   },

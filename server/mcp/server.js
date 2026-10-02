@@ -6,6 +6,7 @@ import {
   coreTools,
   catalogForSurface,
 } from '../../src/tools/index.js';
+import { panelRuntime } from '../../src/app/globePanelRuntime.js';
 import { createGlobePanelResource } from '../../src/tools/globePanel.js';
 import { createMcpServer } from '../../src/tools/mcp/index.js';
 import { DEFAULT_API_BASE, createLocalToolServices } from './services.js';
@@ -38,6 +39,6 @@ export function createLocalMcpServer({
     name: 'gods-eye-view',
     version,
     instructions: INSTRUCTIONS,
-    resources: [createGlobePanelResource({ appUrl: apiBase })],
+    resources: [createGlobePanelResource({ runtime: panelRuntime })],
   });
 }

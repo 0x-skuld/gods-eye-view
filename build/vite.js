@@ -1,46 +1,7 @@
 import { applicationHtmlPlugin } from './application-html.js';
 import cesium from 'vite-plugin-cesium';
 import { embedFramingPlugin } from './embed-framing.js';
-
-/** Origins allowed to read the dev and preview servers' responses. */
-export const PANEL_CORS_ORIGINS = Object.freeze([
-  /^https?:\/\/(?:(?:[^:]+\.)?localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/,
-  /^https:\/\/[a-z0-9]+\.claudemcpcontent\.com$/,
-  /^(?:https|codex-sandbox):\/\/[a-z0-9-]+\.web-sandbox\.oaiusercontent\.com$/,
-]);
-
-/**
- * Vite plugin answering cross-origin reads from PANEL_CORS_ORIGINS on every
- * path. It runs ahead of the API middlewares, which Vite's own `cors` option
- * would not cover.
- */
-function panelCorsPlugin() {
-  const install = (server) => {
-    server.middlewares.use((req, res, next) => {
-      const origin = req.headers.origin;
-      if (
-        !origin ||
-        !PANEL_CORS_ORIGINS.some((allowed) => allowed.test(origin))
-      )
-        return next();
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Vary', 'Origin');
-      if (req.method !== 'OPTIONS') return next();
-      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
-      res.setHeader(
-        'Access-Control-Allow-Headers',
-        req.headers['access-control-request-headers'] || '',
-      );
-      res.statusCode = 204;
-      res.end();
-    });
-  };
-  return {
-    name: 'panel-cors',
-    configureServer: install,
-    configurePreviewServer: install,
-  };
-}
+import { panelBuildPlugin } from './panel.js';
 
 /** Build browser assets with explicit inputs; never load environment or providers. */
 export function createBrowserViteConfig({
@@ -54,11 +15,11 @@ export function createBrowserViteConfig({
 } = {}) {
   return {
     plugins: [
-      panelCorsPlugin(),
       cesium(),
       applicationHtmlPlugin(),
       ...plugins,
       embedFramingPlugin(),
+      panelBuildPlugin(),
     ],
     ...(publicDir === undefined ? {} : { publicDir }),
     // A production build must not clean the dependency cache a running dev
