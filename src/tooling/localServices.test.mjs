@@ -485,3 +485,9 @@ test('the voice instructions name only tools the voice session offers', async ()
   );
   assert.deepEqual(missing, []);
 });
+
+test('the voice instructions send vessels, however heard, to the ships layer', () => {
+  const text = realtimeInstructions();
+  assert.match(text, /"vessels" is easily heard as "visuals"/);
+  assert.match(text, /set_layer_visibility\{layerId:"ais-live-vessels"\}/);
+});
