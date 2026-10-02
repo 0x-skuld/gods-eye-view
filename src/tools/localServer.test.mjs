@@ -87,3 +87,20 @@ test('command-line arguments are strict', () => {
   });
   assert.throws(() => parseArgs(['--port', '1']), /Unknown argument/);
 });
+
+test('the stdio log names methods, tools and resources but never arguments', async () => {
+  const { describeRequest } = await import('../../server/mcp/stdio.js');
+  assert.equal(describeRequest({ method: 'tools/list' }), 'tools/list');
+  assert.equal(
+    describeRequest({
+      method: 'tools/call',
+      params: { name: 'get_weather', arguments: { location: { place: 'x' } } },
+    }),
+    'tools/call get_weather',
+  );
+  assert.equal(
+    describeRequest({ method: 'resources/read', params: { uri: 'ui://a/b' } }),
+    'resources/read ui://a/b',
+  );
+  assert.equal(describeRequest({ result: {} }), null);
+});

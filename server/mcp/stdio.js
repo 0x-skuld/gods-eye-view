@@ -14,13 +14,29 @@ import { parseErrorResponse } from '../../src/tools/mcp/index.js';
 import { createLocalMcpServer } from './server.js';
 import { DEFAULT_API_BASE } from './services.js';
 
+/**
+ * A one-line description of a request for the diagnostic log: its method,
+ * and the tool or resource it names. Arguments and data are never logged.
+ */
+export function describeRequest(message) {
+  const method = typeof message?.method === 'string' ? message.method : null;
+  if (!method) return null;
+  const subject =
+    method === 'tools/call'
+      ? message.params?.name
+      : method === 'resources/read'
+        ? message.params?.uri
+        : null;
+  return typeof subject === 'string' ? `${method} ${subject}` : method;
+}
+
 /** Serve newline-delimited JSON-RPC until `input` ends. */
-export async function serveStdio(server, { input, output }) {
+export async function serveStdio(server, { input, output, log = () => {} }) {
   const lines = createInterface({ input, crlfDelay: Infinity });
   const pending = new Set();
   for await (const line of lines) {
     if (!line.trim()) continue;
-    const work = respond(server, line).then((response) => {
+    const work = respond(server, line, log).then((response) => {
       if (response) output.write(`${JSON.stringify(response)}\n`);
     });
     pending.add(work);
@@ -29,13 +45,15 @@ export async function serveStdio(server, { input, output }) {
   await Promise.all(pending);
 }
 
-async function respond(server, line) {
+async function respond(server, line, log) {
   let message;
   try {
     message = JSON.parse(line);
   } catch {
     return parseErrorResponse();
   }
+  const described = describeRequest(message);
+  if (described) log(described);
   return server.handle(message);
 }
 
@@ -59,6 +77,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     await serveStdio(createLocalMcpServer(options), {
       input: process.stdin,
       output: process.stdout,
+      log: (line) => console.error(`<- ${line}`),
     });
   } catch (error) {
     console.error(error.message);
