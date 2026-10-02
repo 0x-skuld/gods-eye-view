@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyView, installViews, isEmbedded } from './embed.js';
+import {
+  applyView,
+  installViews,
+  isEmbedded,
+  keepPanelRendering,
+} from './embed.js';
 import { createView } from '../view/index.js';
 
 const fakeViewer = () => {
@@ -159,6 +164,12 @@ test('an app loaded inline into a panel page talks through its own window', asyn
   windowRef.postMessage = (message) => posted.push(message);
   windowRef.document = { body: { classList: new Set() } };
   windowRef.document.body.classList.add = Set.prototype.add;
+  Object.assign(windowRef, {
+    requestAnimationFrame: () => 1,
+    cancelAnimationFrame() {},
+    setInterval: () => 1,
+    clearInterval() {},
+  });
   globalThis.GEV_EMBED_INLINE = true;
   try {
     assert.equal(isEmbedded({ search: '' }), true);
@@ -204,4 +215,34 @@ test('annotations in a link are drawn after it restores, embedded or not', async
   assert.deepEqual(calls, [
     ['annotate_map', { annotations: [{ type: 'pin', target: 'Austin' }] }],
   ]);
+});
+
+test('a panel keeps drawing from a timer while animation frames stop', () => {
+  let clock = 0;
+  let tick = null;
+  let frame = null;
+  const windowRef = {
+    requestAnimationFrame: (fn) => ((frame = fn), 1),
+    cancelAnimationFrame: () => (frame = null),
+    setInterval: (fn) => ((tick = fn), 1),
+    clearInterval: () => (tick = null),
+  };
+  const drawn = [];
+  const viewer = {
+    resize: () => drawn.push('resize'),
+    render: () => drawn.push('render'),
+  };
+  const stop = keepPanelRendering(viewer, { windowRef, now: () => clock });
+  // Frames arrive: the render loop draws, so the timer does nothing.
+  clock = 100;
+  frame();
+  tick();
+  assert.deepEqual(drawn, []);
+  // Frames stop, as in a panel its host reports hidden: the timer draws.
+  clock = 400;
+  tick();
+  assert.deepEqual(drawn, ['resize', 'render']);
+  stop();
+  assert.equal(tick, null);
+  assert.equal(frame, null);
 });

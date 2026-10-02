@@ -45,6 +45,39 @@ export function isEmbeddedInline() {
   return globalThis.GEV_EMBED_INLINE === true;
 }
 
+// A panel keeps drawing at about this rate when its host stops animation
+// frames; see keepPanelRendering.
+const PANEL_FRAME_MS = 33;
+const MISSED_FRAMES_MS = 250;
+
+/**
+ * Keep the globe drawing in an inline panel. Some hosts report a panel on
+ * screen as hidden, which stops the browser's animation frames and with them
+ * Cesium's render loop; while frames stop arriving, draw from a timer.
+ * Returns a function that stops it.
+ */
+export function keepPanelRendering(
+  viewer,
+  { windowRef = globalThis.window, now = () => performance.now() } = {},
+) {
+  let lastFrame = now();
+  let frameRequest = null;
+  const onFrame = () => {
+    lastFrame = now();
+    frameRequest = windowRef.requestAnimationFrame(onFrame);
+  };
+  frameRequest = windowRef.requestAnimationFrame(onFrame);
+  const timer = windowRef.setInterval(() => {
+    if (now() - lastFrame < MISSED_FRAMES_MS || viewer.isDestroyed?.()) return;
+    viewer.resize();
+    viewer.render();
+  }, PANEL_FRAME_MS);
+  return () => {
+    windowRef.clearInterval(timer);
+    windowRef.cancelAnimationFrame(frameRequest);
+  };
+}
+
 const delay = (ms, signal) =>
   new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -169,6 +202,9 @@ export function installViews({
 
   windowRef.document.body.classList.add('ui-embed');
   shell.setCleanView?.(true);
+  const stopRendering = isEmbeddedInline()
+    ? keepPanelRendering(viewer, { windowRef })
+    : () => {};
   // A framing page talks to the app across frames; an inline panel shares
   // the page with it and talks through the page's own window.
   const peer = isEmbeddedInline() ? windowRef : windowRef.parent;
@@ -209,5 +245,8 @@ export function installViews({
   void ready.then(() => {
     if (!signal?.aborted) post({ type: EMBED_READY_MESSAGE });
   });
-  return () => windowRef.removeEventListener('message', onMessage);
+  return () => {
+    stopRendering();
+    windowRef.removeEventListener('message', onMessage);
+  };
 }
