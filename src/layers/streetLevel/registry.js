@@ -20,6 +20,7 @@
  * @property {() => boolean} isActive  Layer enabled and this provider switched on.
  * @property {() => 'draped'|'terrain'} getSurface   'terrain' on Google 3D at street zoom: draw on the bare earth, not the mesh top.
  * @property {GroundCaster|null} groundCaster   Bare-earth heights for terrain mode (groundCast.js); null without a terrain service.
+ * @property {{meshAt: (lon: number, lat: number) => number|undefined, request: (points: Array<[number, number]>) => void, onSampled: (listener: (cells: Array<[number, number]>) => void) => () => void}|null} meshSampler   Sampled Google 3D surface heights (meshSampler.js) that refine the cast; pass `meshAt` to `castLine`.
  * @property {() => void} notify       Ask the core to publish a new UI snapshot.
  * @property {{openImage: (imageId: string) => Promise<void>, reportError: (message: string|null) => void}} actions
  *

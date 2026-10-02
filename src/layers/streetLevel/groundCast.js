@@ -25,6 +25,66 @@ export const GROUND_CAST_MAX_CORNERS = 1024;
 /** Cached grid corners before the cache is dropped and refilled. */
 const GROUND_CAST_CACHE_MAX = 50_000;
 
+/**
+ * Mesh refinement. The bare-earth grid cannot see a freeway in a trench, a
+ * steep street between grid corners, or the road under a tree, so where the
+ * rendered Google 3D surface has been sampled it refines the height:
+ *   - mesh at most MESH_ROAD_ABOVE_M above bare earth (and not absurdly far
+ *     below it) is the road itself: follow it, MESH_LIFT_M above;
+ *   - mesh higher than that is something over the road (canopy, deck, roof):
+ *     carry the road's offset from bare earth across from the nearest road
+ *     samples on both sides, within MESH_BRIDGE_MAX_POINTS;
+ *   - otherwise bare earth plus GROUND_CAST_LIFT_M, as without the mesh.
+ */
+export const MESH_ROAD_ABOVE_M = 3;
+/** A sample this far below bare earth is a bad probe, not a road. */
+export const MESH_ROAD_BELOW_M = 30;
+/** Metres above the sampled road surface. */
+export const MESH_LIFT_M = 1;
+/** Longest run of covered points bridged from the road on either side. */
+export const MESH_BRIDGE_MAX_POINTS = 8;
+/** Line spacing, in degrees (~22 m), while the mesh refines heights. */
+export const MESH_DENSIFY_DEG = 0.0002;
+
+/**
+ * Heights for a line's points from bare earth and, where sampled, the mesh.
+ * Pure, so the rule above is testable without a scene.
+ * @param {Array<{dem: number, mesh?: number|null}>} points
+ * @param {{lift?: number}} [options]
+ * @returns {Array<number>}
+ */
+export function refineHeights(points, { lift = GROUND_CAST_LIFT_M } = {}) {
+  const road = points.map(({ dem, mesh }) =>
+    Number.isFinite(mesh) &&
+    mesh <= dem + MESH_ROAD_ABOVE_M &&
+    mesh >= dem - MESH_ROAD_BELOW_M
+      ? mesh - dem
+      : null,
+  );
+  return points.map(({ dem, mesh }, i) => {
+    if (road[i] !== null) return dem + road[i] + MESH_LIFT_M;
+    if (Number.isFinite(mesh) && mesh > dem + MESH_ROAD_ABOVE_M) {
+      let a = i - 1;
+      while (a >= 0 && i - a <= MESH_BRIDGE_MAX_POINTS && road[a] === null) a--;
+      let b = i + 1;
+      while (
+        b < points.length &&
+        b - i <= MESH_BRIDGE_MAX_POINTS &&
+        road[b] === null
+      )
+        b++;
+      const left = a >= 0 && i - a <= MESH_BRIDGE_MAX_POINTS ? road[a] : null;
+      const right =
+        b < points.length && b - i <= MESH_BRIDGE_MAX_POINTS ? road[b] : null;
+      if (left !== null && right !== null) {
+        const t = (i - a) / (b - a);
+        return dem + left + (right - left) * t + MESH_LIFT_M;
+      }
+    }
+    return dem + lift;
+  });
+}
+
 /** Camera height (m above ground) below which Google 3D switches to terrain mode. */
 export const SURFACE_TERRAIN_ENTER_M = 1400;
 /** Camera height above which terrain mode switches back to draped. */
@@ -177,16 +237,25 @@ export function createGroundCaster({
 
   /**
    * A line as flat [lon, lat, height, ...] degrees and metres, densified;
-   * null when any corner it needs is not cached yet.
+   * null when any corner it needs is not cached yet. With `meshAt` (sampled
+   * mesh heights, undefined or null where unknown) the line is densified
+   * finer and its heights refined by `refineHeights`.
    * @param {Array<[number, number]>} coords
+   * @param {{meshAt?: (lon: number, lat: number) => number|null|undefined}} [options]
    */
-  function castLine(coords) {
-    const flat = [];
-    for (const [lon, lat] of densifyLine(coords)) {
-      const height = heightAt(lon, lat);
-      if (height === null) return null;
-      flat.push(lon, lat, height);
+  function castLine(coords, { meshAt = null } = {}) {
+    const rows = [];
+    const points = meshAt
+      ? densifyLine(coords, MESH_DENSIFY_DEG)
+      : densifyLine(coords);
+    for (const [lon, lat] of points) {
+      const dem = groundAt(lon, lat);
+      if (dem === null) return null;
+      rows.push({ lon, lat, dem, mesh: meshAt ? meshAt(lon, lat) : null });
     }
+    const heights = refineHeights(rows, { lift });
+    const flat = [];
+    rows.forEach(({ lon, lat }, i) => flat.push(lon, lat, heights[i]));
     return flat;
   }
 

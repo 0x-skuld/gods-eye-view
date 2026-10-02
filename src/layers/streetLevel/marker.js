@@ -1,6 +1,7 @@
 import * as Cesium from 'cesium';
 import { positionMarkerGlyph } from './glyphs.js';
 import { COLORS, POSITION_PICK_ID } from './policy.js';
+import { refineHeights } from './groundCast.js';
 
 const SPRITE_ID = 'street-level:marker';
 
@@ -26,17 +27,31 @@ export function createMarker({ state, parts }) {
     sprites?.registerSpriteCollection?.(SPRITE_ID, state.marker.collection);
   }
 
-  /** Terrain height for the position, or null to clamp; fetches a missing cell. */
+  /**
+   * Height for the position in terrain mode: bare earth, refined by the
+   * sampled Google 3D surface where it is known; null to clamp. Fetches a
+   * missing terrain cell and asks for a mesh sample under the marker.
+   */
   function castHeight(position) {
     const ground = parts?.groundCaster;
     if (state.surface !== 'terrain' || !ground) return null;
-    const height = ground.heightAt(position.lon, position.lat);
-    if (height !== null) return height;
-    ground.prepare([[position.lon, position.lat]]).then((ready) => {
-      if (ready && last?.position === position) set(position, last.bearing);
-    });
-    return null;
+    const { lon, lat } = position;
+    const dem = ground.groundAt(lon, lat);
+    if (dem === null) {
+      ground.prepare([[lon, lat]]).then((ready) => {
+        if (ready && last?.position === position) set(position, last.bearing);
+      });
+      return null;
+    }
+    const mesh = parts.meshSampler?.meshAt(lon, lat);
+    if (mesh === undefined) parts.meshSampler?.request([[lon, lat]]);
+    return refineHeights([{ dem, mesh }])[0];
   }
+
+  // A new mesh sample may move the marker onto (or off) the road surface.
+  parts?.meshSampler?.onSampled(() => {
+    if (last && state.surface === 'terrain') set(last.position, last.bearing);
+  });
 
   /** Move (or create) the marker; a null position removes it. */
   function set(position, bearing) {

@@ -11,6 +11,7 @@ import { decodeParams, encodeParams } from './params.js';
 import { composeUIState, summarizeCoverage } from './uiState.js';
 import { cameraHeightAboveGround, viewCentre } from './view.js';
 import { createGroundCaster, nextSurfaceMode } from './groundCast.js';
+import { createMeshSampler } from './meshSampler.js';
 
 /** Above this camera height the ground under the camera is not worth fetching. */
 const SURFACE_WARM_BELOW_M = 6000;
@@ -41,6 +42,9 @@ export function createStreetLevelLayer({
   const context = { state, parts };
   parts.groundCaster = services.terrain?.resolveEllipsoidalGround
     ? createGroundCaster({ terrain: services.terrain })
+    : null;
+  parts.meshSampler = parts.groundCaster
+    ? createMeshSampler({ getViewer: () => state.viewer })
     : null;
   parts.credits = createCredits();
   parts.marker = createMarker(context);
@@ -92,6 +96,8 @@ export function createStreetLevelLayer({
       isActive: () => state.enabled && entry.on,
       /** Bare-earth heights (see groundCast.js), or null without a terrain service. */
       groundCaster: parts.groundCaster,
+      /** Sampled Google 3D surface heights refining the cast (meshSampler.js), or null. */
+      meshSampler: parts.meshSampler,
       /** 'terrain' when overlays should sit on the bare earth, else 'draped'. */
       getSurface: () => state.surface,
       notify,
@@ -158,6 +164,7 @@ export function createStreetLevelLayer({
     });
     if (mode === state.surface) return;
     state.surface = mode;
+    parts.meshSampler?.setEnabled(mode === 'terrain');
     parts.marker.setSurface(mode);
     for (const entry of state.providers.values())
       entry.instance.setSurface?.(mode);
@@ -355,6 +362,7 @@ export function createStreetLevelLayer({
       for (const entry of state.providers.values())
         entry.instance.destroy(viewer);
       parts.marker.destroy(viewer);
+      parts.meshSampler?.destroy();
       unsubscribeMapStack?.();
       unsubscribeMapStack = null;
       mapStack = null;

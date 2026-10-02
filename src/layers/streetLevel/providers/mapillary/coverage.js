@@ -2,9 +2,12 @@ import * as Cesium from 'cesium';
 import { decodeCoverageTile } from './decode.js';
 import { passesImageryFilter } from '../../filter.js';
 import { cameraHeightAboveGround, visibleBbox } from '../../view.js';
+import { densifyLine, MESH_DENSIFY_DEG } from '../../groundCast.js';
+import { MESH_CELL_DEG } from '../../meshSampler.js';
 import {
   coverageZoomForHeight,
   overviewZoomForHeight,
+  tileBounds,
   tilesForBbox,
 } from '../../tileMath.js';
 import {
@@ -20,6 +23,10 @@ import {
 
 /** Draped lines stay at most this long while a tile's cast lines build. */
 const SWAP_MAX_WAIT_MS = 4000;
+/** Tiles touched by new mesh samples are redrawn at most this often. */
+const REMESH_INTERVAL_MS = 1500;
+/** Gap between redrawing one dirty tile and the next. */
+const REMESH_STAGGER_MS = 120;
 /** Old-zoom tiles are kept at most this long after a zoom change. */
 const STALE_TILE_MAX_MS = 6000;
 /**
@@ -98,11 +105,12 @@ export function createCoverage({ state, source }) {
    */
   function buildSequencePrimitives(sequences) {
     const ground = terrainMode() ? state.context.groundCaster : null;
+    const meshAt = ground ? state.context.meshSampler?.meshAt : undefined;
     const draped = [];
     const cast = [];
     for (const sequence of sequences) {
       if (!passesImageryFilter(sequence, filter())) continue;
-      const flat = ground?.castLine(sequence.coordinates);
+      const flat = ground?.castLine(sequence.coordinates, { meshAt });
       let positions;
       try {
         positions = flat
@@ -183,8 +191,93 @@ export function createCoverage({ state, source }) {
       entry.primitives = [];
       attachPrimitive(entry);
       removeWhenReady(entry, previous);
+      requestMesh(entry);
     });
   }
+
+  /** The mesh cells under a tile's lines, built once per tile. */
+  function meshCells(entry) {
+    if (entry.meshCells) return entry.meshCells;
+    const cells = new Map();
+    for (const sequence of entry.sequenceList)
+      for (const [lon, lat] of densifyLine(
+        sequence.coordinates,
+        MESH_DENSIFY_DEG,
+      ))
+        cells.set(
+          `${Math.round(lon / MESH_CELL_DEG)},${Math.round(lat / MESH_CELL_DEG)}`,
+          [lon, lat],
+        );
+    entry.meshCells = [...cells.values()];
+    return entry.meshCells;
+  }
+
+  /** Ask for mesh samples under a cast tile's lines (the sampler keeps the near ones). */
+  function requestMesh(entry) {
+    const sampler = state.context.meshSampler;
+    if (!sampler || entry.kind !== 'sequence' || !terrainMode()) return;
+    sampler.request(meshCells(entry));
+  }
+
+  /**
+   * New mesh samples landed: redraw the tiles they fall in, throttled, with
+   * the same no-blink swap as the bare-earth cast.
+   */
+  function onMeshSampled(batch) {
+    if (!terrainMode() || !state.context.isActive()) return;
+    for (const entry of state.coverage.tiles.values()) {
+      if (entry.kind !== 'sequence' || !entry.bounds) continue;
+      const { west, south, east, north } = entry.bounds;
+      if (
+        batch.some(
+          ([lon, lat]) =>
+            lon >= west && lon <= east && lat >= south && lat <= north,
+        )
+      )
+        state.coverage.remeshDirty.add(entry);
+    }
+    if (!state.coverage.remeshDirty.size || state.coverage.remeshTimer) return;
+    const wait = Math.max(
+      0,
+      REMESH_INTERVAL_MS - (Date.now() - (state.coverage.remeshAt || 0)),
+    );
+    state.coverage.remeshTimer = setTimeout(remesh, wait);
+  }
+
+  /** Redraw one dirty tile per idle slice, so a burst of samples never stalls a frame. */
+  function remesh() {
+    state.coverage.remeshTimer = null;
+    state.coverage.remeshAt = Date.now();
+    if (!terrainMode() || !state.context.isActive()) {
+      state.coverage.remeshDirty.clear();
+      return;
+    }
+    const attached = new Set(state.coverage.tiles.values());
+    const [entry] = state.coverage.remeshDirty;
+    if (!entry) return;
+    state.coverage.remeshDirty.delete(entry);
+    if (attached.has(entry)) {
+      const previous = entry.primitives;
+      entry.primitives = [];
+      attachPrimitive(entry);
+      removeWhenReady(entry, previous);
+      requestRender();
+    }
+    if (state.coverage.remeshDirty.size)
+      state.coverage.remeshTimer = setTimeout(
+        () => idleTask(remesh),
+        REMESH_STAGGER_MS,
+      );
+  }
+
+  function idleTask(task) {
+    if (typeof globalThis.requestIdleCallback === 'function')
+      globalThis.requestIdleCallback(() => task(), { timeout: 500 });
+    else task();
+  }
+
+  state.coverage.remeshDirty = new Set();
+  state.context.meshSampler?.onSampled(onMeshSampled);
 
   /**
    * Remove a tile's previous primitives once all its current ones are ready
@@ -329,6 +422,15 @@ export function createCoverage({ state, source }) {
         return;
       const decoded = decodeCoverageTile(bytes, tile);
       const entry = { kind, primitive: null, primitives: [], count: 0 };
+      // Padded: vector tiles carry a small buffer past their edge.
+      const bounds = tileBounds(tile.x, tile.y, tile.z);
+      const pad = (bounds.east - bounds.west) * 0.05;
+      entry.bounds = {
+        west: bounds.west - pad,
+        east: bounds.east + pad,
+        south: bounds.south - pad,
+        north: bounds.north + pad,
+      };
       if (kind === 'sequence') {
         // Newest first, capped per tile so a dense city stays within budget.
         const sequences = decoded.sequences
@@ -432,6 +534,10 @@ export function createCoverage({ state, source }) {
         state.coverage.pending.delete(key);
       }
     for (const tile of tiles) loadTile(tile, kind);
+    // The camera moved: cells that were out of the sampler's range may not be.
+    if (terrainMode())
+      for (const entry of state.coverage.tiles.values())
+        if (entry.castRequested) requestMesh(entry);
     notify();
   }
 
@@ -470,6 +576,9 @@ export function createCoverage({ state, source }) {
     purgeStale();
     state.coverage.zoom = null;
     state.coverage.kind = null;
+    clearTimeout(state.coverage.remeshTimer);
+    state.coverage.remeshTimer = null;
+    state.coverage.remeshDirty.clear();
     requestRender();
   }
 

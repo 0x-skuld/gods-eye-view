@@ -2900,7 +2900,17 @@ buildings and trees. Heights are sampled on the ground-floor grid (0.001°,
 tile needs at most a few hundred lookups, sent once per tile and aborted when
 the tile is dropped. A tile is drawn draped first and swapped for its cast
 lines when the heights arrive; a geoid fallback (terrain proxy down) counts as
-unknown and leaves the lines draped. Cones and the marker keep drawing over
+unknown and leaves the lines draped. The bare-earth grid cannot see a
+freeway in a trench, a steep street between grid corners or the road under a
+tree, so `src/layers/streetLevel/meshSampler.js` then samples the rendered
+Google 3D surface (`scene.sampleHeight`, overlays excluded) once per ~11 m
+cell within 900 m of the camera, nearest first, in idle time within a 6 ms
+budget, and `refineHeights` blends it in: mesh up to 3 m above bare earth is
+the road and is followed 1 m above it; a higher mesh (canopy, deck, roof) takes
+the road's offset from bare earth carried across from the road samples on
+either side; anything else stays bare earth + 2 m. Tiles touched by new
+samples are redrawn one per idle slice with the same no-blink swap. Roads on
+elevated decks are still drawn at ground level under the deck. Cones and the marker keep drawing over
 buildings so they stay clickable. Framing or following a photo also checks the
 sampled mesh height against the bare earth: `sampleHeight` can return values
 kilometres underground before the tiles under the photo have loaded, and such

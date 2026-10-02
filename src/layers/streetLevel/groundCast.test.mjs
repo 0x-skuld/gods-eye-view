@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   GROUND_CAST_LIFT_M,
+  MESH_LIFT_M,
+  refineHeights,
   SURFACE_TERRAIN_ENTER_M,
   SURFACE_TERRAIN_EXIT_M,
   createGroundCaster,
@@ -157,4 +159,63 @@ test('prepares run one at a time so neighbours share corners', async () => {
 
 test('the caster needs a terrain service', () => {
   assert.throws(() => createGroundCaster({ terrain: null }), TypeError);
+});
+
+test('refineHeights follows the mesh where it is the road', () => {
+  // A freeway trench 6 m below the bare-earth grid, and a steep street 2 m above it.
+  const heights = refineHeights([
+    { dem: 100, mesh: 94 },
+    { dem: 100, mesh: 102 },
+    { dem: 100, mesh: null },
+  ]);
+  assert.deepEqual(heights, [
+    94 + MESH_LIFT_M,
+    102 + MESH_LIFT_M,
+    100 + GROUND_CAST_LIFT_M,
+  ]);
+});
+
+test('refineHeights carries the road under a canopy from both sides', () => {
+  // Road 1 m and 3 m above bare earth either side of a tree 12 m tall.
+  const heights = refineHeights([
+    { dem: 50, mesh: 51 },
+    { dem: 50, mesh: 62 },
+    { dem: 50, mesh: 62 },
+    { dem: 50, mesh: 53 },
+  ]);
+  assert.equal(heights[0], 51 + MESH_LIFT_M);
+  assert.ok(Math.abs(heights[1] - (50 + 1 + 2 / 3 + MESH_LIFT_M)) < 1e-9);
+  assert.ok(Math.abs(heights[2] - (50 + 1 + 4 / 3 + MESH_LIFT_M)) < 1e-9);
+  assert.equal(heights[3], 53 + MESH_LIFT_M);
+});
+
+test('refineHeights keeps bare earth under a deck with no road beside it, and rejects bad probes', () => {
+  assert.deepEqual(
+    refineHeights([
+      { dem: 20, mesh: 35 },
+      { dem: 20, mesh: 35 },
+    ]),
+    [20 + GROUND_CAST_LIFT_M, 20 + GROUND_CAST_LIFT_M],
+  );
+  // A probe kilometres under the ground is not a road.
+  assert.deepEqual(refineHeights([{ dem: 20, mesh: -14000 }]), [
+    20 + GROUND_CAST_LIFT_M,
+  ]);
+});
+
+test('castLine refines heights with sampled mesh and densifies finer', async () => {
+  const caster = createGroundCaster({ terrain: fakeTerrain(), step: 0.001 });
+  const line = [
+    [10.0001, 50.0001],
+    [10.0009, 50.0001],
+  ];
+  await caster.prepareLines([line]);
+  const plain = caster.castLine(line);
+  const meshed = caster.castLine(line, { meshAt: () => 98 });
+  assert.ok(meshed.length > plain.length, 'finer spacing with the mesh');
+  for (let i = 2; i < meshed.length; i += 3)
+    assert.equal(meshed[i], 98 + MESH_LIFT_M);
+  // Unsampled points keep the bare-earth height.
+  const unsampled = caster.castLine(line, { meshAt: () => undefined });
+  assert.ok(unsampled[2] > 100 && unsampled[2] < 110);
 });

@@ -10,7 +10,7 @@
 
 - Street Level draws each imagery source in one colour, everywhere it appears: its PROVIDERS chip, coverage lines, overview points, image cones and a single legend swatch. Mapillary is green (no more age dimming or magenta panoramas; 360° cones are rings, and the 360°/FLAT filter still separates them); Panoramax will be purple and Google Street View blue.
 
-- Street Level coverage no longer floats over trees and bridges on the Google 3D map. At street zoom, sequence lines, image cones and the position marker are placed on the bare earth from the terrain service (with a 2 m lift) instead of being draped on the top of the photoreal mesh, so buildings and tree canopies hide what is behind them; other maps and higher views keep draped lines. Opening a photo no longer flies the camera underground when the Google tiles under it have not loaded yet.
+- Street Level coverage no longer floats over trees and bridges on the Google 3D map. At street zoom, sequence lines, image cones and the position marker are placed on the bare earth from the terrain service (with a 2 m lift) instead of being draped on the top of the photoreal mesh, so buildings and tree canopies hide what is behind them; other maps and higher views keep draped lines. Opening a photo no longer flies the camera underground when the Google tiles under it have not loaded yet. Near the camera the placement is refined against the rendered Google 3D surface, so lines also follow freeways in trenches and steep streets, and stay on the road under trees.
 - Public Overpass instances are no longer used by default. Street Traffic
   roads come from TomTom flow tiles, OpenFreeMap vector tiles, or both, chosen
   on the layer row (TomTom / OSM / Hybrid) or with `?trafficRoads=`. With a

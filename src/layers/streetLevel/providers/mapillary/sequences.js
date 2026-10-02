@@ -1,6 +1,7 @@
 import * as Cesium from 'cesium';
 import { imageConeGlyph } from '../../glyphs.js';
 import { passesImageryFilter } from '../../filter.js';
+import { refineHeights } from '../../groundCast.js';
 import {
   COLORS,
   IMAGE_CONE_MIN_SPACING_M,
@@ -78,24 +79,32 @@ export function createSequences({ state, source, parts }) {
   }
 
   /**
-   * Terrain heights for the cones in terrain mode (Google 3D at street zoom),
-   * so they stand on the street rather than on roofs and tree tops. Null when
-   * draped, or when some height is not cached yet; that fetches the heights
-   * and draws the cones again.
+   * Heights for the cones in terrain mode (Google 3D at street zoom), so they
+   * stand on the street rather than on roofs and tree tops: bare earth,
+   * refined along the sequence by the sampled Google 3D surface. Null when
+   * draped, or when a terrain height is not cached yet; that fetches the
+   * heights and draws the cones again.
    */
   function coneHeights(images) {
     const ground = state.context.groundCaster;
     if (state.context.getSurface?.() !== 'terrain' || !ground) return null;
-    const heights = images.map((image) =>
-      ground.heightAt(image.lon, image.lat),
+    const dems = images.map((image) => ground.groundAt(image.lon, image.lat));
+    if (dems.includes(null)) {
+      ground
+        .prepare(images.map((image) => [image.lon, image.lat]))
+        .then((ready) => {
+          if (ready && state.sequence.images === images) renderCones(images);
+        });
+      return null;
+    }
+    const sampler = state.context.meshSampler;
+    sampler?.request(images.map((image) => [image.lon, image.lat]));
+    return refineHeights(
+      images.map((image, i) => ({
+        dem: dems[i],
+        mesh: sampler?.meshAt(image.lon, image.lat),
+      })),
     );
-    if (!heights.includes(null)) return heights;
-    ground
-      .prepare(images.map((image) => [image.lon, image.lat]))
-      .then((ready) => {
-        if (ready && state.sequence.images === images) renderCones(images);
-      });
-    return null;
   }
 
   function renderCones(images) {
@@ -216,6 +225,11 @@ export function createSequences({ state, source, parts }) {
   function rerender() {
     if (state.sequence.images.length) renderCones(state.sequence.images);
   }
+
+  // New mesh samples may move the cones onto (or off) the road surface.
+  state.context.meshSampler?.onSampled(() => {
+    if (state.context.getSurface?.() === 'terrain') rerender();
+  });
 
   function setVisible(visible) {
     if (state.sequence.collection) state.sequence.collection.show = visible;
