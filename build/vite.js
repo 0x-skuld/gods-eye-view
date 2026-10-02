@@ -84,10 +84,6 @@ export function createBrowserViteConfig({
       fs: {
         deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/ENVIRONMENT'],
       },
-      // Cross-origin reads: local pages, as Vite allows by default, plus the
-      // MCP Apps panels that load the app into a conversation (Claude's
-      // sandbox origins); see panelCorsPlugin. Development and preview only.
-      cors: { origin: PANEL_CORS_ORIGINS },
       // These headers protect the document containing Provider Settings.
       // Embed-mode documents are framable instead; see embed-framing.js.
       headers: {
