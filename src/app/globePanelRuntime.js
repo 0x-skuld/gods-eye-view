@@ -489,14 +489,25 @@ export function panelRuntime(config) {
       'text/html',
     );
     window.CESIUM_BASE_URL = `${config.panelBase}cesium/`;
-    const [workers] = await Promise.all([
-      appFetch(config.panelBase + config.workersPath).then((r) => r.text()),
+    const [prelude] = await Promise.all([
+      appFetch(config.panelBase + config.workerPreludePath).then((r) =>
+        r.text(),
+      ),
       ...[...built.head.querySelectorAll('link[rel="stylesheet"]')].map(
         (link) => addStylesheet(link.getAttribute('href')),
       ),
     ]);
-    // Cesium starts its workers from this script instead of from files.
-    window.CESIUM_WORKERS = workers;
+    // Cesium's script sets CESIUM_WORKERS, its workers as one script it
+    // starts from memory. Workers request files themselves, which this page
+    // cannot answer, so the prelude, holding those files, runs ahead of it.
+    let workers;
+    Object.defineProperty(window, 'CESIUM_WORKERS', {
+      configurable: true,
+      get: () => workers,
+      set: (script) => {
+        workers = prelude + script;
+      },
+    });
     // Images in the markup load their files once added; give them the
     // files instead of letting them request this page's site.
     const images = [];

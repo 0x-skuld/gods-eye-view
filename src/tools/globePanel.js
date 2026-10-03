@@ -9,8 +9,8 @@
 export const GLOBE_PANEL_URI = 'ui://gods-eye-view/globe';
 /** Where the app's server serves its panel build (see build/panel.js). */
 export const PANEL_BASE = '/panel/';
-/** Cesium's workers as one script, relative to the panel build. */
-export const PANEL_WORKERS_PATH = 'cesium/workers.js';
+/** The script the panel runs ahead of Cesium's workers, in the build. */
+export const PANEL_WORKER_PRELUDE_PATH = 'cesium/worker-prelude.js';
 
 /**
  * Sites the app's browser code loads from directly: map imagery, 3D tiles,
@@ -63,7 +63,7 @@ function panelHtml(runtime) {
     panelHeight: PANEL_HEIGHT_PX,
     protocolVersion: MCP_APPS_PROTOCOL_VERSION,
     toolName: PANEL_REQUEST_TOOL,
-    workersPath: PANEL_WORKERS_PATH,
+    workerPreludePath: PANEL_WORKER_PRELUDE_PATH,
   };
   const script = `(${runtime})(${JSON.stringify(config)});`.replace(
     /<\/script/gi,

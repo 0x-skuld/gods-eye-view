@@ -1,16 +1,16 @@
 /**
  * The MCP Apps panel build. A panel loads the app through its MCP server,
  * one tool call per file (see src/tools/globePanel.js), so the app must be
- * few files: one app script, one stylesheet, Cesium's own script, and
- * Cesium's workers combined into one script that Cesium runs from memory.
- * The build is served at PANEL_BASE next to the app.
+ * few files: one app script, one stylesheet, and Cesium's own script, which
+ * carries its workers and starts them from memory. The build is served at
+ * PANEL_BASE next to the app.
  */
 
 // The panel loads these paths (src/tools/globePanel.js); a test keeps the
 // two in step.
 export const PANEL_BASE = '/panel/';
-/** Cesium's workers as one script, relative to the panel build. */
-export const PANEL_WORKERS_PATH = 'cesium/workers.js';
+/** The script the panel runs ahead of Cesium's workers (workerFilesPrelude). */
+export const PANEL_WORKER_PRELUDE_PATH = 'cesium/worker-prelude.js';
 export const PANEL_OUT_DIR = 'dist/panel';
 
 /** A browser Vite config changed to produce the panel build. */
@@ -30,19 +30,6 @@ export function panelBuildConfig(config) {
       },
     },
   };
-}
-
-/**
- * Source for Cesium's `CESIUM_WORKERS` script: every worker module, each
- * evaluated only when Cesium starts that worker. `workerNames` are the
- * module names in Cesium's Workers directory, without `.js`.
- */
-export function workersEntrySource(workerNames, workersDir) {
-  const entries = workerNames.map(
-    (name) =>
-      `  ${JSON.stringify(name)}: () => import(${JSON.stringify(`${workersDir}/${name}.js`)}),`,
-  );
-  return `self.CesiumWorkers = {\n${entries.join('\n')}\n};\n`;
 }
 
 const CONTENT_TYPES = {

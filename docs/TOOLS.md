@@ -133,8 +133,10 @@ provider keys.
 
 The panel loads the app's panel build, which `npm run build:panel` writes to
 `dist/panel` and the servers serve at `/panel/`: one app script, one
-stylesheet, Cesium's script, and Cesium's workers combined into one script
-that Cesium runs from memory (`CESIUM_WORKERS`). Rebuild it after changing
+stylesheet, and Cesium's script, which carries its workers and starts them
+from memory (`CESIUM_WORKERS`). Files those workers load themselves are
+embedded in a prelude the panel runs ahead of them, since a worker's
+requests reach the panel page's own site. Rebuild it after changing
 the app.
 
 Hosts differ in ways the panel works around, all inside the panel only:

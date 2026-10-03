@@ -6,16 +6,18 @@ import test from 'node:test';
 import * as PANEL_PATHS from '../tools/globePanel.js';
 import {
   PANEL_BASE,
-  PANEL_WORKERS_PATH,
+  PANEL_WORKER_PRELUDE_PATH,
   panelBuildConfig,
   panelBuildPlugin,
   workerFilesPrelude,
-  workersEntrySource,
 } from '../../build/panel.js';
 
 test('the panel loads the paths the panel build writes', () => {
   assert.equal(PANEL_BASE, PANEL_PATHS.PANEL_BASE);
-  assert.equal(PANEL_WORKERS_PATH, PANEL_PATHS.PANEL_WORKERS_PATH);
+  assert.equal(
+    PANEL_WORKER_PRELUDE_PATH,
+    PANEL_PATHS.PANEL_WORKER_PRELUDE_PATH,
+  );
 });
 
 test('the panel build is one script and one stylesheet under /panel/', () => {
@@ -28,19 +30,6 @@ test('the panel build is one script and one stylesheet under /panel/', () => {
   assert.equal(config.build.cssCodeSplit, false);
   assert.equal(config.build.rollupOptions.output.inlineDynamicImports, true);
   assert.equal(config.build.chunkSizeWarningLimit, 1500);
-});
-
-test("Cesium's workers load lazily from one script", () => {
-  const source = workersEntrySource(['createGeometry', 'decodeDraco'], '/w');
-  assert.match(source, /^self\.CesiumWorkers = \{/);
-  assert.match(
-    source,
-    /"createGeometry": \(\) => import\("\/w\/createGeometry\.js"\)/,
-  );
-  assert.match(
-    source,
-    /"decodeDraco": \(\) => import\("\/w\/decodeDraco\.js"\)/,
-  );
 });
 
 test('the dev server serves the panel build and nothing outside it', async () => {
