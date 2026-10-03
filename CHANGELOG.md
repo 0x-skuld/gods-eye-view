@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- Ship each bundled data pack once. The region, marine, admin-boundary,
+  county, military-name and neighborhood packs were emitted twice by the
+  production build, as the JSON the browser fetches and as an unused
+  JavaScript copy; `dist/` drops from 54 MB to 42 MB. Under Node the loader
+  reads the JSON file directly (reporting that Node 24.14 or newer is needed
+  on a runtime too old to do so), and a test keeps app code from importing a
+  pack as a module.
+
 - Apply the Host check before the app's own routes. Vite installs its Host
   check after the middleware that plugins add, so the provider and `/api`
   routes used to answer any Host, including a DNS-rebinding name, in every
