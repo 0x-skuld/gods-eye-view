@@ -175,3 +175,48 @@ test('only embed-mode documents may be framed, and only by the allowed ancestors
     assert.equal(plugin.configurePreviewServer, undefined);
   }
 });
+
+test('the CSP admits the event media embeds, and no other script origin', async () => {
+  const { embeddedMediaFrameUrl, resolveEmbeddedMediaSource } =
+    await import('../../src/data/bhoteKoshiEmbeddedMedia.js');
+  const directive = (name) =>
+    BROWSER_CSP.split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${name} `))
+      ?.split(/\s+/)
+      .slice(1) ?? [];
+  const scripts = directive('script-src');
+  const frames = directive('frame-src');
+  // The player API, the Facebook SDK and X's widget script.
+  for (const origin of [
+    'https://www.youtube.com',
+    'https://connect.facebook.net',
+    'https://platform.twitter.com',
+  ])
+    assert.ok(scripts.includes(origin), origin);
+  // Only those three, and never a wildcard or a scheme.
+  assert.deepEqual(
+    scripts.filter(
+      (source) => source.startsWith('http') || source === 'https:',
+    ),
+    [
+      'https://www.youtube.com',
+      'https://connect.facebook.net',
+      'https://platform.twitter.com',
+    ],
+  );
+  assert.ok(!scripts.some((source) => source.includes('*')));
+  // Every frame the event builds for a YouTube or Facebook source is allowed.
+  for (const link of [
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    'https://youtu.be/dQw4w9WgXcQ',
+    'https://www.facebook.com/facebook/videos/10153231379946729/',
+  ]) {
+    const source = resolveEmbeddedMediaSource(link);
+    assert.ok(source, link);
+    const origin = new URL(embeddedMediaFrameUrl(source, {})).origin;
+    assert.ok(frames.includes(origin), `${link} -> ${origin}`);
+  }
+  // X posts load in X's own frames.
+  assert.ok(frames.includes('https://platform.twitter.com'));
+});
