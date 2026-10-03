@@ -34,7 +34,7 @@
 - Tighten the local MCP server and embed mode. The panel's `panel_request`
   needs the key in its MCP server's panel page, and refuses Provider
   Settings, credential and model endpoints, `/mcp` and development server
-  routes in any letter case or encoding; panels on one server share six
+  routes in any letter case, encoding or dot suffix; panels on one server share six
   requests in flight, and further requests wait their turn. `/mcp` applies Provider Settings' proxy and sharing checks,
   requires a Host on the port it reached and an Origin from that host, and
   times out request bodies after 30 seconds; stdio honors

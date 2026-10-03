@@ -25,13 +25,14 @@ const HELD_LIMIT_BYTES = 256 * 1024 * 1024;
 export const PANEL_RESPONSE_LIMIT_BYTES = 64 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 60 * 1000;
 const METHODS = new Set(['GET', 'HEAD', 'POST']);
-// Routes the panel never loads, matched without regard to case as the
-// server routes them: Provider Settings, which only the app's own page may
-// use; credential and model endpoints; the MCP server itself; and the
-// development server's internal routes.
+// Routes the panel never loads, matched as the server routes them: without
+// regard to case, and with a mounted route also matching when a dot follows
+// it (`/mcp.json` reaches `/mcp`). Provider Settings, which only the app's own
+// page may use; credential and model endpoints; the MCP server itself; and
+// the development server's internal routes.
 const REFUSED_PATHS = [
-  /^\/api\/(?:setup|realtime|openai)(?:\/|$)/i,
-  /^\/mcp(?:\/|$)/i,
+  /^\/api\/(?:setup|realtime|openai)(?:[/.]|$)/i,
+  /^\/mcp(?:[/.]|$)/i,
   /^\/(?:@|__)/,
 ];
 const FORWARDED_REQUEST_HEADERS = ['accept', 'content-type'];
