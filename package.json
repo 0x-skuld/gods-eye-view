@@ -1,7 +1,7 @@
 {
   "name": "gods-eye-view",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.2.1",
   "description": "A real-time intelligence console for planet Earth — photorealistic 3D globe, live aircraft/ships/satellites/earthquakes/CCTV, and hands-free voice control. Runs in a browser.",
   "type": "module",
   "license": "MIT",
@@ -32,23 +32,25 @@
     "visualization"
   ],
   "scripts": {
-    "build": "vite build",
-    "check:boundaries": "node scripts/check-import-directions.mjs && node scripts/check-package-boundaries.mjs",
-    "dev": "vite",
-    "dev:secure": "./scripts/dev-secure.sh",
     "doctor": "node scripts/setup-doctor.mjs",
     "format": "node scripts/format.mjs --write",
     "format:check": "node scripts/format.mjs --check",
-    "layer-token:check": "node scripts/check-layer-state-tokens.mjs",
     "layer-token:next": "node scripts/next-layer-state-token.mjs",
+    "layer-token:check": "node scripts/check-layer-state-tokens.mjs",
+    "dev": "vite",
+    "dev:secure": "./scripts/dev-secure.sh",
     "opensky:import": "./scripts/opensky-import-client.sh",
+    "build": "vite build",
+    "build:panel": "node scripts/build-panel.mjs",
     "preview": "vite preview",
+    "test": "node scripts/run-unit-tests.mjs",
+    "test:track": "node scripts/track-regression.mjs",
     "qa:map-source-tray": "node scripts/qa-map-source-tray.mjs",
     "qa:panel-resize": "node scripts/qa-panel-resize.mjs",
     "qa:street-level": "node scripts/qa-street-level.mjs",
+    "check:boundaries": "node scripts/check-import-directions.mjs && node scripts/check-package-boundaries.mjs",
     "qa:transit": "node scripts/qa-transit.mjs",
-    "test": "node scripts/run-unit-tests.mjs",
-    "test:track": "node scripts/track-regression.mjs"
+    "mcp": "node server/mcp/stdio.js"
   },
   "dependencies": {
     "@jtarrio/signals": "^0.10.0",
@@ -259,6 +261,10 @@
     },
     "./layers/street-level": "./src/layers/streetLevel/index.js",
     "./layers/street-level/mapillary": "./src/layers/streetLevel/providers/mapillary/index.js",
-    "./layers/street-level/mapillary/source": "./src/layers/streetLevel/providers/mapillary/source.js"
+    "./layers/street-level/mapillary/source": "./src/layers/streetLevel/providers/mapillary/source.js",
+    "./tools": "./src/tools/index.js",
+    "./tools/mcp": "./src/tools/mcp/index.js",
+    "./tools/services": "./src/tools/services.js",
+    "./view": "./src/view/index.js"
   }
 }
