@@ -10,7 +10,8 @@ The panel runs the app's panel build (`npm run build:panel`, served at
 `/panel/`) and loads it, with its data, through the MCP server, so it works
 in Claude Desktop and in the Codex and ChatGPT desktop apps with a local
 server and no HTTPS. `?embed=1` shows the app as the globe alone and takes
-new views from the page that frames it. MCP leads with the tools that find
+new views from the page that frames it; framing is off unless
+`GEV_EMBED_FRAME_ANCESTORS` allows the framing page. MCP leads with the tools that find
 what to show. See [tools and the MCP server](TOOLS.md).
 
 ## Tools and local MCP server — October 1, 2026

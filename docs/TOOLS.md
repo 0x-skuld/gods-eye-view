@@ -164,14 +164,15 @@ The app applies it through its own actions (style, map, exactly the view's
 layers, annotations, then the followed entity, retried until its layer has
 it, or the camera when nothing is followed or the entity is not there yet,
 since a camera flight would end the follow; then cockpit view when asked) and
-answers `{ type: 'gev:view-applied', id, ok, steps }`. It
-posts `{ type: 'gev:ready' }` once it can take views, and only its parent
-page can send them. See `src/app/embed.js`.
+answers `{ type: 'gev:view-applied', id, ok, steps }` to the origin that
+sent the view. It posts `{ type: 'gev:ready' }` once it can take views, and
+only its parent page can send them. See `src/app/embed.js`.
 
-The development and preview servers let other pages frame embed-mode
-documents only; every other document keeps `X-Frame-Options: DENY` and
-`frame-ancestors 'none'`. `GEV_EMBED_FRAME_ANCESTORS` restricts which pages
-may frame them (any by default).
+No page may frame the app by default: every document keeps
+`X-Frame-Options: DENY` and `frame-ancestors 'none'`. Setting
+`GEV_EMBED_FRAME_ANCESTORS` lets the pages it names (CSP frame-ancestors
+sources, or `*` for any page) frame embed-mode documents only. The MCP Apps
+panel loads the app into its own page and needs no framing.
 
 Answers that have something to show include `data.view`: the view that
 shows them, with the matching layers on, an area framed from above, and a

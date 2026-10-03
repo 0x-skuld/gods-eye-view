@@ -135,4 +135,11 @@ test('only embed-mode documents may be framed, and only by the allowed ancestors
     'x-frame-options': 'DENY',
     'content-security-policy': "frame-ancestors 'none'",
   });
+  // Unset, no page may frame even embed-mode documents.
+  for (const ancestors of ['', '   ']) {
+    const plugin = embedFramingPlugin({ ancestors });
+    assert.equal(plugin.name, 'embed-framing');
+    assert.equal(plugin.configureServer, undefined);
+    assert.equal(plugin.configurePreviewServer, undefined);
+  }
 });
