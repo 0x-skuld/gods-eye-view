@@ -12,8 +12,7 @@ npm run build:panel   # the in-conversation globe; rerun after app changes
 npm run dev           # http://localhost:5173, keep it running
 ```
 
-The MCP server reads from this app. Check: `curl -sI http://localhost:5173/panel/`
-answers `200`.
+The MCP server reads from this app.
 
 ## 2. Add the server to a client
 
