@@ -1,6 +1,6 @@
 import { applicationHtmlPlugin } from './application-html.js';
 import cesium from 'vite-plugin-cesium';
-import { DEFAULT_ALLOWED_HOSTS } from './allowedHosts.js';
+import { DEFAULT_ALLOWED_HOSTS, hostCheckPlugin } from './allowedHosts.js';
 import { embedFramingPlugin } from './embed-framing.js';
 import { panelBuildPlugin } from './panel.js';
 
@@ -53,6 +53,8 @@ export function createBrowserViteConfig({
 } = {}) {
   return {
     plugins: [
+      // First, so no provider route answers a Host the server does not allow.
+      hostCheckPlugin(),
       cesium(),
       applicationHtmlPlugin(),
       ...plugins,

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Apply the Host check before the app's own routes. Vite installs its Host
+  check after the middleware that plugins add, so the provider and `/api`
+  routes used to answer any Host, including a DNS-rebinding name, in every
+  mode. A first-running middleware now applies the same allowed hosts on the
+  dev and preview servers.
+
 - Refuse cross-site browser requests to the cost-bearing and log endpoints
   (`/api/realtime/token`, `/api/openai/hud-summary`,
   `/api/google/nearby-places`, `/api/realtime/debug-log`): a foreign or opaque

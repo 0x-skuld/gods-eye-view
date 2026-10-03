@@ -12,7 +12,10 @@ test('explicit build inputs preserve browser-only defines, plugin order and loop
     googleApiKey: 'browser-fixture',
     cesiumToken: 'ion-fixture',
   });
-  assert.equal(config.plugins[2], plugin);
+  // The Host check runs before every other plugin's middleware.
+  assert.equal(config.plugins[0].name, 'host-check');
+  assert.equal(config.plugins[0].enforce, 'pre');
+  assert.equal(config.plugins[3], plugin);
   assert.equal(config.server.host, 'localhost');
   assert.equal(config.server.port, 4173);
   assert.deepEqual(config.server.allowedHosts, ['localhost', '127.0.0.1']);
@@ -65,7 +68,7 @@ test('build helper does not discover environment values or construct local provi
       undefined,
     );
     assert.deepEqual(
-      config.plugins.slice(2).map((plugin) => plugin.name),
+      config.plugins.slice(3).map((plugin) => plugin.name),
       ['embed-framing', 'panel-build'],
     );
   } finally {
@@ -79,7 +82,7 @@ test('root config retains existing named exports and standalone provider order',
     assert.equal(compatibility[name], value, name);
   const config = standaloneConfig({ mode: 'test' });
   assert.deepEqual(
-    config.plugins.slice(2, -4).map((plugin) => plugin.name),
+    config.plugins.slice(3, -4).map((plugin) => plugin.name),
     providers.localProviderPlugins().map((plugin) => plugin.name),
   );
   assert.equal(config.plugins.at(-5).name, 'gev-key-setup');
