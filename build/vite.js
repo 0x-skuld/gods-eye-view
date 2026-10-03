@@ -1,5 +1,6 @@
 import { applicationHtmlPlugin } from './application-html.js';
 import cesium from 'vite-plugin-cesium';
+import { DEFAULT_ALLOWED_HOSTS } from './allowedHosts.js';
 import { embedFramingPlugin } from './embed-framing.js';
 import { panelBuildPlugin } from './panel.js';
 
@@ -45,6 +46,7 @@ export function createBrowserViteConfig({
   cesiumToken,
   host = 'localhost',
   port = 4173,
+  allowedHosts = DEFAULT_ALLOWED_HOSTS,
   command,
 } = {}) {
   return {
@@ -73,10 +75,10 @@ export function createBrowserViteConfig({
     server: {
       host: host || 'localhost',
       port: parseInt(port, 10) || 4173,
-      allowedHosts:
-        host === '0.0.0.0' || host === '::'
-          ? true
-          : ['localhost', '127.0.0.1', '.local'],
+      // A wildcard bind only chooses interfaces; it never disables Vite's
+      // Host-header check. LAN hostnames are added explicitly (see
+      // build/allowedHosts.js); IP addresses are always accepted.
+      allowedHosts: [...allowedHosts],
       fs: {
         deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/ENVIRONMENT'],
       },

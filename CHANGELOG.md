@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- Keep the Host-header check when binding to all interfaces. `HOST=0.0.0.0`
+  used to accept any Host; the dev and preview servers now accept IP
+  addresses, `localhost` and the LAN hostnames listed in `GEV_ALLOWED_HOSTS`
+  (suffix and wildcard entries are ignored), which also keeps DNS-rebinding
+  names out in LAN mode. The `.local` suffix is no longer accepted by default;
+  list such a name explicitly (Puspo Aditya, #97, fixes #21).
+
 - Throttle the cost-bearing proxies by default instead of on request. The
   OpenAI endpoints (`/api/realtime/token`, `/api/openai/hud-summary`) now allow
   30 requests per minute per client IP and the Google Places endpoints

@@ -15,11 +15,7 @@ test('explicit build inputs preserve browser-only defines, plugin order and loop
   assert.equal(config.plugins[2], plugin);
   assert.equal(config.server.host, 'localhost');
   assert.equal(config.server.port, 4173);
-  assert.deepEqual(config.server.allowedHosts, [
-    'localhost',
-    '127.0.0.1',
-    '.local',
-  ]);
+  assert.deepEqual(config.server.allowedHosts, ['localhost', '127.0.0.1']);
   assert.ok(config.server.fs.deny.includes('**/ENVIRONMENT'));
   assert.ok(config.server.fs.deny.includes('.env.*'));
   assert.equal(config.server.headers['X-Frame-Options'], 'DENY');
@@ -39,10 +35,18 @@ test('explicit build inputs preserve browser-only defines, plugin order and loop
     'import.meta.env.GOOGLE_MAPS_API_KEY': '"browser-fixture"',
     'import.meta.env.CESIUM_ION_TOKEN': '"ion-fixture"',
   });
-  assert.equal(
-    createBrowserViteConfig({ host: '0.0.0.0', port: '4800' }).server
-      .allowedHosts,
-    true,
+  // A wildcard bind keeps the Host-header check; LAN names are explicit.
+  for (const host of ['0.0.0.0', '::'])
+    assert.deepEqual(
+      createBrowserViteConfig({ host, port: '4800' }).server.allowedHosts,
+      ['localhost', '127.0.0.1'],
+    );
+  assert.deepEqual(
+    createBrowserViteConfig({
+      host: '0.0.0.0',
+      allowedHosts: ['localhost', '127.0.0.1', 'globe.lan'],
+    }).server.allowedHosts,
+    ['localhost', '127.0.0.1', 'globe.lan'],
   );
   assert.equal(
     createBrowserViteConfig({ host: '::', port: '4800' }).server.port,
