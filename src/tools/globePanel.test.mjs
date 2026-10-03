@@ -75,3 +75,36 @@ test('show_in_gods_eye_view names the panel and shows a view another answer retu
     (error) => error.code === 'invalid_arguments',
   );
 });
+
+test('a view that only follows an aircraft is framed where the aircraft is', async () => {
+  const { resolveViewArguments } = await import('./queries/share.js');
+  const tools = {
+    has: (name) => name === 'find_aircraft',
+    call: async (name, args) => ({
+      data: {
+        rows:
+          args.icao24 === 'ae1234'
+            ? [{ id: 'ae1234', lat: 32.7, lon: -117.2 }]
+            : [],
+      },
+    }),
+  };
+  const { view, label } = await resolveViewArguments(
+    { follow: { kind: 'military_aircraft', id: 'ae1234', cockpit: true } },
+    { services: {}, tools },
+  );
+  assert.deepEqual(
+    [view.camera.lat, view.camera.lon, view.follow.cockpit],
+    [32.7, -117.2, true],
+  );
+  assert.equal(label, 'military aircraft ae1234');
+  await assert.rejects(
+    resolveViewArguments(
+      { follow: { kind: 'aircraft', id: 'abc999' } },
+      { services: {}, tools },
+    ),
+    (error) =>
+      error.code === 'invalid_arguments' &&
+      /not reported now/.test(error.message),
+  );
+});
