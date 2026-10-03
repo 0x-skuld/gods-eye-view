@@ -4,7 +4,7 @@
  * See build/panel.js.
  */
 
-import { readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build as esbuild } from 'esbuild';
@@ -13,8 +13,10 @@ import standaloneConfig from '../server/standalone/vite.config.js';
 import {
   PANEL_BASE,
   PANEL_OUT_DIR,
+  PANEL_WORKER_FILES,
   PANEL_WORKERS_PATH,
   panelBuildConfig,
+  workerFilesPrelude,
   workersEntrySource,
 } from '../build/panel.js';
 
@@ -49,4 +51,12 @@ await esbuild({
   logLevel: 'warning',
 });
 await rm(entry);
+const files = {};
+for (const name of PANEL_WORKER_FILES)
+  files[name] = await readFile(join(outDir, 'cesium', name), 'utf8');
+const workers = join(outDir, PANEL_WORKERS_PATH);
+await writeFile(
+  workers,
+  workerFilesPrelude(files) + (await readFile(workers, 'utf8')),
+);
 console.log(`Panel build written to ${PANEL_OUT_DIR}`);

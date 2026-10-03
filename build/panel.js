@@ -101,3 +101,66 @@ export function panelBuildPlugin({ outDir = PANEL_OUT_DIR } = {}) {
     },
   };
 }
+
+/**
+ * Cesium files its workers load themselves, as paths under Cesium's base.
+ * Workers request them from the panel page's own site, which has none of
+ * the app's files, so the panel build embeds them in the workers script.
+ */
+export const PANEL_WORKER_FILES = Object.freeze([
+  'Assets/approximateTerrainHeights.json',
+]);
+
+/**
+ * A script, run in each worker before Cesium's, that answers the worker's
+ * requests for `files` (Cesium-relative path → text) from memory and lets
+ * every other request through.
+ */
+export function workerFilesPrelude(files) {
+  const answer = (FILES) => {
+    const find = (url) => {
+      const path = String(url).split(/[?#]/)[0];
+      for (const name of Object.keys(FILES))
+        if (path.endsWith(`/${name}`)) return FILES[name];
+      return null;
+    };
+    const xhr = XMLHttpRequest.prototype;
+    const { open, send, setRequestHeader } = xhr;
+    xhr.open = function (method, url, ...rest) {
+      this.__gevFile = find(url);
+      if (this.__gevFile === null) return open.call(this, method, url, ...rest);
+    };
+    xhr.setRequestHeader = function (...args) {
+      if (this.__gevFile === null) return setRequestHeader.apply(this, args);
+    };
+    xhr.send = function (body) {
+      const text = this.__gevFile;
+      if (text === null || text === undefined) return send.call(this, body);
+      const type = this.responseType;
+      const response =
+        type === 'json'
+          ? JSON.parse(text)
+          : type === 'arraybuffer'
+            ? new TextEncoder().encode(text).buffer
+            : text;
+      const state = {
+        readyState: 4,
+        status: 200,
+        statusText: 'OK',
+        response,
+        responseText: typeof response === 'string' ? response : '',
+        getAllResponseHeaders: () => 'content-type: application/json\r\n',
+        getResponseHeader: (name) =>
+          name.toLowerCase() === 'content-type' ? 'application/json' : null,
+      };
+      for (const [name, value] of Object.entries(state))
+        Object.defineProperty(this, name, { configurable: true, value });
+      setTimeout(() => {
+        this.dispatchEvent(new Event('readystatechange'));
+        this.dispatchEvent(new ProgressEvent('load'));
+        this.dispatchEvent(new ProgressEvent('loadend'));
+      });
+    };
+  };
+  return `(${answer})(${JSON.stringify(files)});\n`;
+}
