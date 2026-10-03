@@ -2,8 +2,16 @@
  * The God's Eye View panel's requests. A panel cannot reach the app's server
  * itself: hosts serve panels from their own sites and may refuse other
  * addresses, such as a server on the user's machine. The panel asks this
- * tool instead, which only an app may call, and it requests the path from
- * the app's server. Large responses come back in parts.
+ * tool instead, and it requests the path from the app's server. Large
+ * responses come back in parts.
+ *
+ * It is meant for the panel. `visibility: ['app']` asks hosts to keep it
+ * from the model, and every call must also carry the key in the panel's page
+ * (`services.app.panelKey`), so a client that lists the tool to the model
+ * without loading the panel cannot use it. The key is not access control:
+ * any MCP client can read the panel's page, key included. What protects
+ * sensitive routes is that those the panel never needs are refused to every
+ * caller.
  */
 
 import { defineTool, ToolError } from '../catalog.js';
@@ -17,8 +25,15 @@ const HELD_LIMIT_BYTES = 256 * 1024 * 1024;
 export const PANEL_RESPONSE_LIMIT_BYTES = 64 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 60 * 1000;
 const METHODS = new Set(['GET', 'HEAD', 'POST']);
-// Provider Settings write the app's keys; only the app's own page may.
-const REFUSED_PATHS = [/^\/api\/setup(?:\/|$)/];
+// Routes the panel never loads, matched without regard to case as the
+// server routes them: Provider Settings, which only the app's own page may
+// use; credential and model endpoints; the MCP server itself; and the
+// development server's internal routes.
+const REFUSED_PATHS = [
+  /^\/api\/(?:setup|realtime|openai)(?:\/|$)/i,
+  /^\/mcp(?:\/|$)/i,
+  /^\/(?:@|__)/,
+];
 const FORWARDED_REQUEST_HEADERS = ['accept', 'content-type'];
 const DROPPED_RESPONSE_HEADERS = new Set([
   'connection',
@@ -46,6 +61,17 @@ function base64(bytes) {
 
 function fromBase64(text) {
   return Uint8Array.from(atob(text), (char) => char.charCodeAt(0));
+}
+
+/** Compare a caller's key with the panel's, in time independent of where they differ. */
+function isPanelKey(given, expected) {
+  if (typeof expected !== 'string' || expected.length === 0) return false;
+  if (typeof given !== 'string' || given.length !== expected.length)
+    return false;
+  let difference = 0;
+  for (let index = 0; index < expected.length; index += 1)
+    difference |= given.charCodeAt(index) ^ expected.charCodeAt(index);
+  return difference === 0;
 }
 
 async function gzip(bytes) {
@@ -158,6 +184,10 @@ export const panelRequest = defineTool({
   inputSchema: {
     type: 'object',
     properties: {
+      key: {
+        type: 'string',
+        description: "The panel's key, from its own page.",
+      },
       path: {
         type: 'string',
         description: "A path on the app's server, starting with /.",
@@ -179,6 +209,11 @@ export const panelRequest = defineTool({
   requires: ['app'],
   ui: { visibility: ['app'] },
   async run(args, { services, signal }) {
+    if (!isPanelKey(args.key, services.app.panelKey))
+      throw new ToolError(
+        'invalid_arguments',
+        "Only the God's Eye View panel may make this request",
+      );
     forgetExpired();
     if (args.id !== undefined) {
       const entry = held.get(args.id);

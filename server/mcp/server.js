@@ -1,5 +1,6 @@
 /** The local MCP server: Core's tools over services backed by a running app. */
 
+import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
   composeCatalog,
@@ -28,17 +29,21 @@ export function createLocalMcpServer({
   const { version } = JSON.parse(
     readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
   );
+  // Each server makes a new key for its panel. The panel's page carries it
+  // and panel_request requires it; any client may read the page, so it keeps
+  // the tool from clients that only list it, and is not access control.
+  const panelKey = randomBytes(32).toString('base64url');
   return createMcpServer({
     catalog: catalogForSurface(
       composeCatalog({
         tools: coreTools,
-        services: createLocalToolServices({ apiBase, fetchImpl }),
+        services: createLocalToolServices({ apiBase, fetchImpl, panelKey }),
       }),
       'mcp',
     ),
     name: 'gods-eye-view',
     version,
     instructions: INSTRUCTIONS,
-    resources: [createGlobePanelResource({ runtime: panelRuntime })],
+    resources: [createGlobePanelResource({ runtime: panelRuntime, panelKey })],
   });
 }

@@ -55,12 +55,13 @@ export const PANEL_REQUEST_TOOL = 'panel_request';
  * the panel's script, `runtime`, which loads the app through the MCP server
  * and shows each view a tool returns.
  */
-function panelHtml(runtime) {
+function panelHtml(runtime, panelKey) {
   const config = {
     appBaseUrl: PANEL_APP_BASE_URL,
     loadTimeoutMs: LOAD_TIMEOUT_MS,
     panelBase: PANEL_BASE,
     panelHeight: PANEL_HEIGHT_PX,
+    panelKey,
     protocolVersion: MCP_APPS_PROTOCOL_VERSION,
     toolName: PANEL_REQUEST_TOOL,
     workerPreludePath: PANEL_WORKER_PRELUDE_PATH,
@@ -103,18 +104,21 @@ function panelHtml(runtime) {
  * it (src/app/globePanelRuntime.js), as it is browser code. The security
  * policy lets the panel load map imagery, tiles and fonts from their
  * providers; everything from the app's own server arrives through the MCP
- * server instead.
+ * server instead. `panelKey` is the key the panel's requests must carry
+ * (see src/tools/queries/panelRequest.js), which this page holds.
  */
-export function createGlobePanelResource({ runtime }) {
+export function createGlobePanelResource({ runtime, panelKey }) {
   if (typeof runtime !== 'function')
     throw new TypeError('The globe panel needs its runtime script');
+  if (typeof panelKey !== 'string' || panelKey.length === 0)
+    throw new TypeError('The globe panel needs its request key');
   return Object.freeze({
     uri: GLOBE_PANEL_URI,
     name: 'globe',
     title: "God's Eye View globe",
     description: "Live God's Eye View, showing the view a tool returns.",
     mimeType: MCP_APP_MIME_TYPE,
-    text: panelHtml(runtime),
+    text: panelHtml(runtime, panelKey),
     _meta: {
       ui: {
         csp: {

@@ -131,3 +131,43 @@ test('a failed tool call is logged with its reason', async () => {
     '   tools/call show_in_gods_eye_view failed: bad area',
   ]);
 });
+
+test("only the key in the server's own panel page opens panel requests", async () => {
+  const requested = [];
+  const server = createLocalMcpServer({
+    apiBase: 'http://127.0.0.1:5000',
+    fetchImpl: async (url) => {
+      requested.push(new URL(url).pathname);
+      return new Response('ok');
+    },
+  });
+  const call = (id, args) =>
+    server.handle({
+      jsonrpc: '2.0',
+      id,
+      method: 'tools/call',
+      params: { name: 'panel_request', arguments: args },
+    });
+  const page = await server.handle({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'resources/read',
+    params: { uri: 'ui://gods-eye-view/globe' },
+  });
+  const [, key] = page.result.contents[0].text.match(/"panelKey":"([^"]+)"/);
+  assert.ok(key.length >= 40);
+  const refused = await call(2, { path: '/panel/index.html' });
+  assert.equal(refused.result.isError, true);
+  const opened = await call(3, { key, path: '/panel/index.html' });
+  assert.equal(opened.result.isError, false);
+  assert.deepEqual(requested, ['/panel/index.html']);
+  // Every server makes its own key.
+  const other = createLocalMcpServer({ apiBase: 'http://127.0.0.1:5000' });
+  const otherPage = await other.handle({
+    jsonrpc: '2.0',
+    id: 4,
+    method: 'resources/read',
+    params: { uri: 'ui://gods-eye-view/globe' },
+  });
+  assert.doesNotMatch(otherPage.result.contents[0].text, new RegExp(key));
+});

@@ -45,7 +45,8 @@ export function panelRuntime(config) {
     try {
       const result = await request('tools/call', {
         name: config.toolName,
-        arguments: args,
+        // The server refuses the panel's requests without its key.
+        arguments: { ...args, key: config.panelKey },
       });
       if (result?.isError || !result?.structuredContent)
         throw new Error(result?.content?.[0]?.text || 'The request failed');
