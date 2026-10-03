@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- The voice debug log records the server's own time: a record can no longer
+  supply its `loggedAt`. The dev and preview servers also send
+  `X-Content-Type-Options: nosniff` (findings by Sunil, #710).
+
 - Keep the Host-header check when binding to all interfaces. `HOST=0.0.0.0`
   used to accept any Host; the dev and preview servers now accept IP
   addresses, `localhost` and the LAN hostnames listed in `GEV_ALLOWED_HOSTS`

@@ -36,6 +36,8 @@ export const BROWSER_CSP = [
 export const BROWSER_HEADERS = Object.freeze({
   'X-Frame-Options': 'DENY',
   'Content-Security-Policy': BROWSER_CSP,
+  // Responses are only ever used as the type the server declares.
+  'X-Content-Type-Options': 'nosniff',
 });
 
 /** Build browser assets with explicit inputs; never load environment or providers. */
