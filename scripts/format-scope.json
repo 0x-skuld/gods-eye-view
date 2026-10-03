@@ -893,5 +893,6 @@
   "src/view/index.test.mjs",
   "src/tools/views.test.mjs",
   "src/app/embed.test.mjs",
-  "src/tools/globePanel.test.mjs"
+  "src/tools/globePanel.test.mjs",
+  "src/costEndpointThrottle.test.mjs"
 ]
