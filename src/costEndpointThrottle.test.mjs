@@ -95,6 +95,20 @@ test('a configured value wins, and a fractional one floors', () => {
   assert.equal(resolvePerMinuteCap('30.7', 30), 30);
 });
 
+test('a positive fraction keeps the guard rather than flooring to unlimited', () => {
+  for (const fraction of ['0.5', '0.99', 0.01, '1e-9']) {
+    assert.equal(resolvePerMinuteCap(fraction, 30), 1, String(fraction));
+    assert.equal(
+      typeof makeCostRateLimiter(fraction, 30),
+      'function',
+      `${fraction} must still throttle`,
+    );
+  }
+  // Only an explicit zero turns the limiter off.
+  assert.equal(makeCostRateLimiter('0', 30), null);
+  assert.equal(makeCostRateLimiter('0.0', 30), null);
+});
+
 test('an unreadable value keeps the guard instead of removing it', () => {
   // `3O` (letter O) and `60/min` are the shapes a hand-edited .env produces.
   // Reading either as "unlimited" would disarm the spend guard on a typo —

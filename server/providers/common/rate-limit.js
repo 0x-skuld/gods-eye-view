@@ -23,6 +23,9 @@ export function resolvePerMinuteCap(envValue, defaultPerMin) {
   if (raw === undefined || raw === null || raw === '') return defaultPerMin;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) return defaultPerMin;
+  // Only an explicit 0 disables the guard: a positive fraction such as 0.5
+  // would floor to 0, so it takes the strictest real cap instead.
+  if (parsed > 0 && parsed < 1) return 1;
   return Math.floor(parsed); // includes the explicit 0 = unlimited opt-out
 }
 
