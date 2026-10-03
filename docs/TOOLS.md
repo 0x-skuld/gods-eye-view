@@ -125,13 +125,18 @@ the host to open the link (`ui/open-link`).
 Hosts serve panels from their own sites and may refuse other addresses;
 Codex, for one, refuses any address on the user's machine. So the panel
 never requests the app's server itself. It loads everything from the app's
-own paths through `panel_request`, a tool only the panel may call
-(`_meta.ui.visibility: ["app"]`): the MCP server requests the path from the
-app's server and returns the response, compressed and in parts when large.
+own paths through `panel_request`, a tool meant for the panel: it is
+marked `_meta.ui.visibility: ["app"]`, and each call must carry the key the
+MCP server puts in its panel page. Any client can read that page, so the key
+keeps the tool from clients that only list it, and is not access control. The
+MCP server requests the path from the app's server and returns the response,
+compressed and in parts when large.
 The same path works in every host. Only
 map imagery, tiles and fonts load directly, from the providers the
-resource's `csp` lists. `panel_request` refuses `/api/setup`, which writes
-provider keys.
+resource's `csp` lists. `panel_request` refuses Provider Settings
+(`/api/setup`), credential and model endpoints (`/api/realtime`,
+`/api/openai`), `/mcp` and the development server's internal routes, in any
+letter case or encoding.
 
 The panel loads the app's panel build, which `npm run build:panel` writes to
 `dist/panel` and the servers serve at `/panel/`: one app script, one
@@ -164,14 +169,15 @@ The app applies it through its own actions (style, map, exactly the view's
 layers, annotations, then the followed entity, retried until its layer has
 it, or the camera when nothing is followed or the entity is not there yet,
 since a camera flight would end the follow; then cockpit view when asked) and
-answers `{ type: 'gev:view-applied', id, ok, steps }`. It
-posts `{ type: 'gev:ready' }` once it can take views, and only its parent
-page can send them. See `src/app/embed.js`.
+answers `{ type: 'gev:view-applied', id, ok, steps }` to the origin that
+sent the view. It posts `{ type: 'gev:ready' }` once it can take views, and
+only its parent page can send them. See `src/app/embed.js`.
 
-The development and preview servers let other pages frame embed-mode
-documents only; every other document keeps `X-Frame-Options: DENY` and
-`frame-ancestors 'none'`. `GEV_EMBED_FRAME_ANCESTORS` restricts which pages
-may frame them (any by default).
+No page may frame the app by default: every document keeps
+`X-Frame-Options: DENY` and `frame-ancestors 'none'`. Setting
+`GEV_EMBED_FRAME_ANCESTORS` lets the pages it names (CSP frame-ancestors
+sources, or `*` for any page) frame embed-mode documents only. The MCP Apps
+panel loads the app into its own page and needs no framing.
 
 Answers that have something to show include `data.view`: the view that
 shows them, with the matching layers on, an area framed from above, and a
@@ -240,10 +246,15 @@ claude mcp add --transport http gods-eye-view http://localhost:4173/mcp
 ```
 
 The route accepts only requests from this machine that name a loopback host
-and, when a browser sends an `Origin`, come from a loopback origin. This is
-local transport safety, not authentication. The
-local server makes no requests other than to the app's `/api` routes and the
-public feeds the sources already use.
+on the port they reached and, when a browser sends an `Origin`, come from
+that same host. It refuses requests a proxy forwarded and refuses all
+requests while launcher sharing is on. This is local transport safety, not
+authentication. The
+local server's tools request the app's `/api` routes and the public feeds
+the sources already use. The panel's `panel_request` also requests the app's
+own files and data routes for the panel: it requires the key in the panel's
+page, and refuses Provider Settings, credential and model endpoints, `/mcp`
+and the development server's internal routes. See SECURITY.md.
 
 ## Tools
 

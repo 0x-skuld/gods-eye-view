@@ -102,7 +102,13 @@ test('a followed entity is retried until its layer has it', async () => {
 
 test('an embedded page takes views only from its parent and answers it', async () => {
   const posted = [];
-  const parent = { postMessage: (message) => posted.push(message) };
+  const targets = [];
+  const parent = {
+    postMessage: (message, target) => {
+      posted.push(message);
+      targets.push(target);
+    },
+  };
   const windowRef = new EventTarget();
   windowRef.parent = parent;
   windowRef.document = { body: { classList: new Set() } };
@@ -126,9 +132,9 @@ test('an embedded page takes views only from its parent and answers it', async (
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(shell.clean, true);
   assert.deepEqual(posted, [{ type: 'gev:ready' }]);
-  const send = (source, data) => {
+  const send = (source, data, origin = 'https://host.example') => {
     const event = new Event('message');
-    Object.assign(event, { source, data });
+    Object.assign(event, { source, data, origin });
     windowRef.dispatchEvent(event);
   };
   send({}, { type: 'gev:view', id: 1, view: { camera: { lat: 1, lon: 2 } } });
@@ -154,6 +160,13 @@ test('an embedded page takes views only from its parent and answers it', async (
     ),
   );
   assert.equal(posted.filter((message) => message.id === 1).length, 0);
+  // Ready names no data and goes to any parent; answers go only to the
+  // origin that asked.
+  assert.deepEqual(targets, [
+    '*',
+    'https://host.example',
+    'https://host.example',
+  ]);
   remove();
 });
 

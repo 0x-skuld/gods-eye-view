@@ -9,7 +9,10 @@ import { panelRuntime } from '../app/globePanelRuntime.js';
 import { composeCatalog, coreTools } from './index.js';
 
 test('the globe panel is an MCP Apps resource that loads the app through its server', () => {
-  const resource = createGlobePanelResource({ runtime: panelRuntime });
+  const resource = createGlobePanelResource({
+    runtime: panelRuntime,
+    panelKey: 'test-key',
+  });
   assert.equal(resource.uri, GLOBE_PANEL_URI);
   assert.equal(resource.mimeType, MCP_APP_MIME_TYPE);
   assert.equal(MCP_APP_MIME_TYPE, 'text/html;profile=mcp-app');
@@ -24,6 +27,9 @@ test('the globe panel is an MCP Apps resource that loads the app through its ser
   assert.equal(csp.frameDomains, undefined);
   assert.equal(csp.baseUriDomains, undefined);
   assert.match(resource.text, /"toolName":"panel_request"/);
+  // The page carries the key its requests need, and sends it with each one.
+  assert.match(resource.text, /"panelKey":"test-key"/);
+  assert.match(resource.text, /key: config\.panelKey/);
   assert.match(resource.text, /"panelBase":"\/panel\/"/);
   assert.match(resource.text, /'ui\/initialize'/);
   assert.match(resource.text, /'ui\/notifications\/tool-result'/);
@@ -37,6 +43,14 @@ test('the globe panel is an MCP Apps resource that loads the app through its ser
   assert.doesNotMatch(resource.text, /<iframe|createElement\('base'\)/);
   const script = resource.text.match(/<script>([\s\S]*)<\/script>/)[1];
   assert.doesNotThrow(() => new Function(script));
+});
+
+test('the globe panel needs a request key', () => {
+  for (const panelKey of [undefined, '', 42])
+    assert.throws(
+      () => createGlobePanelResource({ runtime: panelRuntime, panelKey }),
+      TypeError,
+    );
 });
 
 test('show_in_gods_eye_view names the panel and shows a view another answer returned', async () => {

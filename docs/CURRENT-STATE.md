@@ -10,7 +10,8 @@ The panel runs the app's panel build (`npm run build:panel`, served at
 `/panel/`) and loads it, with its data, through the MCP server, so it works
 in Claude Desktop and in the Codex and ChatGPT desktop apps with a local
 server and no HTTPS. `?embed=1` shows the app as the globe alone and takes
-new views from the page that frames it. MCP leads with the tools that find
+new views from the page that frames it; framing is off unless
+`GEV_EMBED_FRAME_ANCESTORS` allows the framing page. MCP leads with the tools that find
 what to show. See [tools and the MCP server](TOOLS.md).
 
 ## Tools and local MCP server — October 1, 2026
@@ -20,7 +21,9 @@ and `gods-eye-view/tools/mcp` exposes a composed catalog over the Model Context
 Protocol. `npm run mcp` serves Core's tools over stdio to a local MCP client,
 reading from a running app's `/api` routes (default `http://localhost:4173`).
 The development and preview servers also serve the tools over HTTP at `/mcp`,
-accepting only local requests with loopback hosts and origins.
+accepting only direct local requests: a loopback host on the port reached,
+an `Origin` (when sent) from that same host, no proxy forwarding headers, and
+launcher sharing off.
 Queries cover earthquakes, active fires, recent launches, aircraft (in an
 area, by identifier, tracks, and type and route lookups), ships (in an area,
 by identifier, and tracks), satellites (next

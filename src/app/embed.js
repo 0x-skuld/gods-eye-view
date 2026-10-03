@@ -249,9 +249,11 @@ export function installViews({
   // A framing page talks to the app across frames; an inline panel shares
   // the page with it and talks through the page's own window.
   const peer = isEmbeddedInline() ? windowRef : windowRef.parent;
-  const post = (message) => {
+  // Answers go back only to the origin that asked. An inline panel posts to
+  // its own window, and a sandboxed framing page has no origin to name.
+  const post = (message, origin = '*') => {
     if (peer && (peer !== windowRef || isEmbeddedInline()))
-      peer.postMessage(message, '*');
+      peer.postMessage(message, origin);
   };
   // Views apply one at a time, in the order they arrive.
   let queue = ready;
@@ -259,27 +261,37 @@ export function installViews({
     if (event.source !== peer || event.data?.type !== EMBED_VIEW_MESSAGE)
       return;
     const { id = null } = event.data;
+    const replyOrigin =
+      isEmbeddedInline() || !event.origin || event.origin === 'null'
+        ? '*'
+        : event.origin;
     let view;
     try {
       view = createView(event.data.view);
     } catch (error) {
-      post({
-        type: EMBED_APPLIED_MESSAGE,
-        id,
-        ok: false,
-        error: error.message,
-      });
+      post(
+        {
+          type: EMBED_APPLIED_MESSAGE,
+          id,
+          ok: false,
+          error: error.message,
+        },
+        replyOrigin,
+      );
       return;
     }
     queue = queue.then(async () => {
       if (signal?.aborted) return;
       const steps = await applyView(view, { viewer, dataManager, run, signal });
-      post({
-        type: EMBED_APPLIED_MESSAGE,
-        id,
-        ok: steps.every((step) => step.ok),
-        steps,
-      });
+      post(
+        {
+          type: EMBED_APPLIED_MESSAGE,
+          id,
+          ok: steps.every((step) => step.ok),
+          steps,
+        },
+        replyOrigin,
+      );
     });
   };
   windowRef.addEventListener('message', onMessage);

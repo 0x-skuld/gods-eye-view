@@ -3,15 +3,23 @@ import { createServer, request as httpRequest } from 'node:http';
 import test from 'node:test';
 import { isLocalMcpRequest, localMcpPlugin } from '../../server/mcp/plugin.js';
 
-test('only loopback connections with loopback hosts and origins are local', () => {
-  const local = { remoteAddress: '127.0.0.1', host: 'localhost:4173' };
+test('only direct loopback connections to this server are local', () => {
+  const local = {
+    remoteAddress: '127.0.0.1',
+    localPort: 4173,
+    host: 'localhost:4173',
+  };
   assert.equal(isLocalMcpRequest(local), true);
   assert.equal(
     isLocalMcpRequest({ ...local, remoteAddress: '::1', host: '[::1]:4173' }),
     true,
   );
   assert.equal(
-    isLocalMcpRequest({ ...local, origin: 'http://127.0.0.1:5173' }),
+    isLocalMcpRequest({ ...local, origin: 'http://localhost:4173' }),
+    true,
+  );
+  assert.equal(
+    isLocalMcpRequest({ ...local, env: { PINOKIO_SHARE_LOCAL: 'false' } }),
     true,
   );
   for (const request of [
@@ -19,9 +27,20 @@ test('only loopback connections with loopback hosts and origins are local', () =
     { ...local, host: 'attacker.example:4173' },
     { ...local, host: 'localhost.attacker.example' },
     { ...local, host: '' },
+    // Another local port, as the Host or as the page's origin.
+    { ...local, host: 'localhost:9000' },
+    { ...local, localPort: 80 },
+    { ...local, origin: 'http://127.0.0.1:5173' },
+    { ...local, origin: 'http://localhost:5173' },
     { ...local, origin: 'https://attacker.example' },
     { ...local, origin: 'null' },
     { ...local, origin: 'file:///tmp/page.html' },
+    // Proxied or shared: not from this machine, whatever the socket says.
+    { ...local, headers: { 'x-forwarded-for': '203.0.113.9' } },
+    { ...local, headers: { forwarded: 'for=203.0.113.9' } },
+    { ...local, headers: { 'cf-connecting-ip': '203.0.113.9' } },
+    { ...local, env: { PINOKIO_SHARE_LOCAL: 'true' } },
+    { ...local, env: { PINOKIO_SHARE_VAR: 'GEV_SHARE_URL' } },
   ])
     assert.equal(isLocalMcpRequest(request), false, JSON.stringify(request));
 });
@@ -111,6 +130,18 @@ test('the /mcp route answers local MCP requests and refuses others', async (t) =
     (await post({}, { Host: `localhost.attacker.example:${port}` })).status,
     403,
   );
+  // A Host naming another local port, a page on another port, and a request
+  // a proxy forwarded are all refused, and no server is made for them.
+  assert.equal((await post({}, { Host: `localhost:${port + 1}` })).status, 403);
+  assert.equal(
+    (await post({}, { Origin: `http://localhost:${port + 1}` })).status,
+    403,
+  );
+  assert.equal(
+    (await post({}, { 'X-Forwarded-For': '203.0.113.9' })).status,
+    403,
+  );
+  assert.deepEqual(created, [`http://localhost:${port}`]);
   assert.equal((await post('x'.repeat(1024 * 1024 + 1))).status, 413);
   assert.equal(
     (
@@ -163,4 +194,45 @@ test('a client that disconnects cancels its tool call', async (t) => {
   request.destroy();
   await aborted.promise;
   assert.equal(seen.aborted, true);
+});
+
+test('a client that stops sending its request body is answered with a timeout', async (t) => {
+  let middleware;
+  const plugin = localMcpPlugin({
+    bodyTimeoutMs: 20,
+    createServer: () => ({ handle: async () => null }),
+  });
+  plugin.configureServer({
+    middlewares: { use: (path, handler) => (middleware = handler) },
+  });
+  const http = createServer((req, res) => middleware(req, res));
+  await new Promise((resolve) => http.listen(0, '127.0.0.1', resolve));
+  t.after(() => http.close());
+  const { port } = http.address();
+  const status = await new Promise((resolve, reject) => {
+    const request = httpRequest(
+      {
+        host: '127.0.0.1',
+        port,
+        path: '/mcp',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': '100',
+          Host: `localhost:${port}`,
+        },
+      },
+      (response) => {
+        response.resume();
+        resolve(response.statusCode);
+        request.destroy();
+      },
+    );
+    request.on('error', (error) => {
+      if (error.code !== 'ECONNRESET') reject(error);
+    });
+    // Part of the body, then nothing more.
+    request.write('{"jsonrpc"');
+  });
+  assert.equal(status, 408);
 });

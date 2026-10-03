@@ -1,11 +1,12 @@
 /**
- * Lets other pages frame the app in embed mode (`?embed=1`). Every other
+ * Lets chosen pages frame the app in embed mode (`?embed=1`). Every
  * document keeps the server's `X-Frame-Options: DENY` and
- * `frame-ancestors 'none'`, which protect Provider Settings. Embed mode
- * shows only the globe, so for those documents framing is limited to
- * `ancestors` instead: `GEV_EMBED_FRAME_ANCESTORS`, or any frame by default.
- * "Any" sends no framing restriction at all: `frame-ancestors *` would still
- * refuse sandboxed frames with an opaque origin, which panel hosts use.
+ * `frame-ancestors 'none'` unless `GEV_EMBED_FRAME_ANCESTORS` names who may
+ * frame embed-mode documents: CSP frame-ancestors sources, or `*` for any
+ * page. A framing page can change what the app shows, so no page may frame
+ * it by default. Other documents, including Provider Settings, are never
+ * framable. "Any" sends no framing restriction at all: `frame-ancestors *`
+ * would still refuse sandboxed frames with an opaque origin.
  */
 
 const FRAMING_HEADERS = new Set(['x-frame-options', 'content-security-policy']);
@@ -26,10 +27,13 @@ export function isEmbedDocumentRequest(url) {
 
 /** Vite plugin applying the embed framing policy on dev and preview servers. */
 export function embedFramingPlugin({
-  ancestors = process.env.GEV_EMBED_FRAME_ANCESTORS || '*',
+  ancestors = process.env.GEV_EMBED_FRAME_ANCESTORS || '',
 } = {}) {
-  const anywhere = ancestors.trim() === '*';
-  const policy = `frame-ancestors ${ancestors}`;
+  const allowed = ancestors.trim();
+  // Unset: embed documents keep the server's framing protection.
+  if (!allowed) return { name: 'embed-framing' };
+  const anywhere = allowed === '*';
+  const policy = `frame-ancestors ${allowed}`;
   const install = (server) => {
     server.middlewares.use((req, res, next) => {
       if (!isEmbedDocumentRequest(req.url)) return next();

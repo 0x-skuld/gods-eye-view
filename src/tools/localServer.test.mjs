@@ -131,3 +131,83 @@ test('a failed tool call is logged with its reason', async () => {
     '   tools/call show_in_gods_eye_view failed: bad area',
   ]);
 });
+
+test("only the key in the server's own panel page opens panel requests", async () => {
+  const requested = [];
+  const server = createLocalMcpServer({
+    apiBase: 'http://127.0.0.1:5000',
+    fetchImpl: async (url) => {
+      requested.push(new URL(url).pathname);
+      return new Response('ok');
+    },
+  });
+  const call = (id, args) =>
+    server.handle({
+      jsonrpc: '2.0',
+      id,
+      method: 'tools/call',
+      params: { name: 'panel_request', arguments: args },
+    });
+  const page = await server.handle({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'resources/read',
+    params: { uri: 'ui://gods-eye-view/globe' },
+  });
+  const [, key] = page.result.contents[0].text.match(/"panelKey":"([^"]+)"/);
+  assert.ok(key.length >= 40);
+  const refused = await call(2, { path: '/panel/index.html' });
+  assert.equal(refused.result.isError, true);
+  const opened = await call(3, { key, path: '/panel/index.html' });
+  assert.equal(opened.result.isError, false);
+  assert.deepEqual(requested, ['/panel/index.html']);
+  // Every server makes its own key.
+  const other = createLocalMcpServer({ apiBase: 'http://127.0.0.1:5000' });
+  const otherPage = await other.handle({
+    jsonrpc: '2.0',
+    id: 4,
+    method: 'resources/read',
+    params: { uri: 'ui://gods-eye-view/globe' },
+  });
+  assert.doesNotMatch(otherPage.result.contents[0].text, new RegExp(key));
+});
+
+test('a request the client cancels over stdio is aborted and gets no answer', async () => {
+  let seen;
+  const server = {
+    handle: (message, { signal } = {}) => {
+      if (message.id === 1) {
+        seen = signal;
+        return new Promise((resolve) =>
+          signal.addEventListener(
+            'abort',
+            () => resolve({ jsonrpc: '2.0', id: 1, result: {} }),
+            { once: true },
+          ),
+        );
+      }
+      return Promise.resolve(
+        message.id === undefined
+          ? null
+          : { jsonrpc: '2.0', id: message.id, result: {} },
+      );
+    },
+  };
+  const input = new PassThrough();
+  const output = new PassThrough();
+  let written = '';
+  output.on('data', (chunk) => (written += chunk));
+  const served = serveStdio(server, { input, output });
+  input.write('{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}}\n');
+  input.write('{"jsonrpc":"2.0","id":2,"method":"ping"}\n');
+  input.end(
+    '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1}}\n',
+  );
+  await served;
+  assert.equal(seen.aborted, true);
+  const ids = written
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line).id);
+  assert.deepEqual(ids, [2]);
+});

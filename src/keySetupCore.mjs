@@ -184,6 +184,48 @@ export function parseWindowsUserSid(stdout) {
     : null;
 }
 
+/** Headers that reverse proxies, tunnels and CDNs add to a request. */
+export const PROXY_SIGNAL_HEADERS = Object.freeze([
+  'forwarded',
+  'via',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-port',
+  'x-forwarded-proto',
+  'x-real-ip',
+  'cf-connecting-ip',
+  'cf-ray',
+]);
+
+/**
+ * Whether a request carries reverse-proxy or CDN forwarding headers, so it
+ * did not originate on this machine whatever its socket says. `headers` is
+ * keyed by lower-case header name.
+ */
+export function hasProxySignals(headers = {}) {
+  return PROXY_SIGNAL_HEADERS.some(
+    (name) => String(headers[name] || '').trim() !== '',
+  );
+}
+
+/**
+ * Whether the launcher has sharing on. Every sharing signal the launcher
+ * recognizes (scripts/pinokio-preflight.mjs) counts, so the two sets cannot
+ * drift apart. One DELIBERATE divergence: preflight is a boot check that
+ * treats an empty PINOKIO_SHARE_VAR as sharing-on (fail closed before Start),
+ * but here an empty/unset value is the NORMAL git-clone and Pinokio state, so
+ * a bare/sentinel value is not sharing; only a real tunnel var is.
+ */
+export function isSharingEnabled(env = {}) {
+  const shareVar = String(env.PINOKIO_SHARE_VAR ?? '').trim();
+  return (
+    ['PINOKIO_SHARE_CLOUDFLARE', 'PINOKIO_SHARE_LOCAL'].some((name) =>
+      /^(1|true)$/i.test(String(env[name] || '').trim()),
+    ) ||
+    (shareVar !== '' && shareVar !== '__gev_sharing_disabled__')
+  );
+}
+
 /**
  * The admission gate for the Provider Settings endpoints — pure, exported so
  * every refusal below is pinned by a unit assertion rather than a review note.
@@ -219,20 +261,7 @@ export function admitKeySetupRequest({
   // on this machine, whatever its socket says. Refuse them outright as defense
   // in depth — the shipped tunnel (Pinokio) is force-closed at boot, so these
   // only appear when someone has deliberately fronted the dev server.
-  const PROXY_SIGNALS = [
-    'forwarded',
-    'via',
-    'x-forwarded-for',
-    'x-forwarded-host',
-    'x-forwarded-port',
-    'x-forwarded-proto',
-    'x-real-ip',
-    'cf-connecting-ip',
-    'cf-ray',
-  ];
-  if (
-    PROXY_SIGNALS.some((name) => String(proxyHeaders[name] || '').trim() !== '')
-  ) {
+  if (hasProxySignals(proxyHeaders)) {
     return {
       ok: false,
       status: 403,
@@ -249,13 +278,7 @@ export function admitKeySetupRequest({
   // tunnel var is. This is defense in depth regardless: the loopback+Host checks
   // below independently refuse LAN/tunnel traffic, and under Pinokio the launcher
   // refuses to boot at all when sharing is genuinely on.
-  const shareVar = String(env.PINOKIO_SHARE_VAR ?? '').trim();
-  const sharingEnabled =
-    ['PINOKIO_SHARE_CLOUDFLARE', 'PINOKIO_SHARE_LOCAL'].some((name) =>
-      /^(1|true)$/i.test(String(env[name] || '').trim()),
-    ) ||
-    (shareVar !== '' && shareVar !== '__gev_sharing_disabled__');
-  if (sharingEnabled) {
+  if (isSharingEnabled(env)) {
     return {
       ok: false,
       status: 403,

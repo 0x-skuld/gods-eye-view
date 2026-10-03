@@ -2,8 +2,16 @@
  * The God's Eye View panel's requests. A panel cannot reach the app's server
  * itself: hosts serve panels from their own sites and may refuse other
  * addresses, such as a server on the user's machine. The panel asks this
- * tool instead, which only an app may call, and it requests the path from
- * the app's server. Large responses come back in parts.
+ * tool instead, and it requests the path from the app's server. Large
+ * responses come back in parts.
+ *
+ * It is meant for the panel. `visibility: ['app']` asks hosts to keep it
+ * from the model, and every call must also carry the key in the panel's page
+ * (`services.app.panelKey`), so a client that lists the tool to the model
+ * without loading the panel cannot use it. The key is not access control:
+ * any MCP client can read the panel's page, key included. What protects
+ * sensitive routes is that those the panel never needs are refused to every
+ * caller.
  */
 
 import { defineTool, ToolError } from '../catalog.js';
@@ -17,8 +25,15 @@ const HELD_LIMIT_BYTES = 256 * 1024 * 1024;
 export const PANEL_RESPONSE_LIMIT_BYTES = 64 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 60 * 1000;
 const METHODS = new Set(['GET', 'HEAD', 'POST']);
-// Provider Settings write the app's keys; only the app's own page may.
-const REFUSED_PATHS = [/^\/api\/setup(?:\/|$)/];
+// Routes the panel never loads, matched without regard to case as the
+// server routes them: Provider Settings, which only the app's own page may
+// use; credential and model endpoints; the MCP server itself; and the
+// development server's internal routes.
+const REFUSED_PATHS = [
+  /^\/api\/(?:setup|realtime|openai)(?:\/|$)/i,
+  /^\/mcp(?:\/|$)/i,
+  /^\/(?:@|__)/,
+];
 const FORWARDED_REQUEST_HEADERS = ['accept', 'content-type'];
 const DROPPED_RESPONSE_HEADERS = new Set([
   'connection',
@@ -33,9 +48,67 @@ const INCOMPRESSIBLE =
   /^(?:image\/(?!svg)|video\/|audio\/|font\/woff2)|zip|compressed/;
 const COMPRESS_MIN_BYTES = 1024;
 
-// Bodies too large for one call, kept for the calls that read the rest.
-const held = new Map();
-let heldBytes = 0;
+/**
+ * Requests in flight at once for one server's panels. Several panels (one
+ * per conversation) share a server, so further requests wait their turn
+ * rather than fail; past `PANEL_QUEUED_REQUESTS` waiting, they are refused.
+ */
+export const PANEL_CONCURRENT_REQUESTS = 6;
+export const PANEL_QUEUED_REQUESTS = 256;
+
+/**
+ * Each server's panel state: bodies too large for one call, kept for the
+ * calls that read the rest, and the requests in flight. Kept per server
+ * (its `services.app`), so one server's panel never reads another's.
+ */
+const panels = new WeakMap();
+function panelState(app) {
+  if (!panels.has(app))
+    panels.set(app, {
+      held: new Map(),
+      heldBytes: 0,
+      inFlight: 0,
+      waiting: [],
+    });
+  return panels.get(app);
+}
+
+/** Take a place among the requests in flight, waiting for one if need be. */
+async function acquire(state, signal) {
+  if (state.inFlight < PANEL_CONCURRENT_REQUESTS) {
+    state.inFlight += 1;
+    return;
+  }
+  if (state.waiting.length >= PANEL_QUEUED_REQUESTS)
+    throw new ToolError(
+      'retry_later',
+      'The panel has too many requests waiting',
+      {
+        retryAfterSeconds: 1,
+      },
+    );
+  await new Promise((resolve, reject) => {
+    const waiter = { resolve };
+    const abort = () => {
+      const index = state.waiting.indexOf(waiter);
+      if (index !== -1) state.waiting.splice(index, 1);
+      reject(signal.reason);
+    };
+    waiter.resolve = () => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+    state.waiting.push(waiter);
+  });
+}
+
+/** Give up a place, handing it straight to the next waiting request. */
+function releaseSlot(state) {
+  const next = state.waiting.shift();
+  if (next) next.resolve();
+  else state.inFlight -= 1;
+}
 
 function base64(bytes) {
   let binary = '';
@@ -48,6 +121,17 @@ function fromBase64(text) {
   return Uint8Array.from(atob(text), (char) => char.charCodeAt(0));
 }
 
+/** Compare a caller's key with the panel's, in time independent of where they differ. */
+function isPanelKey(given, expected) {
+  if (typeof expected !== 'string' || expected.length === 0) return false;
+  if (typeof given !== 'string' || given.length !== expected.length)
+    return false;
+  let difference = 0;
+  for (let index = 0; index < expected.length; index += 1)
+    difference |= given.charCodeAt(index) ^ expected.charCodeAt(index);
+  return difference === 0;
+}
+
 async function gzip(bytes) {
   const stream = new Blob([bytes])
     .stream()
@@ -55,26 +139,27 @@ async function gzip(bytes) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-function release(id) {
-  heldBytes -= held.get(id).bytes.length;
-  held.delete(id);
+function release(state, id) {
+  state.heldBytes -= state.held.get(id).bytes.length;
+  state.held.delete(id);
 }
 
 /** Drop held responses nobody continued in time. */
-function forgetExpired(now = Date.now()) {
-  for (const [id, entry] of held) if (entry.expires <= now) release(id);
+function forgetExpired(state, now = Date.now()) {
+  for (const [id, entry] of state.held)
+    if (entry.expires <= now) release(state, id);
 }
 
 /** Hold a response for its later parts, first making room for it. */
-function hold(id, entry) {
-  forgetExpired();
+function hold(state, id, entry) {
+  forgetExpired(state);
   // Oldest first; a response being read is renewed, so it is the newest.
-  for (const oldest of held.keys()) {
-    if (heldBytes + entry.bytes.length <= HELD_LIMIT_BYTES) break;
-    release(oldest);
+  for (const oldest of state.held.keys()) {
+    if (state.heldBytes + entry.bytes.length <= HELD_LIMIT_BYTES) break;
+    release(state, oldest);
   }
-  held.set(id, entry);
-  heldBytes += entry.bytes.length;
+  state.held.set(id, entry);
+  state.heldBytes += entry.bytes.length;
 }
 
 /** Read a response body, refusing one larger than the panel may load. */
@@ -158,6 +243,10 @@ export const panelRequest = defineTool({
   inputSchema: {
     type: 'object',
     properties: {
+      key: {
+        type: 'string',
+        description: "The panel's key, from its own page.",
+      },
       path: {
         type: 'string',
         description: "A path on the app's server, starting with /.",
@@ -179,13 +268,19 @@ export const panelRequest = defineTool({
   requires: ['app'],
   ui: { visibility: ['app'] },
   async run(args, { services, signal }) {
-    forgetExpired();
+    if (!isPanelKey(args.key, services.app.panelKey))
+      throw new ToolError(
+        'invalid_arguments',
+        "Only the God's Eye View panel may make this request",
+      );
+    const state = panelState(services.app);
+    forgetExpired(state);
     if (args.id !== undefined) {
-      const entry = held.get(args.id);
+      const entry = state.held.get(args.id);
       if (entry) {
         // Still being read: renew it, and keep it newest.
-        held.delete(args.id);
-        held.set(args.id, { ...entry, expires: Date.now() + HELD_MS });
+        state.held.delete(args.id);
+        state.held.set(args.id, { ...entry, expires: Date.now() + HELD_MS });
       }
       if (!entry)
         throw new ToolError(
@@ -206,6 +301,8 @@ export const panelRequest = defineTool({
       if (FORWARDED_REQUEST_HEADERS.includes(name.toLowerCase()))
         headers[name] = String(value);
     }
+    signal?.throwIfAborted();
+    await acquire(state, signal);
     const deadline = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     let answer;
     let bytes;
@@ -225,6 +322,8 @@ export const panelRequest = defineTool({
       if (signal?.aborted) throw error;
       if (error instanceof ToolError) throw error;
       throw new ToolError('unavailable', "The app's server did not answer");
+    } finally {
+      releaseSlot(state);
     }
     const type = answer.headers.get('content-type') || '';
     let encoding = 'identity';
@@ -245,7 +344,7 @@ export const panelRequest = defineTool({
     };
     if (bytes.length > PANEL_PART_BYTES) {
       response.id = crypto.randomUUID();
-      hold(response.id, {
+      hold(state, response.id, {
         path,
         response,
         bytes,
