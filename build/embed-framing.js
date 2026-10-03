@@ -11,6 +11,15 @@
 
 const FRAMING_HEADERS = new Set(['x-frame-options', 'content-security-policy']);
 
+/** The directives of a CSP header value, minus any frame-ancestors rule. */
+function withoutFraming(value) {
+  return String(value ?? '')
+    .split(';')
+    .map((directive) => directive.trim())
+    .filter(Boolean)
+    .filter((directive) => !/^frame-ancestors\b/i.test(directive));
+}
+
 /** Whether a request is for an embed-mode document. */
 export function isEmbedDocumentRequest(url) {
   let parsed;
@@ -43,8 +52,13 @@ export function embedFramingPlugin({
       res.setHeader = (name, value) => {
         const key = String(name).toLowerCase();
         if (!FRAMING_HEADERS.has(key)) return setHeader(name, value);
-        if (key === 'content-security-policy' && !anywhere)
-          return setHeader(name, policy);
+        if (key === 'content-security-policy') {
+          // Keep every other directive of the server's policy (script-src,
+          // connect-src, ...) and only swap the framing rule.
+          const kept = withoutFraming(value);
+          const next = anywhere ? kept : [...kept, policy];
+          return next.length ? setHeader(name, next.join('; ')) : res;
+        }
         return res;
       };
       if (!anywhere) setHeader('Content-Security-Policy', policy);

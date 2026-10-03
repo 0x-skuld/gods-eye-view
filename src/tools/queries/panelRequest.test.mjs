@@ -234,6 +234,12 @@ test('routes the panel never loads are refused in any case or encoding', async (
     '/api/%4fpenai/hud-summary',
     '/mcp',
     '/MCP',
+    // A dot after a mounted route still reaches it.
+    '/mcp.json',
+    '/MCP.json',
+    '/api/setup.json',
+    '/api/realtime.token',
+    '/api/OpenAI.x/hud-summary',
     '/@fs/etc/passwd',
     '/@vite/client',
     '/%40fs/x',

@@ -2,10 +2,46 @@
 
 ## [Unreleased]
 
+- Apply the Host check before the app's own routes. Vite installs its Host
+  check after the middleware that plugins add, so the provider and `/api`
+  routes used to answer any Host, including a DNS-rebinding name, in every
+  mode. A first-running middleware now applies the same allowed hosts on the
+  dev and preview servers.
+
+- Refuse cross-site browser requests to the cost-bearing and log endpoints
+  (`/api/realtime/token`, `/api/openai/hud-summary`,
+  `/api/google/nearby-places`, `/api/google/text-search`,
+  `/api/realtime/debug-log`): a foreign or opaque
+  Origin, a cross-site `Sec-Fetch-Site`, or proxy forwarding headers get 403,
+  while loopback tools and LAN use keep working. The dev and preview servers
+  send one shared Content-Security-Policy (James Sumpter, #242).
+
+- The voice debug log records the server's own time: a record can no longer
+  supply its `loggedAt`. The dev and preview servers also send
+  `X-Content-Type-Options: nosniff` (findings by Sunil, #710).
+
+- Keep the Host-header check when binding to all interfaces. `HOST=0.0.0.0`
+  used to accept any Host; the dev and preview servers now accept IP
+  addresses, `localhost` and the LAN hostnames listed in `GEV_ALLOWED_HOSTS`
+  (suffix and wildcard entries are ignored), which also keeps DNS-rebinding
+  names out in LAN mode. The `.local` suffix is no longer accepted by default;
+  list such a name explicitly (Puspo Aditya, #97, fixes #21).
+
+- Throttle the cost-bearing proxies by default instead of on request. The
+  OpenAI endpoints (`/api/realtime/token`, `/api/openai/hud-summary`) now allow
+  30 requests per minute per client IP and the Google Places endpoints
+  (`/api/google/nearby-places`, `/api/google/text-search`) 120 — the caps the
+  Pinokio build already ships, so the packaged app is unaffected and only an
+  unconfigured server changes, from unlimited to what the product already runs
+  with. `GEV_RATELIMIT_OPENAI_PER_MIN` and `GEV_RATELIMIT_GOOGLE_PER_MIN` still
+  override the caps, and exactly `0` disables them; a value that cannot be read
+  as a number now falls back to the default rather than to unlimited, so a typo
+  cannot silently disarm the guard (daikaginza, #683).
+
 - Tighten the local MCP server and embed mode. The panel's `panel_request`
   needs the key in its MCP server's panel page, and refuses Provider
   Settings, credential and model endpoints, `/mcp` and development server
-  routes in any letter case or encoding; panels on one server share six
+  routes in any letter case, encoding or dot suffix; panels on one server share six
   requests in flight, and further requests wait their turn. `/mcp` applies Provider Settings' proxy and sharing checks,
   requires a Host on the port it reached and an Origin from that host, and
   times out request bodies after 30 seconds; stdio honors

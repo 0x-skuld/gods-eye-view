@@ -31,6 +31,7 @@
     "modules": [
       "build/vite.js",
       "build/application-html.js",
+      "build/allowedHosts.js",
       "build/embed-framing.js",
       "build/panel.js"
     ],
@@ -74,6 +75,8 @@
       "server/providers/common/http.js",
       "scripts/google-server-key.mjs",
       "src/data/placeProviderPayloads.js",
+      "server/providers/common/same-site.js",
+      "src/localRequestGate.mjs",
       "src/data/routeSteps.js",
       "src/sources/httpBody.js",
       "src/sources/rateLimit.js"
@@ -287,6 +290,8 @@
       "src/loadingFeedback.js",
       "src/data/installationFeedback.js",
       "src/voice/voiceCost.js",
+      "server/providers/common/same-site.js",
+      "src/localRequestGate.mjs",
       "src/voice/actionSchemas.js",
       "server/providers/openai/toolDescriptions.js",
       "src/sources/rateLimit.js"
@@ -301,6 +306,7 @@
       "server/providers/common/source-root.js",
       "server/standalone/key-setup.js",
       "src/keySetupCore.mjs",
+      "src/localRequestGate.mjs",
       "server/standalone/key-setup-hardening.mjs"
     ],
     "external": []
@@ -385,7 +391,8 @@
       "src/ui/mapSource.js",
       "src/ui/mapSourceControls.js",
       "src/mapStackChips.js",
-      "src/keySetupCore.mjs"
+      "src/keySetupCore.mjs",
+      "src/localRequestGate.mjs"
     ],
     "external": []
   },
@@ -404,6 +411,7 @@
       "src/loadingFeedback.js",
       "src/data/installationFeedback.js",
       "src/keySetupCore.mjs",
+      "src/localRequestGate.mjs",
       "src/data/feedState.js",
       "src/data/layerSnapshot.js"
     ],
@@ -524,6 +532,7 @@
       "src/data/militaryAwarenessEngine.js",
       "src/data/scenePick.js",
       "src/keySetupCore.mjs",
+      "src/localRequestGate.mjs",
       "src/loadingFeedback.js",
       "src/locationStatus.js",
       "src/mapStackChips.js",
@@ -1261,6 +1270,7 @@
       "src/maps/terrain.js",
       "src/maps/terrainRetry.js",
       "src/keySetupCore.mjs",
+      "src/localRequestGate.mjs",
       "src/maps/imageryHost.js"
     ],
     "external": ["cesium"]
@@ -1506,6 +1516,7 @@
       "src/hudSummaryResponse.js",
       "src/keySetup.js",
       "src/keySetupCore.mjs",
+      "src/localRequestGate.mjs",
       "src/keylessGeocoder.js",
       "src/layers/aircraft/classification.js",
       "src/layers/alpr/index.js",

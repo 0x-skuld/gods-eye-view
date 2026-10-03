@@ -7,7 +7,8 @@
  * rebinding) and, when a browser sends an Origin, come from that same host.
  */
 
-import { hasProxySignals, isSharingEnabled } from '../../src/keySetupCore.mjs';
+import { isSharingEnabled } from '../../src/keySetupCore.mjs';
+import { hasProxySignals } from '../../src/localRequestGate.mjs';
 import { createMcpHttpHandler } from '../../src/tools/mcp/index.js';
 import { createLocalMcpServer } from './server.js';
 

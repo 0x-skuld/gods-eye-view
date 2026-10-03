@@ -136,7 +136,7 @@ map imagery, tiles and fonts load directly, from the providers the
 resource's `csp` lists. `panel_request` refuses Provider Settings
 (`/api/setup`), credential and model endpoints (`/api/realtime`,
 `/api/openai`), `/mcp` and the development server's internal routes, in any
-letter case or encoding.
+letter case, encoding or dot suffix.
 
 The panel loads the app's panel build, which `npm run build:panel` writes to
 `dist/panel` and the servers serve at `/panel/`: one app script, one
