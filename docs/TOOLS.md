@@ -241,8 +241,10 @@ claude mcp add --transport http gods-eye-view http://localhost:4173/mcp
 ```
 
 The route accepts only requests from this machine that name a loopback host
-and, when a browser sends an `Origin`, come from a loopback origin. This is
-local transport safety, not authentication. The
+on the port they reached and, when a browser sends an `Origin`, come from
+that same host. It refuses requests a proxy forwarded and refuses all
+requests while launcher sharing is on. This is local transport safety, not
+authentication. The
 local server makes no requests other than to the app's `/api` routes and the
 public feeds the sources already use.
 
