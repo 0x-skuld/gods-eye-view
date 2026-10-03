@@ -1,5 +1,45 @@
 # God's Eye View Current State
 
+## God's Eye View in conversations — October 2, 2026
+
+Tool answers that can be shown in God's Eye View include a view: camera, layers,
+style, map, marks and an aircraft or satellite to follow, written in the
+share-link format (`gods-eye-view/view`). `show_in_gods_eye_view` shows a view as live
+God's Eye View inside clients that display MCP Apps, and as a link everywhere.
+The panel runs the app's panel build (`npm run build:panel`, served at
+`/panel/`) and loads it, with its data, through the MCP server, so it works
+in Claude Desktop and in the Codex and ChatGPT desktop apps with a local
+server and no HTTPS. `?embed=1` shows the app as the globe alone and takes
+new views from the page that frames it; framing is off unless
+`GEV_EMBED_FRAME_ANCESTORS` allows the framing page. MCP leads with the tools that find
+what to show. See [tools and the MCP server](TOOLS.md).
+
+## Tools and local MCP server — October 1, 2026
+
+`gods-eye-view/tools` defines queries that answer questions from the app's data,
+and `gods-eye-view/tools/mcp` exposes a composed catalog over the Model Context
+Protocol. `npm run mcp` serves Core's tools over stdio to a local MCP client,
+reading from a running app's `/api` routes (default `http://localhost:4173`).
+The development and preview servers also serve the tools over HTTP at `/mcp`,
+accepting only direct local requests: a loopback host on the port reached,
+an `Origin` (when sent) from that same host, no proxy forwarding headers, and
+launcher sharing off.
+Queries cover earthquakes, active fires, recent launches, aircraft (in an
+area, by identifier, tracks, and type and route lookups), ships (in an area,
+by identifier, and tracks), satellites (next
+pass over a point, and those overhead now), public cameras (including a
+camera's current image), license plate reader cameras, radio stations, place search, routing, bike-share
+stations, transit vehicles, road traffic flow, weather, weather map images
+(radar, satellite, lightning), wind, the most recent satellite image of an
+area, submarine cables, datacenters and dams, the Bhote Koshi flood event pack, regional briefs, tropical cyclones, fire
+perimeters, terrain height, military installations and map features, plus a
+combined situation brief, military awareness around a point, the app's heads-up display caption, and a link that
+opens the app over an area. Tools reuse the layers' portable source factories, take a
+shared `area` argument (place name, bounding box, or point and radius) and cap
+lists at 25 rows by default. Voice offers the same queries next to its app
+actions: the session lists them, and the browser runs them through the same
+catalog, loaded on first use. See [tools and the MCP server](TOOLS.md).
+
 ## Cyber HUD — September 30, 2026
 
 Display > HUD > Layout includes Cyber, also available through the HUD voice
@@ -891,9 +931,20 @@ errors.
 ## Places and CCTV request bounds
 
 With a Google key configured, nearby and text search reject missing, blank,
-non-numeric and out-of-range coordinates before the opt-in limiter and upstream
+non-numeric and out-of-range coordinates before the per-IP limiter and upstream
 request. Text search also requires a nonblank query. Keyless requests retain
 their `configured: false` response.
+
+The cost-bearing proxies are throttled per client IP without configuration:
+`/api/realtime/token` and `/api/openai/hud-summary` share 30 requests per
+minute per IP, `/api/google/nearby-places` and `/api/google/text-search` share
+120 — the caps the Pinokio build already sets, so the packaged app is
+unaffected. `GEV_RATELIMIT_OPENAI_PER_MIN` and `GEV_RATELIMIT_GOOGLE_PER_MIN` override
+those; exactly `0` disables the limiter, while a value that cannot be read as a
+number falls back to the default rather than to unlimited. Over-limit requests
+receive a sanitized `429` with `Retry-After: 5` and never reach the provider.
+The client key is the socket peer address only — a forwarded-for header is not
+trusted, so a proxied deployment shares one bucket per upstream hop.
 
 CCTV media waits at most 15 seconds for upstream response headers and returns
 504 on timeout. Its timer stops when headers arrive, so live bodies can continue
