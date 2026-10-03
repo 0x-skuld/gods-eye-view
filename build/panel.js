@@ -62,7 +62,7 @@ const CONTENT_TYPES = {
 
 /**
  * Vite plugin serving the panel build at PANEL_BASE on the dev server, as
- * the preview server and hosted deployments serve it from the build output.
+ * the preview server and production builds serve it from the build output.
  */
 export function panelBuildPlugin({ outDir = PANEL_OUT_DIR } = {}) {
   return {

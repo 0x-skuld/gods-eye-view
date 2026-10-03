@@ -1,5 +1,14 @@
 # Changelog
 
+- Show God's Eye View inside AI conversations. Answers that can be shown
+  include a view (camera, layers, style, map, marks, something to follow),
+  and `show_in_gods_eye_view` displays it as the live globe in clients that
+  support MCP Apps, such as Claude Desktop and the Codex and ChatGPT desktop
+  apps, and as a link everywhere else. The panel loads the app's panel build
+  (`npm run build:panel`) and its data through the MCP server, so a local
+  server needs no HTTPS or tunnel. `?embed=1` shows the globe alone for pages
+  that frame the app.
+
 - Add tools for language-model clients and a local MCP server, served over
   stdio by `npm run mcp` and over HTTP at `/mcp` on the development and preview
   servers for local requests only. `npm run mcp`

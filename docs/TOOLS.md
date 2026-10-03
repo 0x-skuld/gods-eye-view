@@ -125,7 +125,7 @@ never requests the app's server itself. It loads everything from the app's
 own paths through `panel_request`, a tool only the panel may call
 (`_meta.ui.visibility: ["app"]`): the MCP server requests the path from the
 app's server and returns the response, compressed and in parts when large.
-The same path works for a local server, a hosted one, and every host. Only
+The same path works in every host. Only
 map imagery, tiles and fonts load directly, from the providers the
 resource's `csp` lists. `panel_request` refuses `/api/setup`, which writes
 provider keys.

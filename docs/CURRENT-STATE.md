@@ -6,9 +6,12 @@ Tool answers that can be shown in God's Eye View include a view: camera, layers,
 style, map, marks and an aircraft or satellite to follow, written in the
 share-link format (`gods-eye-view/view`). `show_in_gods_eye_view` shows a view as live
 God's Eye View inside clients that display MCP Apps, and as a link everywhere.
-`?embed=1` shows the app as the globe alone and takes new views from the page
-that frames it. MCP leads with the tools that find what to show. See
-[tools and the MCP server](TOOLS.md).
+The panel runs the app's panel build (`npm run build:panel`, served at
+`/panel/`) and loads it, with its data, through the MCP server, so it works
+in Claude Desktop and in the Codex and ChatGPT desktop apps with a local
+server and no HTTPS. `?embed=1` shows the app as the globe alone and takes
+new views from the page that frames it. MCP leads with the tools that find
+what to show. See [tools and the MCP server](TOOLS.md).
 
 ## Tools and local MCP server — October 1, 2026
 
