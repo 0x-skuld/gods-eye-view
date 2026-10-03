@@ -91,7 +91,8 @@ aircraft or satellite to follow. `createView` builds and bounds one,
 `viewToParams` and `viewFromParams` write and read it in the share-link
 format the app restores, and `viewUrl` gives the address that opens it. The
 style names are the ones share links use. Ships cannot be followed from a
-link yet.
+link yet. An aircraft's `follow` may ask for its cockpit view
+(`cockpit: true`); links cannot carry that and open the app following it.
 
 A view can also carry `annotations`, the marks the app's `annotate_map`
 action draws (pins, highlights, areas, arrows, routes and labels at a place
@@ -156,8 +157,10 @@ an app-only tool with `ui: { visibility: ['app'] }`;
 and setup prompts hidden; provider attribution stays. A page that frames it
 changes the view by posting `{ type: 'gev:view', id, view }` to the frame.
 The app applies it through its own actions (style, map, exactly the view's
-layers, annotations, the camera, then the followed entity, retried until its
-layer has it) and answers `{ type: 'gev:view-applied', id, ok, steps }`. It
+layers, annotations, then the followed entity, retried until its layer has
+it, or the camera when nothing is followed or the entity is not there yet,
+since a camera flight would end the follow; then cockpit view when asked) and
+answers `{ type: 'gev:view-applied', id, ok, steps }`. It
 posts `{ type: 'gev:ready' }` once it can take views, and only its parent
 page can send them. See `src/app/embed.js`.
 

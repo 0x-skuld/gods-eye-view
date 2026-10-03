@@ -471,8 +471,8 @@ export function panelRuntime(config) {
         location.href.split('#')[0] + new URL(url).hash,
       );
       // The app restores this view from its link, following included, so
-      // it must not be applied again: flying there would end the follow.
-      if (queued === view) queued = null;
+      // it needs applying again only for what links cannot carry: cockpit.
+      if (queued === view && !view.follow?.cockpit) queued = null;
     } catch {
       // The view still arrives once the app is ready.
     }

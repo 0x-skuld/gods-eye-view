@@ -185,25 +185,36 @@ export async function applyView(
   await act('clear_annotations', {});
   if (view.annotations.length)
     await act('annotate_map', { annotations: [...view.annotations] });
-  steps.push({ step: 'camera', ok: await flyTo(viewer, view.camera) });
-  if (view.follow) {
-    // The followed entity appears once its layer has data; retry until then.
-    const args = {
-      query: view.follow.id,
-      layerId: FOLLOW_LAYERS[view.follow.kind],
-    };
-    let followed = false;
-    for (let attempt = 0; attempt < FOLLOW_ATTEMPTS && !followed; attempt++) {
-      if (signal?.aborted) break;
-      try {
-        followed = (await run('track_entity', args))?.ok === true;
-      } catch {
-        followed = false;
-      }
-      if (!followed) await delay(retryMs, signal);
-    }
-    steps.push({ step: 'follow', ok: followed });
+  if (!view.follow) {
+    steps.push({ step: 'camera', ok: await flyTo(viewer, view.camera) });
+    return steps;
   }
+  // A followed entity owns the camera, and a camera flight would end the
+  // follow, so fly to the view only while the entity is not there yet. It
+  // appears once its layer has data; retry until then.
+  const layerId = FOLLOW_LAYERS[view.follow.kind];
+  const follow = async () => {
+    try {
+      return (
+        (await run('track_entity', { query: view.follow.id, layerId }))?.ok ===
+        true
+      );
+    } catch {
+      return false;
+    }
+  };
+  let followed = await follow();
+  if (!followed) {
+    steps.push({ step: 'camera', ok: await flyTo(viewer, view.camera) });
+    for (let attempt = 1; attempt < FOLLOW_ATTEMPTS && !followed; attempt++) {
+      if (signal?.aborted) break;
+      await delay(retryMs, signal);
+      followed = await follow();
+    }
+  }
+  steps.push({ step: 'follow', ok: followed });
+  if (followed && view.follow.cockpit)
+    await act('control_cockpit', { action: 'enter', targetLayer: layerId });
   return steps;
 }
 

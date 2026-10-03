@@ -283,3 +283,30 @@ test('a panel reports a render error in full and stops drawing', () => {
     console.error = original;
   }
 });
+
+test('a followed aircraft owns the camera, and cockpit view is entered after it', async () => {
+  const viewer = fakeViewer();
+  const { calls, run } = recorder();
+  const steps = await applyView(
+    createView({
+      camera: { lat: 32.7, lon: -117.2 },
+      follow: { kind: 'military_aircraft', id: 'AE1234', cockpit: true },
+    }),
+    { viewer, dataManager: fakeLayers(new Set()), run, retryMs: 0 },
+  );
+  // Following worked at once, so no camera flight ended it.
+  assert.equal(viewer.flights.length, 0);
+  assert.deepEqual(calls.slice(-2), [
+    ['track_entity', { query: 'ae1234', layerId: 'military' }],
+    ['control_cockpit', { action: 'enter', targetLayer: 'military' }],
+  ]);
+  assert.ok(steps.every((step) => step.ok));
+  assert.throws(
+    () =>
+      createView({
+        camera: { lat: 0, lon: 0 },
+        follow: { kind: 'satellite', id: '25544', cockpit: true },
+      }),
+    /no cockpit view/,
+  );
+});

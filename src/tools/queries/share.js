@@ -85,8 +85,8 @@ export const showInGodsEyeView = defineTool({
     "God's Eye View globe in the conversation; everywhere, a link that opens " +
     'it. Pass the view another answer returned, or describe one: an area ' +
     'framed from above or a camera position, with chosen data layers, visual ' +
-    'style and map, optionally following an aircraft or satellite and with ' +
-    'marks drawn on the map.',
+    'style and map, optionally following an aircraft (or riding in its ' +
+    'cockpit view) or a satellite, and with marks drawn on the map.',
   inputSchema: {
     type: 'object',
     properties: VIEW_ARGUMENTS,

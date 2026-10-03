@@ -48,11 +48,13 @@ const FOLLOWABLE = Object.freeze({
     layer: 'flights',
     owner: 'flights',
     key: 'selectedFlightsTrackingId',
+    cockpit: true,
   },
   military_aircraft: {
     layer: 'military',
     owner: 'flights',
     key: 'selectedMilitaryTrackingId',
+    cockpit: true,
   },
   satellite: {
     layer: 'satellites',
@@ -169,6 +171,12 @@ export const VIEW_PROPERTIES = Object.freeze({
     properties: {
       kind: { type: 'string', enum: [...VIEW_FOLLOW_KINDS] },
       id: { type: 'string', pattern: '^[0-9A-Za-z~_-]{1,16}$' },
+      cockpit: {
+        type: 'boolean',
+        description:
+          "Show the aircraft's cockpit view instead of following it from " +
+          'outside. Aircraft only; links open the app following it.',
+      },
     },
     required: ['kind', 'id'],
     additionalProperties: false,
@@ -253,6 +261,8 @@ export function createView({
   const followed = follow ? FOLLOWABLE[follow.kind] : null;
   if (follow && !followed)
     throw new TypeError(`Cannot follow a ${follow.kind}`);
+  if (follow?.cockpit === true && !followed.cockpit)
+    throw new TypeError(`A ${follow.kind} has no cockpit view`);
   const enabled = new Set(
     layers.filter((layer) => REGISTERED_LAYER_IDS.includes(layer)),
   );
@@ -276,6 +286,7 @@ export function createView({
       ? Object.freeze({
           kind: follow.kind,
           id: String(follow.id).toLowerCase(),
+          ...(follow.cockpit === true ? { cockpit: true } : {}),
         })
       : null,
     annotations: Object.freeze(
