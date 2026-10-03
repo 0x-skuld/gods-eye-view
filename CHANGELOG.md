@@ -10,7 +10,8 @@
 
 - Refuse cross-site browser requests to the cost-bearing and log endpoints
   (`/api/realtime/token`, `/api/openai/hud-summary`,
-  `/api/google/nearby-places`, `/api/realtime/debug-log`): a foreign or opaque
+  `/api/google/nearby-places`, `/api/google/text-search`,
+  `/api/realtime/debug-log`): a foreign or opaque
   Origin, a cross-site `Sec-Fetch-Site`, or proxy forwarding headers get 403,
   while loopback tools and LAN use keep working. The dev and preview servers
   send one shared Content-Security-Policy (James Sumpter, #242).

@@ -178,6 +178,8 @@ export function googlePlacesContextProxy({
     // a view-biased Text Search lands on the actual feature. Same key, field
     // mask, throttle, and `places: []` error contract as nearby-places above.
     middlewares.use('/api/google/text-search', async (req, res) => {
+      // Paid like nearby-places, so gated the same way, first.
+      if (admitSameSite(req, res)) return;
       if (req.method !== 'GET') {
         res.statusCode = 405;
         res.setHeader('Content-Type', 'application/json');
