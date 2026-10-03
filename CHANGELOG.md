@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+## [0.2.0] — 2026-10-02 — God's Eye View through Your Agent
+
 - Show God's Eye View inside AI conversations. Answers that can be shown
   include a view (camera, layers, style, map, marks, something to follow),
   and `show_in_gods_eye_view` displays it as the live globe in clients that
@@ -206,7 +210,7 @@
   (`src/ui/imagerySplit.js`, `src/maps/imageryComparison.js`), and
   `MapSourceController.subscribe()` reports every settled map switch.
 
-## Unreleased — local receiver feeds
+### Local receiver feeds
 
 - The Local ADS-B layer also reads local 1090 MHz and 978 MHz UAT decoder
   feeds: the `aircraft.json` that dump1090-fa, readsb, tar1090 or skyaware978
@@ -235,7 +239,7 @@
 - Records carry `band` (`1090`/`978`) and `source` (`webusb`/`feed`).
 - See `docs/LOCAL-RECEIVERS.md`.
 
-## Unreleased — local RTL-SDR and Local ADS-B
+### Local RTL-SDR and Local ADS-B
 
 - Add a Local RTL-SDR card to the Radio panel. It connects a USB RTL-SDR in
   desktop Chrome or Edge through WebUSB and receives broadcast FM (tune, seek,
@@ -260,7 +264,7 @@
 - Add `@jtarrio/webrtlsdr` and `@jtarrio/signals` (Apache-2.0); see
   `THIRD_PARTY_NOTICES.md`.
 
-## Unreleased — weather review
+### Weather review
 
 - On 3D Tiles, draw a 4096×2048 detail window around the view on each
   observed-weather shell except global infrared, sampled by the shell's own
@@ -526,26 +530,26 @@ Analyst records for loaded satellites, datacenters and dams, with explicit bound
 
 - Split application scene, controls, catalog, tools and HTML into reusable components; configure application request services and sources without changing global fetch. Preserve standalone markup and voice behavior. Explicit annotation navigation may resolve a distant named target.
 
-## Satellite pass prediction
+### Satellite pass prediction
 
 - Bisect pass rise/set to ~0.2 s and fit peak elevation with a parabola.
 - Mark passes visible from Earth-shadow and civil-twilight checks.
 - Add `getNextSatellitePass(noradId, options)` for any loaded catalog satellite.
 - `next_iss_pass` retains the next geometric pass and adds visibility metadata. `next_satellite_pass` adds bounded loaded-catalog name/NORAD lookup and optional visible-only filtering (Rehaan Delmotra, #451; maintainer adaptation).
 
-## Voice component boundaries
+### Voice component boundaries
 
 - Separate voice controls, Realtime connection requests and the action runner.
 - Allow compatible endpoints and server-selected models through construction options.
 - Cancel pending token/SDP requests on Stop or teardown and reject expired secrets.
 
-## Configurable geospatial services
+### Configurable geospatial services
 
 - Compose geocoding, place context and routes through independent providers.
 - Allow compatible endpoint configuration without changing voice tools or annotation behavior.
 - Isolate configured source caches and reject results after cancellation.
 
-## ALPR camera locations
+### ALPR camera locations
 
 - Port Manjunath's (@manjunath22466) cyan camera badges, coral selection brackets,
   gradient direction wedges and animated tactical labels into the reusable ALPR
@@ -565,32 +569,32 @@ Analyst records for loaded satellites, datacenters and dams, with explicit bound
 - Separate the request adapter, camera model, presentation, and instance lifecycle.
   Source cancellation also guards late response bodies and rejects invalid query bounds.
 
-## Release disabled infrastructure rendering
+### Release disabled infrastructure rendering
 
 - Remove built Data Center, Dam and Submarine Cable entities when their layers
   are disabled, avoiding retained visualizer work and entity memory.
 - Keep parsed datasets cached for re-enable; rebuild entities without refetching.
 
-## Camera layer components
+### Camera layer components
 
 - Separate camera source requests, placement, frames, projection, cards and calibration.
 - Own visibility listeners and pending initialization within each layer lifetime.
 - Preserve existing camera catalogs, URL families, geometry and playback behavior.
 
-## Traffic and bikeshare components
+### Traffic and bikeshare components
 
 - Separate traffic loading, animation, styling and lifecycle into factory-owned components.
 - Give each flow source its own bounded decode cache and cancellation checks.
 - Separate bikeshare registry, station requests, rendering, selection and proximity handling.
 
-## Installation and context components
+### Installation and context components
 
 - Separate mapped-site requests, records, placement, selection and viewport lifecycle.
 - Separate proximity queries, subject tracking, navigation/history, panel and direction rendering.
 - Retain source and ground-floor ownership in standalone composition; reject malformed
   installation snapshots and ignore failures from cancelled requests.
 
-## Satellite and mission layer components
+### Satellite and mission layer components
 
 - Separate catalog loading, orbit calculations, display, tracking and interaction
   into instance-owned satellite components.
@@ -598,20 +602,20 @@ Analyst records for loaded satellites, datacenters and dams, with explicit bound
   operations, retaining existing layer controls and satellite coordination.
 - Cancel late mission source work and reject malformed launch snapshots.
 
-## Fire layer components
+### Fire layer components
 
 - Split fire source loading, state, rendering, cards, selection and viewport work
   into reusable components with application-owned scene services.
 - Cancel late refreshes, retain good data after malformed responses, and preserve
   selection identity without repeating a user-selection notification on refresh.
 
-## Earthquake components
+### Earthquake components
 
 - Separate earthquake snapshot loading, record validation, and display ownership.
 - Cancel pending earthquake refreshes on disable or destruction, retaining the
   last good snapshot after malformed or failed refreshes.
 
-## September 8, 2026
+### September 8, 2026
 
 Earthquake refreshes validate the complete feed and construct replacement entities before clearing the previous snapshot. Malformed rows and duplicate rendered IDs retain the last good entities, overlays, count and timestamp and report a malformed response; unknown magnitude is excluded from M2.5+ rendering.
 
@@ -622,7 +626,7 @@ Launch payloads with missing records now say PAYLOAD DATA UNAVAILABLE. Missing n
 This changelog records public product changes. For the authoritative description
 of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md).
 
-## [Unreleased]
+### Other changes
 
 
 - Add ECMWF IFS model selection to Wind (#464, thanks @beneduzi), with model-scoped forecast-step caches, cancellation of replaced requests, and separate issue/valid timestamps.
@@ -643,7 +647,7 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 
 - Separate submarine cable sources and rendering components, and export bundled geography lookup modules.
 
-### Added
+#### Added
 
 - DISPLAY ▸ Draw: draw on the world by hand. Pick Area, Line or Pin, click the
   vertices, double-click or press Enter to finish, label and colour it; Backspace
@@ -653,7 +657,7 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   together. While you are drawing, the draw tool owns the pointer and no layer
   selects what you click through (#235 — thanks @cora-fresh-labs).
 
-### Fixed
+#### Fixed
 
 - Keep traffic-road bounds crossing the antimeridian monotonic and inside the
   longitude range accepted by the Overpass request path, preserving the small
@@ -720,7 +724,7 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   toggle. Camera departure cancels pending work, arrival checks the final view,
   and superseded requests cannot keep a newer view loading.
 
-### Added
+#### Added
 
 - Add MODIS NRT (Terra+Aqua, ~1 km) active fires to the FIRMS layer, sharing the
   existing `FIRMS_MAP_KEY` and 30-minute cache.
@@ -848,9 +852,9 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 - Extract shared surface keyboard handling for the welcome launcher and Provider
   Settings, preserving Tab/Escape behavior and releasing the listener on teardown.
 
-### Added
+#### Added
 
-### Security
+#### Security
 
 - The CCTV media route no longer forwards a client `Range` header to the upstream
   camera host as it arrived. A single `bytes=` range is canonicalized and
@@ -881,7 +885,7 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 
 - Cancel the active location lookup when its controls are disposed.
 
-### Fixed
+#### Fixed
 
 - `DATA_SOURCES.md` states what the project does with camera frame content: a
   successful upstream response is relayed as the provider served it, nothing in
@@ -960,7 +964,7 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   fetching, AIS records/tracks and shared request helpers; preserve existing
   routes, local setup, fallback behavior and rendering.
 
-### Added
+#### Added
 
 - **Directions layer** — keyless A→B directions without a geocoder or a
   microphone (thanks @spcpza). The row's chips arm a globe click for A and B
@@ -988,7 +992,7 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   voice routes since launch, previously uncredited), with the OpenStreetMap
   credit and the "fix the map" link the service's usage policy asks for.
 
-### Changed
+#### Changed
 
 - The interface asks Google Fonts for only the icon glyphs it draws, instead of
   the whole variable icon font, and no longer requests a second icon family that
@@ -1003,7 +1007,7 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 - Rename standalone browser startup to `src/standalone/` and add a Node-only
   `gods-eye-view/build/vite` export with checked package ownership.
 
-### Development
+#### Development
 
 - The CCTV launcher and preview-server tests resolve their temporary fixture
   root through `fs.realpath`, so they pass on macOS, where the system temp
@@ -1037,7 +1041,7 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   infrastructure modules and their consumer tests. Package boundary checks keep
   those exports separate from app startup and local Node services.
 
-### Fixed
+#### Fixed
 
 - Reduce terrain-height timeouts when Re:Earth slows down. Batches are
   sized against measured response latency on both browser and server to reduce
@@ -1128,7 +1132,7 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   and upstream error bodies; response statuses and cache fallback remain intact.
   Includes the security fixes contributed by Tom-Neverwinter in PR #171.
 
-### Fixed
+#### Fixed
 
 - Map Source keyboard opening retries focus until the selected tile is visible.
   Leaving the disclosure, pointer interaction, or closing the tray cancels the
@@ -1170,7 +1174,7 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   that had since recovered. A miss is now cached only when every source
   consulted actually returned a verdict.
 
-### Added
+#### Added
 
 - Keyless place search. The LOCATION search box and the `fly_to_location` voice
   tool now resolve place names through Photon (komoot, over OpenStreetMap) when
