@@ -54,7 +54,11 @@ async function respond(server, line, log) {
   }
   const described = describeRequest(message);
   if (described) log(described);
-  return server.handle(message);
+  const response = await server.handle(message);
+  // A failed tool call answers the client, not the log; say why here too.
+  if (response?.result?.isError)
+    log(`   ${described} failed: ${response.result.content?.[0]?.text}`);
+  return response;
 }
 
 /** Read `--api-base <url>` from command-line arguments. */

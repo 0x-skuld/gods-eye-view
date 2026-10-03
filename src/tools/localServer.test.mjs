@@ -104,3 +104,30 @@ test('the stdio log names methods, tools and resources but never arguments', asy
   );
   assert.equal(describeRequest({ result: {} }), null);
 });
+
+test('a failed tool call is logged with its reason', async () => {
+  const server = {
+    handle: async (message) => ({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: { isError: true, content: [{ type: 'text', text: 'bad area' }] },
+    }),
+  };
+  const input = new PassThrough();
+  const output = new PassThrough();
+  output.resume();
+  const logged = [];
+  const served = serveStdio(server, {
+    input,
+    output,
+    log: (line) => logged.push(line),
+  });
+  input.end(
+    '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"show_in_gods_eye_view"}}\n',
+  );
+  await served;
+  assert.deepEqual(logged, [
+    'tools/call show_in_gods_eye_view',
+    '   tools/call show_in_gods_eye_view failed: bad area',
+  ]);
+});
