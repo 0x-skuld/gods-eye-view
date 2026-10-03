@@ -1,7 +1,8 @@
 /**
  * Key setup ("POWER UP") — the pure core.
  *
- * One registry, three pure functions, zero dependencies. The dev server's
+ * One registry and pure functions; its only import is the proxy-header check
+ * shared with the other local gates (localRequestGate.mjs). The dev server's
  * /api/setup endpoints (vite.config.js) and the in-app panel (keySetup.js)
  * are both thin shells over this module, so what a key is called, what it
  * unlocks, and how a .env line is written each live in exactly one place.
@@ -10,6 +11,8 @@
  * pass environments in and write text out, which is also what makes every
  * behavior below unit-testable.
  */
+
+import { hasProxySignals } from './localRequestGate.mjs';
 
 /** Longest accepted key/token value. Real provider keys are all far shorter. */
 export const KEY_SETUP_VALUE_LIMIT = 512;
@@ -182,30 +185,6 @@ export function parseWindowsUserSid(stdout) {
   return /^(?:S-1-5-21-(?:\d+-){3}\d+|S-1-12-1-(?:\d+-){3}\d+)$/i.test(sid)
     ? sid
     : null;
-}
-
-/** Headers that reverse proxies, tunnels and CDNs add to a request. */
-export const PROXY_SIGNAL_HEADERS = Object.freeze([
-  'forwarded',
-  'via',
-  'x-forwarded-for',
-  'x-forwarded-host',
-  'x-forwarded-port',
-  'x-forwarded-proto',
-  'x-real-ip',
-  'cf-connecting-ip',
-  'cf-ray',
-]);
-
-/**
- * Whether a request carries reverse-proxy or CDN forwarding headers, so it
- * did not originate on this machine whatever its socket says. `headers` is
- * keyed by lower-case header name.
- */
-export function hasProxySignals(headers = {}) {
-  return PROXY_SIGNAL_HEADERS.some(
-    (name) => String(headers[name] || '').trim() !== '',
-  );
 }
 
 /**

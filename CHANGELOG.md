@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- Refuse cross-site browser requests to the cost-bearing and log endpoints
+  (`/api/realtime/token`, `/api/openai/hud-summary`,
+  `/api/google/nearby-places`, `/api/realtime/debug-log`): a foreign or opaque
+  Origin, a cross-site `Sec-Fetch-Site`, or proxy forwarding headers get 403,
+  while loopback tools and LAN use keep working. The dev and preview servers
+  send one shared Content-Security-Policy (James Sumpter, #242).
+
 - The voice debug log records the server's own time: a record can no longer
   supply its `loggedAt`. The dev and preview servers also send
   `X-Content-Type-Options: nosniff` (findings by Sunil, #710).

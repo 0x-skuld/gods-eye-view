@@ -21,10 +21,9 @@
  */
 /**
  * Reverse-proxy / CDN forwarding headers. Their presence means the request did
- * not originate on this machine, whatever its socket says. Kept as this
- * module's own list (keySetupCore.mjs carries the same nine names for the
- * credential panel) so the gate has no imports and can sit in any package
- * boundary.
+ * not originate on this machine, whatever its socket says. This module owns
+ * the list for every local gate (the credential panel and /mcp import
+ * `hasProxySignals`), and has no imports so it can sit in any package boundary.
  */
 export const PROXY_SIGNALS = Object.freeze([
   'forwarded',
@@ -37,6 +36,16 @@ export const PROXY_SIGNALS = Object.freeze([
   'cf-connecting-ip',
   'cf-ray',
 ]);
+
+/**
+ * Whether a request carries reverse-proxy or CDN forwarding headers. `headers`
+ * is keyed by lower-case header name.
+ */
+export function hasProxySignals(headers = {}) {
+  return PROXY_SIGNALS.some(
+    (name) => String(headers[name] || '').trim() !== '',
+  );
+}
 
 /**
  * Compute a request's own authority (an origin string) from its protocol and
@@ -90,9 +99,7 @@ export function admitSameSiteRequest({
 } = {}) {
   // (1) A request carrying reverse-proxy / CDN forwarding headers did not
   // originate on this machine, whatever its socket says.
-  if (
-    PROXY_SIGNALS.some((name) => String(proxyHeaders[name] || '').trim() !== '')
-  ) {
+  if (hasProxySignals(proxyHeaders)) {
     return {
       ok: false,
       status: 403,
