@@ -58,6 +58,22 @@
   only to the origin that sent the view. SECURITY.md describes the MCP surface
   and the panel's browser keys.
 
+- Cockpit now enters on the existing matching map style while keeping one fixed,
+  duplicate-free carousel over `Normal / CRT / NVG / FLIR / Anime / Noir / Snow`.
+  Normal remains a real unfiltered option; Cockpit-only choices still restore
+  the captured map style through both Exit Cockpit and Reset.
+- Cyber's compact right-rail and Cockpit utility buttons now center their glyphs
+  vertically and share the same inset and edge alignment.
+- Keep Cyber Voice help/error popups and Location/Visual Presets pins clear of
+  their decorative frames. Leave space above attribution for its full logo row.
+- Add an intentionally future-facing, opt-in panel surface contract for new
+  panels to inherit compatible Normal, Cyber and Cockpit styling. Its first
+  production adopter will land separately after this change.
+- Restore the user's previous visual preset when they explicitly switch from
+  Cyber to another HUD layout, without overriding scene or shared-link state.
+- Move the aligned Cyber side-panel rails upward on desktop so the left stack
+  clears the lower coordinate card; keep Cockpit's independent visor layout.
+
 ## [0.2.0] — 2026-10-02 — God's Eye View through Your Agent
 
 - Show God's Eye View inside AI conversations. Answers that can be shown
