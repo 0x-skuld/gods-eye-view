@@ -51,7 +51,10 @@ test('build helper does not discover environment values or construct local provi
       config.define['import.meta.env.GOOGLE_MAPS_API_KEY'],
       undefined,
     );
-    assert.equal(config.plugins.length, 2);
+    assert.deepEqual(
+      config.plugins.slice(2).map((plugin) => plugin.name),
+      ['embed-framing', 'panel-build'],
+    );
   } finally {
     if (before === undefined) delete process.env.GOOGLE_MAPS_API_KEY;
     else process.env.GOOGLE_MAPS_API_KEY = before;
@@ -63,11 +66,15 @@ test('root config retains existing named exports and standalone provider order',
     assert.equal(compatibility[name], value, name);
   const config = standaloneConfig({ mode: 'test' });
   assert.deepEqual(
-    config.plugins.slice(2, -1).map((plugin) => plugin.name),
+    config.plugins.slice(2, -4).map((plugin) => plugin.name),
     providers.localProviderPlugins().map((plugin) => plugin.name),
   );
-  assert.equal(config.plugins.at(-2).name, 'gev-key-setup');
-  assert.equal(config.plugins.at(-1).name, 'api-not-found');
+  assert.equal(config.plugins.at(-5).name, 'gev-key-setup');
+  // The local MCP route follows every provider and precedes the API fallback.
+  assert.equal(config.plugins.at(-4).name, 'local-mcp');
+  assert.equal(config.plugins.at(-3).name, 'api-not-found');
+  assert.equal(config.plugins.at(-2).name, 'embed-framing');
+  assert.equal(config.plugins.at(-1).name, 'panel-build');
 });
 
 test('build export resolves in Node and has no browser fallback', async () => {
@@ -77,4 +84,55 @@ test('build export resolves in Node and has no browser fallback', async () => {
     readFileSync(new URL('../../package.json', import.meta.url)),
   );
   assert.deepEqual(pkg.exports['./build/vite'], { node: './build/vite.js' });
+});
+
+test('only embed-mode documents may be framed, and only by the allowed ancestors', async () => {
+  const { embedFramingPlugin, isEmbedDocumentRequest } =
+    await import('../../build/embed-framing.js');
+  assert.equal(isEmbedDocumentRequest('/?embed=1'), true);
+  assert.equal(isEmbedDocumentRequest('/index.html?embed=1#v=2'), true);
+  assert.equal(isEmbedDocumentRequest('/?embed=0'), false);
+  assert.equal(isEmbedDocumentRequest('/api/x?embed=1'), false);
+  assert.equal(isEmbedDocumentRequest('/src/main.js?embed=1'), false);
+  let middleware;
+  embedFramingPlugin({ ancestors: 'https://a.example' }).configureServer({
+    middlewares: { use: (handler) => (middleware = handler) },
+  });
+  const response = () => {
+    const headers = new Map();
+    return {
+      headers,
+      setHeader(name, value) {
+        headers.set(name.toLowerCase(), value);
+        return this;
+      },
+    };
+  };
+  const embedded = response();
+  middleware({ url: '/?embed=1' }, embedded, () => {});
+  // The server's protections, written later at send time.
+  embedded.setHeader('X-Frame-Options', 'DENY');
+  embedded.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+  embedded.setHeader('Content-Type', 'text/html');
+  assert.deepEqual(Object.fromEntries(embedded.headers), {
+    'content-security-policy': 'frame-ancestors https://a.example',
+    'content-type': 'text/html',
+  });
+  let open;
+  embedFramingPlugin({ ancestors: '*' }).configureServer({
+    middlewares: { use: (handler) => (open = handler) },
+  });
+  const anywhere = response();
+  open({ url: '/?embed=1' }, anywhere, () => {});
+  anywhere.setHeader('X-Frame-Options', 'DENY');
+  anywhere.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+  assert.deepEqual(Object.fromEntries(anywhere.headers), {});
+  const normal = response();
+  middleware({ url: '/' }, normal, () => {});
+  normal.setHeader('X-Frame-Options', 'DENY');
+  normal.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+  assert.deepEqual(Object.fromEntries(normal.headers), {
+    'x-frame-options': 'DENY',
+    'content-security-policy': "frame-ancestors 'none'",
+  });
 });

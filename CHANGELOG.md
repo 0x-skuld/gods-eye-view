@@ -1,5 +1,29 @@
 # Changelog
 
+- Show God's Eye View inside AI conversations. Answers that can be shown
+  include a view (camera, layers, style, map, marks, something to follow),
+  and `show_in_gods_eye_view` displays it as the live globe in clients that
+  support MCP Apps, such as Claude Desktop and the Codex and ChatGPT desktop
+  apps, and as a link everywhere else. The panel loads the app's panel build
+  (`npm run build:panel`) and its data through the MCP server, so a local
+  server needs no HTTPS or tunnel. `?embed=1` shows the globe alone for pages
+  that frame the app.
+
+- Add tools for language-model clients and a local MCP server, served over
+  stdio by `npm run mcp` and over HTTP at `/mcp` on the development and preview
+  servers for local requests only. `npm run mcp`
+  serves earthquake, active-fire, launch, aircraft, ship, satellite, camera, radio,
+  place, routing, bike-share, transit, traffic, weather, cyclone, fire-perimeter,
+  terrain, installation and map-feature queries, plus a situation brief, over
+  stdio to clients such as Claude Code, reading
+  from a running app. Tools are defined
+  once in `gods-eye-view/tools`, reuse the layers' source factories, and are
+  exposed through the protocol adapter in `gods-eye-view/tools/mcp`. The
+  catalog also covers weather maps, wind, recent imagery, submarine cables,
+  license plate reader cameras, datacenters and dams, the Bhote Koshi flood,
+  military awareness and links that open the app over an area with layers on.
+  Voice offers the same queries next to its app actions.
+
 - Public Overpass instances are no longer used by default. Street Traffic
   roads come from TomTom flow tiles, OpenFreeMap vector tiles, or both, chosen
   on the layer row (TomTom / OSM / Hybrid) or with `?trafficRoads=`. With a

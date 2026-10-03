@@ -93,8 +93,16 @@ export function nameMilitaryFragment(fragment, names) {
   };
 }
 
-/** Area-ranked spatial thinning of visible label points, including dateline views. */
-export function militaryNamesInView(names, box, cap = MILITARY_POINT_CAP) {
+/**
+ * Area-ranked spatial thinning of visible label points, including dateline
+ * views. With `thinned` false every point in the box is kept, up to `cap`.
+ */
+export function militaryNamesInView(
+  names,
+  box,
+  cap = MILITARY_POINT_CAP,
+  thinned = true,
+) {
   const width =
     box.east >= box.west ? box.east - box.west : 360 + box.east - box.west;
   const height = box.north - box.south;
@@ -107,7 +115,7 @@ export function militaryNamesInView(names, box, cap = MILITARY_POINT_CAP) {
       continue;
     count++;
     const cell = `${Math.min(31, Math.floor((x / width) * 32))}:${Math.min(15, Math.floor(((record.latitude - box.south) / height) * 16))}`;
-    if (cells.has(cell) || records.length >= cap) continue;
+    if ((thinned && cells.has(cell)) || records.length >= cap) continue;
     cells.add(cell);
     records.push(record);
   }
