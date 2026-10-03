@@ -14,10 +14,6 @@ export function createMilitaryNamesLoader({
   loadPack = (signal) =>
     loadBundledJson(
       new URL('./local_data/osm_military_names/names.json', import.meta.url),
-      () =>
-        import('./local_data/osm_military_names/names.json', {
-          with: { type: 'json' },
-        }),
       { signal },
     ),
   timeoutMs = MILITARY_NAMES_TIMEOUT_MS,
