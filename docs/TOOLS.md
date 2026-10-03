@@ -4,6 +4,8 @@ Tools answer questions from God's Eye View data for language-model clients.
 They are defined once and exposed through adapters: the Model Context Protocol
 (MCP) and function calling, which voice uses.
 
+To use them from Claude or Codex, see [MCP setup](MCP_SETUP.md).
+
 ## Layers
 
 | Owner                | Responsibility                                                                                    |
