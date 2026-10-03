@@ -461,7 +461,7 @@ export function panelRuntime(config) {
    * Load God's Eye View into this page from the app's panel build, in
    * inline embed mode, starting at the first view as its link would.
    */
-  async function startApp(url) {
+  async function startApp(url, view) {
     window.GEV_EMBED_INLINE = true;
     window.GEV_APP_BASE_URL = config.appBaseUrl;
     try {
@@ -470,6 +470,9 @@ export function panelRuntime(config) {
         '',
         location.href.split('#')[0] + new URL(url).hash,
       );
+      // The app restores this view from its link, following included, so
+      // it must not be applied again: flying there would end the follow.
+      if (queued === view) queued = null;
     } catch {
       // The view still arrives once the app is ready.
     }
@@ -554,7 +557,7 @@ export function panelRuntime(config) {
     if (started) return;
     started = true;
     say("Loading God's Eye View…");
-    startApp(url).catch((error) =>
+    startApp(url, view).catch((error) =>
       say(`God's Eye View could not load here: ${error?.message || error}.`),
     );
     setTimeout(() => {
