@@ -90,6 +90,15 @@ The dev server is a **key broker**: every server-side key above is spendable by 
   loopback only. Use a separately reviewed authentication proxy for remote
   access and keep provider-side quotas as the spend backstop.
 
+## MCP server and panel
+
+God's Eye View's tools are also served to MCP clients: over stdio (`npm run mcp`) and at `/mcp` on the development and preview servers.
+
+- **`/mcp` answers only direct local requests**: a loopback connection naming a loopback host on the port it reached, a browser `Origin` (when sent) from that same host, no proxy forwarding headers, and launcher sharing off. It accepts only JSON, so a web page cannot post to it cross-site. This is transport safety, not authentication: any program on your machine can use the tools, and some of them spend the same provider quotas as the app.
+- **What the panel's requests can reach.** In clients that display MCP Apps, the panel loads the app through the `panel_request` tool, which requests paths on the app's server. It is marked for the panel only and requires a key that each MCP server puts in its panel page, which keeps it from clients that list tools to the model without loading the panel. That key is not access control: any MCP client can read the panel page, key included, and then reach the app's files and data routes through `panel_request`, much as its other tools reach the data. Provider Settings, credential and model endpoints, `/mcp` and the development server's internal routes are refused to every caller.
+- **The panel carries the two browser keys.** The panel build (`npm run build:panel`) includes the same Google Maps key and Cesium ion token as the app, and they run inside the client's panel page, on the client's site. A key restricted by HTTP referrer must also allow that page, or the panel cannot load tiles. To keep the app's own keys narrower, build the panel with separately restricted keys in the environment of `npm run build:panel`.
+- **Embed mode is not framable by default.** `?embed=1` documents keep `X-Frame-Options: DENY` and `frame-ancestors 'none'` unless `GEV_EMBED_FRAME_ANCESTORS` names the pages that may frame them; a framing page can change what the app shows. Other documents can never be framed.
+
 ## Scope & expectations
 
 - The Vite server is a **development/preview** server. If you expose it beyond localhost, put it behind your own auth/proxy and review the bindings (see the threat model above).

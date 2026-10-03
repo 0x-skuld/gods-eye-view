@@ -125,13 +125,18 @@ the host to open the link (`ui/open-link`).
 Hosts serve panels from their own sites and may refuse other addresses;
 Codex, for one, refuses any address on the user's machine. So the panel
 never requests the app's server itself. It loads everything from the app's
-own paths through `panel_request`, a tool only the panel may call
-(`_meta.ui.visibility: ["app"]`): the MCP server requests the path from the
-app's server and returns the response, compressed and in parts when large.
+own paths through `panel_request`, a tool meant for the panel: it is
+marked `_meta.ui.visibility: ["app"]`, and each call must carry the key the
+MCP server puts in its panel page. Any client can read that page, so the key
+keeps the tool from clients that only list it, and is not access control. The
+MCP server requests the path from the app's server and returns the response,
+compressed and in parts when large.
 The same path works in every host. Only
 map imagery, tiles and fonts load directly, from the providers the
-resource's `csp` lists. `panel_request` refuses `/api/setup`, which writes
-provider keys.
+resource's `csp` lists. `panel_request` refuses Provider Settings
+(`/api/setup`), credential and model endpoints (`/api/realtime`,
+`/api/openai`), `/mcp` and the development server's internal routes, in any
+letter case or encoding.
 
 The panel loads the app's panel build, which `npm run build:panel` writes to
 `dist/panel` and the servers serve at `/panel/`: one app script, one
@@ -245,8 +250,11 @@ on the port they reached and, when a browser sends an `Origin`, come from
 that same host. It refuses requests a proxy forwarded and refuses all
 requests while launcher sharing is on. This is local transport safety, not
 authentication. The
-local server makes no requests other than to the app's `/api` routes and the
-public feeds the sources already use.
+local server's tools request the app's `/api` routes and the public feeds
+the sources already use. The panel's `panel_request` also requests the app's
+own files and data routes for the panel: it requires the key in the panel's
+page, and refuses Provider Settings, credential and model endpoints, `/mcp`
+and the development server's internal routes. See SECURITY.md.
 
 ## Tools
 
