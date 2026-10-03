@@ -195,3 +195,44 @@ test('a client that disconnects cancels its tool call', async (t) => {
   await aborted.promise;
   assert.equal(seen.aborted, true);
 });
+
+test('a client that stops sending its request body is answered with a timeout', async (t) => {
+  let middleware;
+  const plugin = localMcpPlugin({
+    bodyTimeoutMs: 20,
+    createServer: () => ({ handle: async () => null }),
+  });
+  plugin.configureServer({
+    middlewares: { use: (path, handler) => (middleware = handler) },
+  });
+  const http = createServer((req, res) => middleware(req, res));
+  await new Promise((resolve) => http.listen(0, '127.0.0.1', resolve));
+  t.after(() => http.close());
+  const { port } = http.address();
+  const status = await new Promise((resolve, reject) => {
+    const request = httpRequest(
+      {
+        host: '127.0.0.1',
+        port,
+        path: '/mcp',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': '100',
+          Host: `localhost:${port}`,
+        },
+      },
+      (response) => {
+        response.resume();
+        resolve(response.statusCode);
+        request.destroy();
+      },
+    );
+    request.on('error', (error) => {
+      if (error.code !== 'ECONNRESET') reject(error);
+    });
+    // Part of the body, then nothing more.
+    request.write('{"jsonrpc"');
+  });
+  assert.equal(status, 408);
+});

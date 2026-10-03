@@ -30,13 +30,18 @@ export function describeRequest(message) {
   return typeof subject === 'string' ? `${method} ${subject}` : method;
 }
 
-/** Serve newline-delimited JSON-RPC until `input` ends. */
+/**
+ * Serve newline-delimited JSON-RPC until `input` ends. A client's
+ * `notifications/cancelled` aborts the named request, which then gets no
+ * response, as the protocol asks.
+ */
 export async function serveStdio(server, { input, output, log = () => {} }) {
   const lines = createInterface({ input, crlfDelay: Infinity });
   const pending = new Set();
+  const running = new Map();
   for await (const line of lines) {
     if (!line.trim()) continue;
-    const work = respond(server, line, log).then((response) => {
+    const work = respond(server, line, log, running).then((response) => {
       if (response) output.write(`${JSON.stringify(response)}\n`);
     });
     pending.add(work);
@@ -45,16 +50,30 @@ export async function serveStdio(server, { input, output, log = () => {} }) {
   await Promise.all(pending);
 }
 
-async function respond(server, line, log) {
+async function respond(server, line, log, running) {
   let message;
   try {
     message = JSON.parse(line);
   } catch {
     return parseErrorResponse();
   }
+  if (message?.method === 'notifications/cancelled') {
+    running.get(message.params?.requestId)?.abort();
+    return null;
+  }
   const described = describeRequest(message);
   if (described) log(described);
-  const response = await server.handle(message);
+  const id = message?.id;
+  const cancellable = id !== undefined && id !== null && !running.has(id);
+  const controller = new AbortController();
+  if (cancellable) running.set(id, controller);
+  let response;
+  try {
+    response = await server.handle(message, { signal: controller.signal });
+  } finally {
+    if (cancellable) running.delete(id);
+  }
+  if (controller.signal.aborted) return null;
   // A failed tool call answers the client, not the log; say why here too.
   if (response?.result?.isError)
     log(`   ${described} failed: ${response.result.content?.[0]?.text}`);

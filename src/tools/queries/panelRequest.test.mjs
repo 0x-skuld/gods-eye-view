@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { composeCatalog, coreTools } from '../index.js';
 import {
+  PANEL_CONCURRENT_REQUESTS,
   PANEL_PART_BYTES,
   PANEL_RESPONSE_LIMIT_BYTES,
 } from './panelRequest.js';
@@ -250,4 +251,91 @@ test('routes the panel never loads are refused in any case or encoding', async (
     requests.map((request) => request.path),
     ['/api/setups-help', '/mcpx.json'],
   );
+});
+
+test('requests past the limit wait their turn instead of failing', async () => {
+  const gates = [];
+  const { catalog, requests } = catalogWith(
+    () =>
+      new Promise((resolve) => gates.push(() => resolve(new Response('ok')))),
+  );
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  // Two panels on one server, each sending as many requests as it may.
+  const calls = Array.from({ length: PANEL_CONCURRENT_REQUESTS * 2 }, (_, n) =>
+    catalog.call('panel_request', { key: KEY, path: `/panel/${n}.js` }),
+  );
+  await tick();
+  assert.equal(requests.length, PANEL_CONCURRENT_REQUESTS);
+  // Each finished request lets one waiting request start.
+  for (let started = PANEL_CONCURRENT_REQUESTS; gates.length;) {
+    gates.shift()();
+    await tick();
+    if (started < calls.length) {
+      started += 1;
+      assert.equal(requests.length, started);
+    }
+  }
+  const results = await Promise.all(calls);
+  assert.ok(results.every(({ data }) => data.status === 200));
+});
+
+test('a waiting request its caller cancels leaves the queue', async () => {
+  const gates = [];
+  const { catalog, requests } = catalogWith(
+    () =>
+      new Promise((resolve) => gates.push(() => resolve(new Response('ok')))),
+  );
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const busy = Array.from({ length: PANEL_CONCURRENT_REQUESTS }, (_, n) =>
+    catalog.call('panel_request', { key: KEY, path: `/panel/${n}.js` }),
+  );
+  const cancel = new AbortController();
+  const waiting = catalog.call(
+    'panel_request',
+    { key: KEY, path: '/panel/cancelled.js' },
+    { signal: cancel.signal },
+  );
+  const after = catalog.call('panel_request', {
+    key: KEY,
+    path: '/panel/after.js',
+  });
+  await tick();
+  cancel.abort();
+  await assert.rejects(waiting);
+  gates.shift()();
+  await tick();
+  // The cancelled request never reached the server; the next one did.
+  assert.equal(requests.at(-1).path, '/panel/after.js');
+  while (gates.length) gates.shift()();
+  await Promise.all([...busy, after]);
+  assert.ok(
+    !requests.some((request) => request.path === '/panel/cancelled.js'),
+  );
+});
+
+test("one server's held responses are not readable through another's", async () => {
+  const big = new Uint8Array(PANEL_PART_BYTES * 2).fill(7);
+  const one = catalogWith(
+    () => new Response(big, { headers: { 'content-type': 'image/png' } }),
+  );
+  const other = catalogWith(() => new Response('x'));
+  const { data } = await one.catalog.call('panel_request', {
+    key: KEY,
+    path: '/big.png',
+  });
+  assert.ok(data.id);
+  await assert.rejects(
+    other.catalog.call('panel_request', {
+      key: KEY,
+      id: data.id,
+      offset: data.nextOffset,
+    }),
+    (error) => error.code === 'invalid_arguments',
+  );
+  const rest = await one.catalog.call('panel_request', {
+    key: KEY,
+    id: data.id,
+    offset: data.nextOffset,
+  });
+  assert.equal(rest.data.offset, data.nextOffset);
 });
