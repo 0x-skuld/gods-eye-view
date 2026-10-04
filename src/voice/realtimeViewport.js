@@ -86,13 +86,29 @@ export function pointerCropRect({
   pixelHeight,
   size = POINTER_CROP_SIZE,
 }) {
-  if (!cssWidth || !cssHeight || !pixelWidth || !pixelHeight) return null;
+  const values = [x, y, cssWidth, cssHeight, pixelWidth, pixelHeight, size];
+  if (
+    values.some((value) => !Number.isFinite(value)) ||
+    cssWidth <= 0 ||
+    cssHeight <= 0 ||
+    pixelWidth <= 0 ||
+    pixelHeight <= 0 ||
+    size <= 0 ||
+    x < 0 ||
+    x > cssWidth ||
+    y < 0 ||
+    y > cssHeight
+  )
+    return null;
   const side = Math.min(size, cssWidth, cssHeight);
   const left = Math.min(Math.max(0, x - side / 2), cssWidth - side);
   const top = Math.min(Math.max(0, y - side / 2), cssHeight - side);
   const scaleX = pixelWidth / cssWidth;
   const scaleY = pixelHeight / cssHeight;
-  const output = Math.round(Math.min(size, side * scaleX));
+  // Keep the provider-facing image contract stable even on a narrow canvas.
+  // drawImage may upscale a smaller source crop, but the retained image and
+  // pointer-ring coordinates are always expressed in one 512 px square.
+  const output = Math.round(size);
   return {
     sx: Math.round(left * scaleX),
     sy: Math.round(top * scaleY),
@@ -116,7 +132,7 @@ export async function capturePointerCrop(screenPx) {
   const viewer = window.__godsEyeView?.viewer;
   const source = viewer?.scene?.canvas;
   if (!source?.width || !source?.height || !screenPx) return null;
-  const fresh = await renderFreshCesiumFrame(viewer);
+  const fresh = await renderFreshPointerFrame(viewer);
   if (!fresh) return null;
   const rect = pointerCropRect({
     x: screenPx.x,
@@ -164,6 +180,16 @@ export async function capturePointerCrop(screenPx) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Pointer crops get one bounded recovery request for a slow render loop.
+ * Full-viewport captures intentionally keep their single 400 ms attempt.
+ */
+export async function renderFreshPointerFrame(viewer) {
+  if (await renderFreshCesiumFrame(viewer)) return true;
+  if (typeof document !== 'undefined' && document.hidden) return false;
+  return renderFreshCesiumFrame(viewer);
 }
 
 // Scale (w, h) down so w*h <= maxPixels while preserving aspect ratio. Never
@@ -345,11 +371,14 @@ export class RealtimeViewport {
     // Too far out, the crop is a smear: every path shares this guard.
     if (!POINTER_CROP_SCALES.has(viewScale)) return false;
     if (snapshot === this.lastPointerCrop) return false;
-    if (this.now() - (snapshot.capturedAt || 0) > POINTER_CROP_MAX_AGE_MS)
-      return false;
+    const capturedAt = Number(snapshot.capturedAt) || 0;
+    if (this.now() - capturedAt > POINTER_CROP_MAX_AGE_MS) return false;
     // The snapshot's pixels only name its own camera pose.
+    const snapshotCameraKey = snapshot.cameraKey;
+    if (!snapshotCameraKey) return false;
     const samePose = () =>
-      !snapshot.cameraKey || snapshot.cameraKey === this.readCameraKey();
+      snapshotCameraKey === this.readCameraKey() &&
+      this.now() - capturedAt <= POINTER_CROP_MAX_AGE_MS;
     if (!samePose()) return false;
     this.lastPointerCrop = snapshot;
     const sent = await this.sendRetainedImage(

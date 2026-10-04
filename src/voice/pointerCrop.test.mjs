@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { RealtimeViewport, pointerCropRect } from './realtimeViewport.js';
+import {
+  RealtimeViewport,
+  pointerCropRect,
+  renderFreshPointerFrame,
+} from './realtimeViewport.js';
 
 test('crop: a square around the pointer, clamped inside the canvas, in buffer pixels', () => {
   assert.deepEqual(
@@ -48,6 +52,88 @@ test('crop: a square around the pointer, clamped inside the canvas, in buffer pi
     }),
     null,
   );
+  assert.equal(
+    pointerCropRect({
+      x: Number.NaN,
+      y: 1,
+      cssWidth: 100,
+      cssHeight: 100,
+      pixelWidth: 100,
+      pixelHeight: 100,
+    }),
+    null,
+    'non-finite pointer geometry fails closed',
+  );
+  assert.equal(
+    pointerCropRect({
+      x: 101,
+      y: 1,
+      cssWidth: 100,
+      cssHeight: 100,
+      pixelWidth: 100,
+      pixelHeight: 100,
+    }),
+    null,
+    'out-of-canvas pointer geometry fails closed',
+  );
+  assert.equal(
+    pointerCropRect({
+      x: 120,
+      y: 100,
+      cssWidth: 320,
+      cssHeight: 240,
+      pixelWidth: 320,
+      pixelHeight: 240,
+    }).output,
+    512,
+    'the provider image stays 512 px even when the source crop is smaller',
+  );
+});
+
+test('crop: a slow render gets one bounded fresh-frame recovery request', async () => {
+  const originalDocument = globalThis.document;
+  let requests = 0;
+  let listener = null;
+  try {
+    globalThis.document = { hidden: false };
+    const scene = {
+      postRender: {
+        addEventListener(next) {
+          listener = next;
+          return () => {
+            if (listener === next) listener = null;
+          };
+        },
+      },
+      requestRender() {
+        requests += 1;
+        if (requests === 2) queueMicrotask(() => listener?.());
+      },
+    };
+    assert.equal(await renderFreshPointerFrame({ scene }), true);
+    assert.equal(requests, 2, 'only the pointer path retries once');
+    assert.equal(listener, null, 'the successful listener is removed');
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test('crop: a hidden document never starts the recovery request', async () => {
+  const originalDocument = globalThis.document;
+  let requests = 0;
+  try {
+    globalThis.document = { hidden: true };
+    const scene = {
+      postRender: { addEventListener: () => () => {} },
+      requestRender() {
+        requests += 1;
+      },
+    };
+    assert.equal(await renderFreshPointerFrame({ scene }), false);
+    assert.equal(requests, 0);
+  } finally {
+    globalThis.document = originalDocument;
+  }
 });
 
 function viewportFixture({ capturePointer, capture } = {}) {
@@ -191,6 +277,15 @@ test('crop: a camera move before or during capture drops it; pixels only name th
     false,
     'moved before capture',
   );
+  state.camera = null;
+  assert.equal(
+    await viewport.sendPointerCrop(
+      { ...ground, cameraKey: null },
+      { viewScale: 'local' },
+    ),
+    false,
+    'a missing pose identity fails closed',
+  );
   state.camera = 'pose-A';
   const pending = viewport.sendPointerCrop(
     { ...ground },
@@ -199,6 +294,28 @@ test('crop: a camera move before or during capture drops it; pixels only name th
   state.camera = 'pose-B';
   release();
   assert.equal(await pending, false, 'moved while capturing');
+  assert.equal(sent.length, 0);
+});
+
+test('crop: a snapshot that expires during capture is not published', async () => {
+  let release;
+  const { viewport, sent, state } = viewportFixture({
+    capturePointer: () =>
+      new Promise((resolve) => {
+        release = () =>
+          resolve({
+            dataUrl: 'data:image/jpeg;base64,CROP',
+            rect: { x: 0, y: 0, w: 1, h: 1 },
+          });
+      }),
+  });
+  const pending = viewport.sendPointerCrop(
+    { ...ground },
+    { viewScale: 'local' },
+  );
+  state.clock = 40_000;
+  release();
+  assert.equal(await pending, false);
   assert.equal(sent.length, 0);
 });
 

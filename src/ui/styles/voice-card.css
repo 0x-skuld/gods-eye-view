@@ -32,6 +32,14 @@
   animation: gev-voice-card-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+/* The visible card must clear the dock trays' parent stacking contexts. */
+#command-dock
+  > #gev-voice-control:not([data-status='error']):has(
+    .gev-voice-card:not([hidden])
+  ) {
+  z-index: 101;
+}
+
 #gev-voice-control .gev-voice-card[hidden],
 #gev-voice-control .gev-voice-card [hidden],
 #gev-voice-control[data-status='error'] .gev-voice-card {

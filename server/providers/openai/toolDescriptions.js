@@ -543,7 +543,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   analyst_query: {
     description:
-      'Counts, lists, superlatives and attribute filters over records loaded by ENABLED layers — "how many flights over Texas", "biggest fire near LA", "ships headed to Oakland", "next rocket launch". complete:false means the count is a floor ("at least") and rankings cover the records examined; partial names unanswered layers. Items carry lat/lon for a follow-up fly_to_location. ok:false codes: LAYER_OFF (offer to enable), NOT_READY (loading), FOLLOW_UP_MISMATCH (ask again without followUp), UNKNOWN_FIELD/UNKNOWN_SCOPE/BAD_VALUE (retry with the allowed values).',
+      'Counts, lists, superlatives and attribute filters over records loaded by ENABLED layers — "how many flights over Texas", "biggest fire near LA", "ships headed to Oakland", "next rocket launch". A requested list or ranking requires this tool even after set_context_mode returned a Contacts count; that count alone has no requested items. complete:false means the count is a floor ("at least") and rankings cover the records examined; partial names unanswered layers. Items carry lat/lon for a follow-up fly_to_location. ok:false codes: LAYER_OFF (offer to enable), NOT_READY (loading), FOLLOW_UP_MISMATCH (ask again without followUp), UNKNOWN_FIELD/UNKNOWN_SCOPE/BAD_VALUE (retry with the allowed values).',
     $position: 1,
     parameters: {
       properties: {
@@ -554,7 +554,7 @@ export const ACTION_DESCRIPTIONS = {
         },
         scope: {
           description:
-            'Always set it (see WHERE). view = a radius around the view centre ("in view", "nearby"); pointer = "around here/this" while pointing (radius at the cursor); region = "over Texas"; radius with center {lat, lon} = "near <place>"; anywhere = no place ("biggest anywhere", "today"). There is no drawn-area scope yet: say so rather than answering for the view.',
+            'Always set it (see WHERE). Explicit "in view" uses view; "nearby" uses view when Contacts is off. Around the active Contacts subject uses radius with the requested km and center omitted, never view: the five closest within 250 km use scope:{kind:"radius",km:250}, sortBy:"distance", limit:5. For another requested radius use its actual km, not 250. pointer = "around here/this" while pointing (radius at the cursor); region = "over Texas"; radius with center {lat, lon} = "near <place>" or explicit coordinates; anywhere = no place ("biggest anywhere", "today"). Preserve explicit view, named place, pointer and explicit center even while Contacts is active; never invent coordinates. There is no drawn-area scope yet: say so rather than answering for the view.',
           $position: 2,
           properties: {
             name: {
@@ -563,7 +563,13 @@ export const ACTION_DESCRIPTIONS = {
               $position: 1,
             },
             km: {
-              description: 'For kind=radius or pointer.',
+              description:
+                'For kind=radius or pointer: the actual requested kilometers. An active-subject 250 km request uses 250; another requested radius keeps that number.',
+              $position: 1,
+            },
+            center: {
+              description:
+                'Omit for a radius around the active Contacts subject. Supply only an explicitly requested coordinate or a resolved named-place coordinate; never invent 0,0 or replace an explicit center with the subject.',
               $position: 1,
             },
           },

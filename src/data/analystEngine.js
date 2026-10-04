@@ -698,7 +698,10 @@ export async function selectAnalystRows(
     const item = { layerKey: key, ...row };
     const age = ageOf(key, row);
     if (age !== null) item[AGE_FIELD] = age;
-    if (sortBy === 'distance') item.distanceKm = distance(row);
+    if (sortBy === 'distance') {
+      const km = distance(row);
+      item.distanceKm = Number.isFinite(km) ? Math.round(km * 10) / 10 : km;
+    }
     return item;
   });
   return { count, items, matched, summary };
@@ -881,6 +884,8 @@ export function createAnalystEngine(providers) {
     // 2) Spatial scope
     const rememberedScope =
       followUp && !spec.scope ? lastResult.scopePresentation || null : null;
+    const rememberedDistanceOf =
+      followUp && !spec.scope ? lastResult.distanceOf || null : null;
     let resolvedScope = null;
     let scopeNote = rememberedScope?.coverage || 'anywhere';
     // Human phrasing for the same scope, so every spoken count can name what it
@@ -985,6 +990,7 @@ export function createAnalystEngine(providers) {
       sortDir: spec.sortDir,
       limit: spec.limit,
       layerKeys: layers,
+      distanceOf: rememberedDistanceOf,
       ref:
         spec.sortBy === 'distance'
           ? resolvedScope?.center || providers.getViewContext()
@@ -1070,6 +1076,7 @@ export function createAnalystEngine(providers) {
     const committedCoverage = memoryOverride?.coverage || result.coverage;
     lastResult = {
       matched: memoryOverride?.matched || selection.matched,
+      distanceOf: memoryOverride?.distanceOf || rememberedDistanceOf,
       layerKeys: [...(memoryOverride?.layerKeys || layers)],
       coverage: committedCoverage,
       unanswered: [

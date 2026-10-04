@@ -34,8 +34,9 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // Re-derived for the voice layer manifest (generated layer enums and
     // aliases), point-and-ask (pointer sentinels, referent args) and the
     // consolidated tool wording (each policy stated once); model-facing tools
-    // omit top-level anyOf (OpenAI rejects it).
-    '66c955a41e36c6e7d2d255a950993128528288be13946fe4f7dacb05ad2ba291',
+    // omit top-level anyOf (OpenAI rejects it). Contacts list routing preserves
+    // requested radius and center authority in descriptions only.
+    '71c66bb725e6987e56780db1e1a05e17359df6f2fcc4884b7ad46f326eae5f5d',
   );
 });
 

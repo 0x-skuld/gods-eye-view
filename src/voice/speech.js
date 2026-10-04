@@ -401,6 +401,18 @@ function annotateMap(result) {
 function analystQuery(result) {
   if (!result?.ok || result.cancelled) return null;
   const headline = spokenLabel(analystHeadline(result), 96);
+  const state =
+    result.feedState ||
+    result.feedProvenance?.overall ||
+    result.coverage?.feedProvenance?.overall;
+  const tag = feedTag(state);
+  const scope = spokenLabel(result.scopeLabel || '', 96);
+  const answer =
+    tag === 'feed unavailable'
+      ? sentence(
+          `Feed unavailable${scope ? ` ${scope}` : ''}; no authoritative count${result.complete === false ? ', retained coverage is a lower bound' : ''}`,
+        )
+      : sentence(`${headline}${tag ? `, ${tag}` : ''}`);
   const unanswered = (Array.isArray(result.unanswered) ? result.unanswered : [])
     .map((layer) => spokenLabel(layer, 24))
     .filter(Boolean);
@@ -408,7 +420,7 @@ function analystQuery(result) {
     ? `Partial; ${listPhrase(unanswered.slice(0, 2))}${unanswered.length > 2 ? ` and ${unanswered.length - 2} more` : ''} not answered.`
     : 'Partial answer.';
   return {
-    say: `${sentence(headline)}${result.partial ? ` ${missing}` : ''}`,
+    say: `${answer}${result.partial ? ` ${missing}` : ''}`,
   };
 }
 

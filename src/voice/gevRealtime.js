@@ -15,7 +15,7 @@ const ACTION_NAMES = new Set(GEV_ACTION_SCHEMAS.map((schema) => schema.name));
  */
 export function withToolCatalog(runner, loadCatalog) {
   if (typeof loadCatalog !== 'function') return runner;
-  return async function runGevTool(name, args, options = {}) {
+  const runGevTool = async function runGevTool(name, args, options = {}) {
     if (ACTION_NAMES.has(name)) return runner(name, args, options);
     const catalog = await loadCatalog();
     if (!catalog?.get(name)) return runner(name, args, options);
@@ -24,6 +24,10 @@ export function withToolCatalog(runner, loadCatalog) {
     });
     return toFunctionOutput(name, result);
   };
+  runGevTool.resetConversation = (...args) =>
+    runner.resetConversation?.(...args);
+  runGevTool.dispose = (...args) => runner.dispose?.(...args);
+  return runGevTool;
 }
 
 /** Compose the standalone action runner with the voice controls. */

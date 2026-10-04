@@ -3478,6 +3478,9 @@ async function aircraftProximityWindowForQuery(
   result,
   isCurrent = () => true,
 ) {
+  // Follow-ups re-filter the engine's retained answer. Re-projecting a fresh
+  // Contacts snapshot here would restore rows a previous filter removed.
+  if (result?.coverage?.followUp) return null;
   const spec = normalizeAnalystSpec(args, args?.layers || []);
   if (!spec) return null;
   const scope = args?.scope;
@@ -3552,8 +3555,10 @@ async function aircraftProximityWindowForQuery(
         lat,
         lon,
       };
+      // Rank the retained cohort at its original precision; display rounding
+      // must not turn nearby contacts into artificial ID-sorted ties.
       if (Number.isFinite(item.distance))
-        distanceKm.set(row, Math.round(item.distance / 100) / 10);
+        distanceKm.set(row, item.distance / 1000);
       return row;
     });
     return { key, rows };
@@ -3659,6 +3664,9 @@ async function aircraftProximityWindowForQuery(
     answer,
     memory: {
       matched: selection.matched,
+      // Follow-up ranking belongs to this retained Contacts evaluation, not
+      // the camera's current position. Keep the accessor with its row owners.
+      distanceOf: (row) => distanceKm.get(row),
       layerKeys: wanted,
       coverage,
       unanswered: [...(result?.unanswered || [])],
@@ -4791,6 +4799,46 @@ const ANALYST_REFUSAL_FIELDS = Object.freeze([
   'cancelled',
 ]);
 
+const VIEWPORT_COVERAGE_NOTE = 'the flights layer loads by viewport';
+
+/** Resolve omitted follow-up scope from the engine's retained coverage. */
+function effectiveAnalystScopeKind(args, coverage) {
+  const explicit = String(args.scope?.kind || '').toLowerCase();
+  if (explicit) return explicit;
+  const retained = String(coverage?.scope || '')
+    .split(':', 1)[0]
+    .toLowerCase();
+  if (retained === 'window') return 'radius';
+  if (['anywhere', 'radius', 'region', 'view'].includes(retained))
+    return retained;
+  return args.followUp ? 'anywhere' : 'view';
+}
+
+/** Add the viewport qualification without replacing retained provenance. */
+function withViewportCoverageNote(coverage) {
+  if (!coverage) return coverage;
+  const current = typeof coverage.note === 'string' ? coverage.note : '';
+  if (current.includes(VIEWPORT_COVERAGE_NOTE)) return coverage;
+  const separator = current ? '; ' : '';
+  return {
+    ...coverage,
+    note: current
+      ? `${current}${separator}${VIEWPORT_COVERAGE_NOTE}`
+      : VIEWPORT_COVERAGE_NOTE,
+  };
+}
+
+/** Whether this query counts records from a viewport-loaded layer. */
+function isViewportScopedAnalystResult(args, coverage) {
+  const scopeKind = effectiveAnalystScopeKind(args, coverage);
+  return (
+    (scopeKind === 'radius' || scopeKind === 'view') &&
+    (coverage?.layersQueried || []).some(
+      (layer) => voiceLayer(layer.layerKey)?.query?.viewportLoaded,
+    )
+  );
+}
+
 async function runAnalystQuery(
   analystEngine,
   dataManager,
@@ -4820,6 +4868,15 @@ async function runAnalystQuery(
           candidate,
           isCurrent,
         );
+        if (
+          projected?.answer &&
+          projected?.memory &&
+          isViewportScopedAnalystResult(args, projected.answer.coverage)
+        ) {
+          const coverage = withViewportCoverageNote(projected.answer.coverage);
+          projected.answer.coverage = coverage;
+          projected.memory.coverage = coverage;
+        }
         entityWindow = projected?.answer || null;
         return projected?.memory || null;
       },
@@ -4855,14 +4912,12 @@ async function runAnalystQuery(
   // A radius/view count over a viewport-loaded layer counts what is LOADED, and
   // the flights layer reloads as the camera moves — so this number can sit well
   // under the Contacts cohort without either being wrong.
-  const scopeKind = String(args.scope?.kind || 'view').toLowerCase();
-  const viewportScoped =
-    (scopeKind === 'radius' || scopeKind === 'view') &&
-    (result.coverage?.layersQueried || []).some(
-      (l) => voiceLayer(l.layerKey)?.query?.viewportLoaded,
-    );
+  const scopeKind = effectiveAnalystScopeKind(args, result.coverage);
+  const viewportScoped = isViewportScopedAnalystResult(args, result.coverage);
   if (viewportScoped && result.coverage) {
-    result.coverage.note = 'the flights layer loads by viewport';
+    // The engine's follow-up memory retains this same object, so update its
+    // note in place after deriving the qualified copy.
+    result.coverage.note = withViewportCoverageNote(result.coverage).note;
   }
   // ENTITY-CENTRED NEARBY: answered by the SAME engine that fills the Contacts
   // panel, so the spoken number and the panel readout for one centre cannot
@@ -4870,13 +4925,6 @@ async function runAnalystQuery(
   // arbitrary points — only "how many aircraft around <this contact>" is
   // unified, because that is the question the panel is already answering.
   if (entityWindow) {
-    // The detached Contacts snapshot keeps its own coverage; carry the same
-    // viewport note so both answer shapes say what they measured.
-    if (viewportScoped && entityWindow.coverage)
-      entityWindow.coverage = {
-        ...entityWindow.coverage,
-        note: result.coverage?.note,
-      };
     return entityWindow;
   }
 

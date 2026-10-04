@@ -3733,6 +3733,16 @@ test('voice runs app actions itself and other tools through the catalog', async 
     actions.push([name, args]);
     return { ok: true, action: name };
   };
+  const resets = [];
+  const disposals = [];
+  runner.resetConversation = (...args) => {
+    resets.push(args);
+    return 'reset';
+  };
+  runner.dispose = (...args) => {
+    disposals.push(args);
+    return 'disposed';
+  };
   const calls = [];
   let loads = 0;
   const catalog = {
@@ -3764,5 +3774,9 @@ test('voice runs app actions itself and other tools through the catalog', async 
     actions.map(([name]) => name),
     ['zoom_to_globe', 'not_a_tool'],
   );
+  assert.equal(run.resetConversation('stopped'), 'reset');
+  assert.equal(run.dispose('removed'), 'disposed');
+  assert.deepEqual(resets, [['stopped']]);
+  assert.deepEqual(disposals, [['removed']]);
   assert.equal(withToolCatalog(runner, undefined), runner);
 });

@@ -143,7 +143,14 @@ export function responseInstructionForToolResult(result) {
     return 'The map annotations are cleared. Continue naturally; do not announce the clear.';
   }
   if (typeof result?.say === 'string' && result.say) {
-    return "Speak the say line of this turn's tool results once, in order, lightly rephrased at most; add no qualifiers and don't repeat your preamble.";
+    return "Speak the say line of this turn's tool results once, in order, lightly rephrased at most. Preserve its lower bounds, partial answers and stale, degraded or unavailable feed states. Add no counts, lists, qualifiers or action claims beyond the executed tool results, and don't repeat your preamble. If a requested list or another action is still unfinished, call the required tool before the final answer.";
+  }
+  if (
+    result?.ok &&
+    result.action === 'set_context_mode' &&
+    result.contactsWindow
+  ) {
+    return 'Contacts activation and its window count do not fulfill a requested list or ranking. Continue any unfinished request with analyst_query: around the active subject use radius with the actual requested km and omit center; preserve explicit view, place, pointer and explicit center scopes. Use the returned items, never invent aircraft, counts or qualifications. Otherwise briefly confirm the completed action from its result.';
   }
   return 'Briefly confirm the completed GEV action once. Do not repeat yourself.';
 }

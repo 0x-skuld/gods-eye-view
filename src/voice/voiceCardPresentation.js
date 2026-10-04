@@ -242,12 +242,28 @@ export function reduceVoiceCard(state, event) {
 export function voiceCardView(state) {
   const running = state.steps.some((step) => step.status === 'running');
   const display = state.result?.display || null;
-  const notes = [
+  const allNotes = [
     ...(display?.notes || []),
     ...(display?.sources || []).map((source) => `Source: ${source.label}`),
-  ]
-    .map((note) => spokenLabel(note, 96))
-    .slice(0, MAX_NOTES);
+  ];
+  // Analyst notes carry count/scope/provenance qualifications. Preserve their
+  // full sanitized text in at most six existing rows, joining overflow into
+  // the last row. Other tool cards retain their compact note contract.
+  const completeNotes = display?.preserveNotes
+    ? [
+        ...new Set(
+          allNotes.map((note) => spokenLabel(note, Infinity)).filter(Boolean),
+        ),
+      ]
+    : null;
+  const notes = completeNotes
+    ? completeNotes.length > MAX_NOTES
+      ? [
+          ...completeNotes.slice(0, MAX_NOTES - 1),
+          completeNotes.slice(MAX_NOTES - 1).join('; '),
+        ]
+      : completeNotes
+    : allNotes.map((note) => spokenLabel(note, 96)).slice(0, MAX_NOTES);
   return {
     visible: Boolean(state.visible),
     busy: running,

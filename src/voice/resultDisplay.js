@@ -28,10 +28,19 @@ const LAYER_NOUNS = Object.freeze({
 
 /** Split "a; b" caveat text into separate notes. */
 function notesOf(...values) {
-  return values
-    .flatMap((value) => String(value || '').split(/;\s*/))
-    .map((text) => text.trim())
-    .filter(Boolean);
+  return [
+    ...new Set(
+      values
+        .flatMap((value) => String(value || '').split(/;\s*/))
+        .map((text) =>
+          text
+            .replace(/[\p{Cc}\p{Cf}]+/gu, ' ')
+            .replace(/\s+/g, ' ')
+            .trim(),
+        )
+        .filter(Boolean),
+    ),
+  ];
 }
 
 export function analystNounFor(layerKeys) {
@@ -67,6 +76,19 @@ function analystCard(result) {
   if (!result?.ok) return null;
   const display = result.display || {};
   const unanswered = Array.isArray(result.unanswered) ? result.unanswered : [];
+  const provenance = result.feedProvenance || result.coverage?.feedProvenance;
+  const sources = [
+    ...new Set(
+      [...(provenance?.layers || []), ...(result.coverage?.layersQueried || [])]
+        .map((layer) =>
+          String(layer?.source || '')
+            .replace(/[\p{Cc}\p{Cf}]+/gu, ' ')
+            .replace(/\s+/g, ' ')
+            .trim(),
+        )
+        .filter(Boolean),
+    ),
+  ].map((label) => ({ label }));
   return {
     display: {
       title: analystHeadline(result),
@@ -81,12 +103,16 @@ function analystCard(result) {
           : []),
         ...(result.partial ? [{ label: 'partial' }] : []),
       ],
+      // Coverage qualifications lead the feed detail. The bounded card groups
+      // overflow in its existing Notes disclosure rather than dropping them.
+      preserveNotes: true,
       notes: [
-        ...notesOf(display.caveat, result.coverage?.note),
+        ...notesOf(result.coverage?.note, display.caveat),
         ...(unanswered.length
           ? [`Not answered: ${unanswered.join(', ')}`]
           : []),
       ],
+      sources,
     },
     referents: Array.isArray(result.items) ? result.items : [],
     resultSet: true,
