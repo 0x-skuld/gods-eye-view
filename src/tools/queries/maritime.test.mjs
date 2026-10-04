@@ -201,3 +201,26 @@ test('vessel searches ask for every vessel the server retains', async () => {
   for (const maxRows of requested)
     assert.ok(Number(maxRows) >= AISSTREAM_CACHE_MAX, maxRows);
 });
+
+test('an area search names its area to the server; a vessel lookup asks for every vessel', async () => {
+  const requested = [];
+  const source = createAisStreamSource({
+    origin: () => 'http://localhost',
+    fetchImpl: async (url) => {
+      requested.push(new URL(url).searchParams);
+      return Response.json({ rows: [], source: 'AISStream', status: 'live' });
+    },
+  });
+  const catalog = composeCatalog({
+    tools: coreTools,
+    services: { vessels: source },
+  });
+  await catalog.call('vessels_in_area', { area: bay });
+  await catalog.call('find_vessel', { mmsi: '366999712' });
+  const [area, lookup] = requested;
+  assert.equal(area.get('lat'), '37.78000');
+  assert.equal(area.get('lon'), '-122.40000');
+  assert.equal(area.get('radius_km'), '20.0');
+  assert.equal(lookup.has('lat'), false);
+  assert.equal(lookup.has('radius_km'), false);
+});
