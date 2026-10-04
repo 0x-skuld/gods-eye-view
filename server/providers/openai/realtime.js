@@ -1,4 +1,4 @@
-import { enforceOptInRateLimit, openAiRateLimiter } from './rate-limit.js';
+import { enforceRateLimit, openAiRateLimiter } from './rate-limit.js';
 import {
   resolveVoiceModel,
   isKnownVoiceTier,
@@ -177,6 +177,7 @@ function createRealtimeTokenHandler({
   resolveOAuthAccessToken = () => readCodexOAuthAccessToken(),
   environment = process.env,
   models = {},
+  tools = GEV_REALTIME_TOOLS,
 } = {}) {
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -218,8 +219,8 @@ function createRealtimeTokenHandler({
       return;
     }
 
-    // Opt-in per-IP throttle (GEV_RATELIMIT_OPENAI_PER_MIN). No-op when unset.
-    if (!enforceOptInRateLimit(openAiRateLimiter(), req, res)) return;
+    // Per-IP throttle (GEV_RATELIMIT_OPENAI_PER_MIN). On by default; 0 disables.
+    if (!enforceRateLimit(openAiRateLimiter(), req, res)) return;
 
     let bearer;
     if (authMode === 'oauth') {
@@ -331,7 +332,7 @@ function createRealtimeTokenHandler({
           output: { voice },
         },
         instructions: realtimeInstructions(annotationGuidance),
-        tools: GEV_REALTIME_TOOLS,
+        tools,
         tool_choice: 'auto',
       },
     };
