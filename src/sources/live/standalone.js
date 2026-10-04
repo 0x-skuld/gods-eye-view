@@ -172,9 +172,20 @@ export function createAisStreamSource({
 } = {}) {
   return {
     label: 'AISStream',
-    async getSnapshot({ maxRows = 12000 } = {}, { signal } = {}) {
+    async getSnapshot({ maxRows = 12000, area } = {}, { signal } = {}) {
       const url = new URL(apiUrl, origin());
       url.searchParams.set('maxRows', String(maxRows));
+      // An area asks for the vessels around a point; servers that hold every
+      // vessel may ignore it, since callers still keep only what they need.
+      if (
+        Number.isFinite(area?.lat) &&
+        Number.isFinite(area?.lon) &&
+        Number.isFinite(area?.radiusKm)
+      ) {
+        url.searchParams.set('lat', area.lat.toFixed(5));
+        url.searchParams.set('lon', area.lon.toFixed(5));
+        url.searchParams.set('radius_km', area.radiusKm.toFixed(1));
+      }
       const { response, payload } = await readResponse(
         fetchImpl,
         url.toString(),
