@@ -469,7 +469,7 @@ export async function initKeySetup({
             throw new Error(
               payload.error || 'Could not check ChatGPT sign-in.',
             );
-          if (response.ok && payload.available) {
+          if (payload.available) {
             writeStoredCloudVoiceAuthMode('oauth');
             render(status);
             say(
@@ -490,7 +490,7 @@ export async function initKeySetup({
           });
           const loginPayload = await loginResponse.json().catch(() => ({}));
           if (lifetime.signal.aborted) return;
-          if (!loginResponse.ok && loginResponse.status !== 202) {
+          if (!loginResponse.ok) {
             say(
               loginPayload.error ||
                 payload.error ||

@@ -261,7 +261,7 @@ try {
     result.mints.every(
       (mint) =>
         mint.status === 200 &&
-        mint.auth === (auth === 'oauth' ? 'codex-oauth' : 'api-key'),
+        mint.auth === (auth === 'oauth' ? 'codex-oauth' : 'env'),
     ),
   );
   assert.ok(result.negotiations.every((entry) => entry.status === 201));
