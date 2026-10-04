@@ -197,6 +197,8 @@ async function main() {
         req.respond({
           status: 200,
           contentType: 'application/json',
+          // The bundled server names its vessel provider; attribution reads it.
+          headers: { 'X-Feed-Source': 'AISStream' },
           body: JSON.stringify({ rows: [], status: 'error', error: 'invalid key' }),
         });
         return;
