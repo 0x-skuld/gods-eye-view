@@ -299,25 +299,72 @@ test('OAuth status reports local sign-in availability without returning the toke
   assert.equal(response.body.includes('fixture-oauth-secret'), false);
 });
 
-test('OAuth login endpoint launches local Codex sign-in once and never exposes credentials', async () => {
-  let starts = 0;
-  let clock = 1_000;
+test('OAuth status and token minting report expired sign-in as re-auth required', async () => {
+  const expired = () => {
+    const error = new Error('ChatGPT sign-in has expired.');
+    error.code = 'CODEX_OAUTH_REAUTH_REQUIRED';
+    throw error;
+  };
   const routes = install(
     openAiRealtimeProxy({
       realtime: {
-        resolveOAuthAccessToken: () => {
-          throw new Error('not signed in');
-        },
-        startOAuthLogin: async () => {
-          starts += 1;
-        },
-        now: () => clock,
+        resolveOAuthAccessToken: expired,
+        fetchImpl: () => assert.fail('expired OAuth must not reach OpenAI'),
       },
     }),
   );
+
+  const status = await request(routes.get('/api/realtime/oauth-status'));
+  assert.equal(status.status, 200);
+  assert.deepEqual(status.json(), {
+    available: false,
+    error: 'ChatGPT sign-in has expired.',
+    code: 'CODEX_OAUTH_REAUTH_REQUIRED',
+    reauthRequired: true,
+  });
+
+  const token = await request(routes.get('/api/realtime/token'), {
+    url: '/?auth=oauth',
+  });
+  assert.equal(token.status, 503);
+  assert.equal(token.json().code, 'CODEX_OAUTH_REAUTH_REQUIRED');
+});
+
+test('OAuth login endpoint shares pending attempts and never exposes credentials', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let starts = 0;
+  let spawnReady;
+  let exit;
+  const plugin = openAiRealtimeProxy({
+    realtime: {
+      resolveOAuthAccessToken: () => {
+        throw new Error('not signed in');
+      },
+      startOAuthLogin: async () => {
+        starts += 1;
+        await new Promise((resolve) => {
+          spawnReady = resolve;
+        });
+        return {
+          completion: new Promise((resolve) => {
+            exit = resolve;
+          }),
+          cancel() {},
+        };
+      },
+    },
+  });
+  t.after(plugin.closeBundle);
+  const routes = install(plugin);
   const handler = routes.get('/api/realtime/oauth-login');
 
-  const started = await request(handler, { method: 'POST' });
+  const firstRequest = request(handler, { method: 'POST' });
+  const concurrent = await request(handler, { method: 'POST' });
+  assert.equal(concurrent.status, 202);
+  assert.equal(concurrent.json().started, false);
+  assert.equal(starts, 1, 'reserve the attempt before awaiting spawn');
+  spawnReady();
+  const started = await firstRequest;
   assert.equal(started.status, 202);
   assert.deepEqual(started.json(), {
     available: false,
@@ -326,7 +373,7 @@ test('OAuth login endpoint launches local Codex sign-in once and never exposes c
   });
   assert.equal(starts, 1);
 
-  clock += 1_000;
+  t.mock.timers.tick(31_000);
   const duplicate = await request(handler, { method: 'POST' });
   assert.equal(duplicate.status, 202);
   assert.equal(duplicate.json().pending, true);
@@ -345,6 +392,169 @@ test('OAuth login endpoint launches local Codex sign-in once and never exposes c
   });
   assert.equal(crossOrigin.status, 403);
   assert.equal(starts, 1);
+
+  exit({ exitCode: 1 });
+  await Promise.resolve();
+  const failed = await request(routes.get('/api/realtime/oauth-status'));
+  assert.equal(failed.json().loginFailed, true);
+  assert.equal(failed.json().code, 'CODEX_OAUTH_LOGIN_FAILED');
+});
+
+test('OAuth status follows process completion, permits retry, and checks credential storage', async (t) => {
+  let token = null;
+  let exit;
+  let starts = 0;
+  const plugin = openAiRealtimeProxy({
+    realtime: {
+      resolveOAuthAccessToken: () => token,
+      startOAuthLogin: async () => {
+        starts += 1;
+        return {
+          completion: new Promise((resolve) => {
+            exit = resolve;
+          }),
+          cancel() {},
+        };
+      },
+    },
+  });
+  t.after(plugin.closeBundle);
+  const routes = install(plugin);
+  const launch = () =>
+    request(routes.get('/api/realtime/oauth-login'), { method: 'POST' });
+  const status = () => request(routes.get('/api/realtime/oauth-status'));
+  await launch();
+  exit({ exitCode: 0 });
+  await Promise.resolve();
+  assert.equal(
+    (await status()).json().code,
+    'CODEX_OAUTH_STORAGE_UNAVAILABLE',
+    'exit success alone is not usable sign-in',
+  );
+  await launch();
+  assert.equal(starts, 2, 'failed attempts can be retried immediately');
+  token = 'fixture-private-token';
+  exit({ exitCode: 0 });
+  await Promise.resolve();
+  const ready = await status();
+  assert.deepEqual(ready.json(), { available: true });
+  assert.equal(ready.body.includes(token), false);
+});
+
+test('OAuth login timeout and server shutdown cancel the owned process', async () => {
+  let timeout;
+  let cancelled = 0;
+  let cleared = 0;
+  const plugin = openAiRealtimeProxy({
+    realtime: {
+      resolveOAuthAccessToken: () => null,
+      startOAuthLogin: async () => ({
+        completion: new Promise(() => {}),
+        cancel() {
+          cancelled += 1;
+        },
+      }),
+      setTimer(callback, duration) {
+        timeout = callback;
+        assert.equal(duration, 120_000);
+        return 1;
+      },
+      clearTimer() {
+        cleared += 1;
+      },
+    },
+  });
+  const routes = install(plugin);
+  const launch = () =>
+    request(routes.get('/api/realtime/oauth-login'), { method: 'POST' });
+  await launch();
+  timeout();
+  assert.equal(cancelled, 1);
+  const status = await request(routes.get('/api/realtime/oauth-status'));
+  assert.equal(status.json().code, 'CODEX_OAUTH_LOGIN_TIMEOUT');
+  await launch();
+  plugin.closeBundle();
+  plugin.closeBundle();
+  assert.equal(cancelled, 2, 'shutdown is idempotent');
+  assert.equal(cleared, 2);
+});
+
+test('OAuth launch errors are safe and cross-origin status requests cannot read credentials', async () => {
+  let reads = 0;
+  const routes = install(
+    openAiRealtimeProxy({
+      realtime: {
+        resolveOAuthAccessToken() {
+          reads += 1;
+          return null;
+        },
+        startOAuthLogin: async () => {
+          throw new Error('private-token-fixture');
+        },
+      },
+    }),
+  );
+  const remote = await request(routes.get('/api/realtime/oauth-status'), {
+    origin: 'https://example.com',
+  });
+  assert.equal(remote.status, 403);
+  assert.equal(reads, 0);
+  const failed = await request(routes.get('/api/realtime/oauth-login'), {
+    method: 'POST',
+  });
+  assert.equal(failed.status, 503);
+  assert.equal(failed.json().code, 'CODEX_OAUTH_LOGIN_FAILED');
+  assert.equal(failed.body.includes('private-token-fixture'), false);
+});
+
+test('a login that spawns after timeout is cancelled and cannot replace a retry', async (t) => {
+  let timeout;
+  let releaseSpawn;
+  let cancelled = 0;
+  let launches = 0;
+  const plugin = openAiRealtimeProxy({
+    realtime: {
+      resolveOAuthAccessToken: () => null,
+      startOAuthLogin: async () => {
+        launches += 1;
+        if (launches === 1)
+          await new Promise((resolve) => {
+            releaseSpawn = resolve;
+          });
+        return {
+          completion: new Promise(() => {}),
+          cancel() {
+            cancelled += 1;
+          },
+        };
+      },
+      setTimer(callback) {
+        timeout = callback;
+        return 1;
+      },
+      clearTimer() {},
+    },
+  });
+  t.after(plugin.closeBundle);
+  const routes = install(plugin);
+  const launch = () =>
+    request(routes.get('/api/realtime/oauth-login'), { method: 'POST' });
+  const first = launch();
+  timeout();
+  await launch();
+  releaseSpawn();
+  await first;
+  assert.equal(launches, 2);
+  assert.equal(cancelled, 1, 'late process must not become an orphan');
+  const status = (
+    await request(routes.get('/api/realtime/oauth-status'))
+  ).json();
+  assert.equal(status.pending, true);
+  assert.equal(
+    status.loginFailed,
+    undefined,
+    'the older attempt cannot fail the retry',
+  );
 });
 
 test('OAuth login endpoint selects an existing local sign-in without launching Codex', async () => {

@@ -61,6 +61,19 @@ test('Codex OAuth reader accepts a current ChatGPT token and rejects unusable cr
     }),
     current,
   );
+  assert.equal(
+    readCodexOAuthAccessToken({
+      authPath: '/unused',
+      nowMs,
+      readFile: () =>
+        JSON.stringify({
+          auth_mode: 'chatgpt',
+          tokens: { access_token: current },
+        }),
+    }),
+    current,
+    'GEV does not require or consume the vendor refresh token',
+  );
   for (const readFile of [
     () => '{bad json',
     () => JSON.stringify({ tokens: {} }),
@@ -69,11 +82,6 @@ test('Codex OAuth reader accepts a current ChatGPT token and rejects unusable cr
       JSON.stringify({
         OPENAI_API_KEY: 'sk-fixture',
         tokens: { access_token: current, refresh_token: 'refresh-fixture' },
-      }),
-    () =>
-      JSON.stringify({
-        auth_mode: 'chatgpt',
-        tokens: { access_token: current },
       }),
     () => auth('opaque-token'),
     () => auth('header.not-json.signature'),
@@ -92,13 +100,18 @@ test('Codex OAuth reader accepts a current ChatGPT token and rejects unusable cr
 test('Codex OAuth reader enforces expiry margin and bounds tokens without exp by file age', () => {
   for (const exp of [nowMs / 1000 - 1, nowMs / 1000 + 59]) {
     assert.throws(
-      () =>
+      () => {
         readCodexOAuthAccessToken({
           authPath: '/unused',
           nowMs,
           readFile: () => auth(jwt({ exp })),
-        }),
-      /sign-in has expired/,
+        });
+      },
+      (error) => {
+        assert.match(error.message, /sign-in has expired/);
+        assert.equal(error.code, 'CODEX_OAUTH_REAUTH_REQUIRED');
+        return true;
+      },
     );
   }
   const noExp = jwt({ sub: 'fixture' });
@@ -162,10 +175,88 @@ test('Codex login resolves an installed executable before PATH and starts browse
       return child;
     },
   });
-  assert.deepEqual(await pending, { executable: '/fixture/codex' });
+  const login = await pending;
   assert.equal(unref, 1);
   assert.equal(calls[0].command, '/fixture/codex');
   assert.deepEqual(calls[0].args, ['login']);
   assert.equal(calls[0].options.detached, true);
   assert.equal(calls[0].options.stdio, 'ignore');
+  assert.equal(
+    calls[0].options.env.CODEX_HOME,
+    path.join('/home/fixture', '.codex'),
+  );
+  child.emit('exit', 1);
+  assert.deepEqual(await login.completion, { exitCode: 1 });
+});
+
+test('Codex login refuses a read/write storage mismatch before spawning', async () => {
+  await assert.rejects(
+    startCodexChatGptLogin({
+      environment: { CODEX_AUTH_JSON: '/tmp/another-auth.json' },
+      home: '/home/fixture',
+      executable: 'codex',
+      spawnImpl: () => assert.fail('mismatched storage must not launch login'),
+    }),
+    { code: 'CODEX_OAUTH_STORAGE_MISMATCH' },
+  );
+});
+
+test('Codex login resolves relative CODEX_HOME before changing the child directory', async () => {
+  const child = new EventEmitter();
+  const environment = { CODEX_HOME: './fixture-codex' };
+  const login = await startCodexChatGptLogin({
+    environment,
+    executable: 'codex',
+    spawnImpl(_command, _args, options) {
+      assert.equal(
+        options.env.CODEX_HOME,
+        path.resolve(environment.CODEX_HOME),
+      );
+      queueMicrotask(() => child.emit('spawn'));
+      return child;
+    },
+  });
+  assert.equal(
+    environment.CODEX_HOME,
+    './fixture-codex',
+    'caller environment is unchanged',
+  );
+  child.emit('exit', 0);
+  assert.deepEqual(await login.completion, { exitCode: 0 });
+});
+
+test('Codex login hides spawn errors and can cancel only its owned child', async () => {
+  const child = new EventEmitter();
+  await assert.rejects(
+    startCodexChatGptLogin({
+      executable: 'codex',
+      spawnImpl() {
+        queueMicrotask(() =>
+          child.emit('error', new Error('private-token-fixture')),
+        );
+        return child;
+      },
+    }),
+    (error) =>
+      error.code === 'CODEX_OAUTH_LOGIN_FAILED' &&
+      !error.message.includes('private-token-fixture'),
+  );
+
+  const running = new EventEmitter();
+  let cancelled = 0;
+  running.kill = (signal) => {
+    assert.equal(signal, 'SIGTERM');
+    cancelled += 1;
+    running.emit('exit', null);
+  };
+  const login = await startCodexChatGptLogin({
+    executable: 'codex',
+    spawnImpl() {
+      queueMicrotask(() => running.emit('spawn'));
+      return running;
+    },
+  });
+  login.cancel();
+  assert.equal(cancelled, 1);
+  assert.deepEqual(await login.completion, { exitCode: null });
 });

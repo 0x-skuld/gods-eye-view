@@ -16,7 +16,7 @@ import { GEV_REALTIME_TOOLS } from './tools.js';
 import {
   preferCodexOAuth,
   readCodexOAuthAccessToken,
-  startCodexChatGptLogin,
+  createCodexOAuthLogin,
 } from './codex-auth.js';
 
 const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -53,7 +53,7 @@ function resolveRealtimeAuthMode(query) {
 }
 
 function createRealtimeOAuthStatusHandler({
-  resolveOAuthAccessToken = () => readCodexOAuthAccessToken(),
+  oauthLogin = createCodexOAuthLogin(),
 } = {}) {
   return (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -73,30 +73,14 @@ function createRealtimeOAuthStatusHandler({
       );
       return;
     }
-    try {
-      const token = resolveOAuthAccessToken();
-      if (!token) throw new Error('ChatGPT sign-in is unavailable');
-      res.statusCode = 200;
-      res.end(JSON.stringify({ available: true }));
-    } catch (error) {
-      res.statusCode = 200;
-      res.end(
-        JSON.stringify({
-          available: false,
-          error: error?.message || 'ChatGPT sign-in is unavailable',
-        }),
-      );
-    }
+    res.statusCode = 200;
+    res.end(JSON.stringify(oauthLogin.status()));
   };
 }
 
 function createRealtimeOAuthLoginHandler({
-  resolveOAuthAccessToken = () => readCodexOAuthAccessToken(),
-  startOAuthLogin = () => startCodexChatGptLogin(),
-  now = () => Date.now(),
-  restartCooldownMs = 30_000,
+  oauthLogin = createCodexOAuthLogin(),
 } = {}) {
-  let lastStartedAt = 0;
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'application/json');
@@ -127,42 +111,15 @@ function createRealtimeOAuthLoginHandler({
     }
 
     try {
-      if (resolveOAuthAccessToken()) {
-        res.statusCode = 200;
-        res.end(
-          JSON.stringify({ available: true, started: false, pending: false }),
-        );
-        return;
-      }
+      const result = await oauthLogin.start();
+      res.statusCode = result.available ? 200 : result.loginFailed ? 503 : 202;
+      res.end(JSON.stringify(result));
     } catch {
-      // No usable local token yet; launch the supported Codex sign-in flow.
-    }
-
-    const currentTime = now();
-    if (
-      lastStartedAt > 0 &&
-      currentTime - lastStartedAt < Math.max(0, restartCooldownMs)
-    ) {
-      res.statusCode = 202;
-      res.end(
-        JSON.stringify({ available: false, started: false, pending: true }),
-      );
-      return;
-    }
-
-    try {
-      await startOAuthLogin();
-      lastStartedAt = currentTime;
-      res.statusCode = 202;
-      res.end(
-        JSON.stringify({ available: false, started: true, pending: true }),
-      );
-    } catch (error) {
       res.statusCode = 503;
       res.end(
         JSON.stringify({
           available: false,
-          error: error?.message || 'Could not start ChatGPT sign-in',
+          error: 'Could not start ChatGPT sign-in',
         }),
       );
     }
@@ -242,7 +199,7 @@ function createRealtimeTokenHandler({
         res.end(
           JSON.stringify({
             error: error?.message || 'ChatGPT sign-in is unavailable',
-            code: 'CODEX_OAUTH_UNAVAILABLE',
+            code: error?.code || 'CODEX_OAUTH_UNAVAILABLE',
           }),
         );
         return;

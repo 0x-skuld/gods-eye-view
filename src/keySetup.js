@@ -75,7 +75,13 @@ export async function waitForChatGptOAuth({
       signal,
     });
     const payload = await response.json().catch(() => ({}));
+    if (signal?.aborted) return false;
     if (response.ok && payload.available) return true;
+    if (!response.ok || payload.loginFailed) {
+      throw new Error(
+        payload.error || 'Could not check ChatGPT sign-in. Try again.',
+      );
+    }
     if (now() >= deadline) break;
     await sleep(Math.max(0, pollMs), signal);
   }
@@ -288,6 +294,7 @@ export async function initKeySetup({
   const statusLine = root.querySelector('[data-key-setup-status]');
   const defaultStatusText = statusLine?.textContent || '';
   let busy = false;
+  let oauthBusy = false;
   let open = false;
 
   const render = (nextStatus) => {
@@ -303,6 +310,10 @@ export async function initKeySetup({
     rowsHost.textContent = '';
     for (const key of status.keys || [])
       rowsHost.append(buildRow(documentRef, key));
+    for (const button of rowsHost.querySelectorAll(
+      '[data-cloud-voice-auth-toggle]',
+    ))
+      button.disabled = oauthBusy;
   };
 
   const visible = () =>
@@ -435,6 +446,7 @@ export async function initKeySetup({
       '[data-cloud-voice-auth-toggle]',
     );
     if (authButton && !disposed) {
+      if (oauthBusy) return;
       void (async () => {
         const current = readStoredCloudVoiceAuthMode();
         if (current === 'oauth') {
@@ -444,6 +456,7 @@ export async function initKeySetup({
           return;
         }
         authButton.disabled = true;
+        oauthBusy = true;
         say('Checking local ChatGPT OAuth sign-in…');
         try {
           const response = await doFetch('/api/realtime/oauth-status', {
@@ -451,6 +464,11 @@ export async function initKeySetup({
             signal: lifetime.signal,
           });
           const payload = await response.json().catch(() => ({}));
+          if (lifetime.signal.aborted) return;
+          if (!response.ok)
+            throw new Error(
+              payload.error || 'Could not check ChatGPT sign-in.',
+            );
           if (response.ok && payload.available) {
             writeStoredCloudVoiceAuthMode('oauth');
             render(status);
@@ -460,13 +478,18 @@ export async function initKeySetup({
             return;
           }
 
-          say('Opening ChatGPT sign-in in your browser…');
+          say(
+            payload.code === 'CODEX_OAUTH_REAUTH_REQUIRED'
+              ? 'ChatGPT sign-in expired. Opening sign-in again…'
+              : 'Opening ChatGPT sign-in in your browser…',
+          );
           const loginResponse = await doFetch('/api/realtime/oauth-login', {
             method: 'POST',
             cache: 'no-store',
             signal: lifetime.signal,
           });
           const loginPayload = await loginResponse.json().catch(() => ({}));
+          if (lifetime.signal.aborted) return;
           if (!loginResponse.ok && loginResponse.status !== 202) {
             say(
               loginPayload.error ||
@@ -491,9 +514,10 @@ export async function initKeySetup({
             fetchImpl: doFetch,
             signal: lifetime.signal,
           });
+          if (lifetime.signal.aborted) return;
           if (!available) {
             say(
-              'ChatGPT sign-in is still pending. Finish it in the browser, then click USE CHATGPT OAUTH again.',
+              'ChatGPT sign-in timed out. Click USE CHATGPT OAUTH to try again.',
             );
             return;
           }
@@ -506,7 +530,11 @@ export async function initKeySetup({
           if (lifetime.signal.aborted) return;
           say(`OAuth check failed: ${error?.message || error}`);
         } finally {
-          authButton.disabled = false;
+          oauthBusy = false;
+          for (const button of rowsHost.querySelectorAll(
+            '[data-cloud-voice-auth-toggle]',
+          ))
+            button.disabled = false;
         }
       })();
       return;
