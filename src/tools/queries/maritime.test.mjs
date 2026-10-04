@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { composeCatalog, coreTools } from '../index.js';
 import { LiveSourceError } from '../../sources/live/contract.js';
-import { createAisStreamSource } from '../../sources/live/standalone.js';
+import { createVesselSource } from '../../sources/live/standalone.js';
 import { AISSTREAM_CACHE_MAX } from '../../../server/providers/vessels/ais-store.js';
 
 const vessel = (id, latitude, longitude, extra = {}) => ({
@@ -184,7 +184,7 @@ test('a missing AIS key surfaces as an unavailable feed', async () => {
 
 test('vessel searches ask for every vessel the server retains', async () => {
   const requested = [];
-  const source = createAisStreamSource({
+  const source = createVesselSource({
     origin: () => 'http://localhost',
     fetchImpl: async (url) => {
       requested.push(new URL(url).searchParams.get('maxRows'));
@@ -204,7 +204,7 @@ test('vessel searches ask for every vessel the server retains', async () => {
 
 test('an area search names its area to the server; a vessel lookup asks for every vessel', async () => {
   const requested = [];
-  const source = createAisStreamSource({
+  const source = createVesselSource({
     origin: () => 'http://localhost',
     fetchImpl: async (url) => {
       requested.push(new URL(url).searchParams);
