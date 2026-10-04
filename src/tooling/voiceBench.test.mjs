@@ -1,3 +1,4 @@
+import { GEV_ACTION_SCHEMAS } from '../voice/actionSchemas.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -80,7 +81,10 @@ test('toGeminiSchema drops unsupported keywords and expresses unions as anyOf', 
 });
 
 test('referent-only tracking keeps object alternatives in Gemini OpenAPI mode', () => {
-  const track = toGeminiDeclarations(GEV_REALTIME_TOOLS, {
+  // The full action schemas carry the query-or-referent rule; the OpenAI
+  // Realtime tools omit it because that API rejects top-level anyOf.
+  const fullTools = GEV_ACTION_SCHEMAS.map((schema) => ({ type: 'function', ...schema }));
+  const track = toGeminiDeclarations(fullTools, {
     mode: 'openapi',
   }).find((tool) => tool.name === 'track_entity');
   assert.deepEqual(

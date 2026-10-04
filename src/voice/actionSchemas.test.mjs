@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { GEV_ACTION_SCHEMAS, createActionTools } from './actionSchemas.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
-import { validateArgs } from '../../scripts/voice-bench/grade.mjs';
+import {
+  validateArgs,
+  validateCall,
+} from '../../scripts/voice-bench/grade.mjs';
 
 const stable = (value) =>
   Array.isArray(value)
@@ -30,8 +33,9 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     digest,
     // Re-derived for the voice layer manifest (generated layer enums and
     // aliases), point-and-ask (pointer sentinels, referent args) and the
-    // consolidated tool wording (each policy stated once).
-    'a824c2ed0ceb553eb3041350856db05dbfc5abad8a3fa17d29dc378bf7a732d2',
+    // consolidated tool wording (each policy stated once); model-facing tools
+    // omit top-level anyOf (OpenAI rejects it).
+    '66c955a41e36c6e7d2d255a950993128528288be13946fe4f7dacb05ad2ba291',
   );
 });
 
@@ -139,7 +143,7 @@ test('all legacy action arguments are byte-identical after removing the delibera
 });
 
 test('track_entity accepts a referent alone but rejects an empty target', () => {
-  const schema = GEV_REALTIME_TOOLS.find(
+  const schema = GEV_ACTION_SCHEMAS.find(
     (tool) => tool.name === 'track_entity',
   ).parameters;
   assert.deepEqual(validateArgs(schema, { referent: 2 }), []);
@@ -150,4 +154,29 @@ test('track_entity accepts a referent alone but rejects an empty target', () => 
   assert.ok(validateArgs(schema, { query: '   ' }).length > 0);
   assert.ok(validateArgs(schema, { referent: 0 }).length > 0);
   assert.ok(validateArgs(schema, { referent: 6 }).length > 0);
+});
+
+test('tools sent to the model never carry a top-level schema combinator', () => {
+  for (const tool of createActionTools()) {
+    assert.equal(tool.parameters.type, 'object', tool.name);
+    for (const key of ['anyOf', 'oneOf', 'allOf', 'enum', 'not'])
+      assert.equal(tool.parameters[key], undefined, `${tool.name}.${key}`);
+  }
+  // The runner still knows track_entity needs a query or a referent.
+  const track = GEV_ACTION_SCHEMAS.find((s) => s.name === 'track_entity');
+  assert.ok(track.parameters.anyOf);
+});
+
+test('the benchmark still rejects an empty track_entity although the model-facing tool omits anyOf', () => {
+  assert.ok(
+    validateCall(GEV_REALTIME_TOOLS, { name: 'track_entity', args: {} })
+      .length > 0,
+  );
+  assert.deepEqual(
+    validateCall(GEV_REALTIME_TOOLS, {
+      name: 'track_entity',
+      args: { referent: 2 },
+    }),
+    [],
+  );
 });

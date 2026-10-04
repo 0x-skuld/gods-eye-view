@@ -670,11 +670,12 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // Re-derived for the voice layer manifest (generated layer enums, alias and
   // field hints), point-and-ask's pointer/referent arguments and the prompt
   // consolidation (shorter analyst, annotate_map and ISS wording), plus the
-  // referent-only track_entity alternative; the missions still ride existing tools.
-  assert.equal(block.length, 28922, 'serialized tool schema length drifted');
+  // referent-only track_entity alternative (kept out of the model-facing
+  // schema, which may not carry top-level anyOf); the missions still ride existing tools.
+  assert.equal(block.length, 28831, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '2b0b1b6677eb735a80fb3955544bf6909df1acf74ca83d3047fcd51edf15a04e',
+    'cce7eb17b2af9ac34c06bdf59d1d31f4e8ace6a9d695d79111f3e4d49d033f1f',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
   const instructions = fs.readFileSync(new URL('../server/providers/openai/instructions.js', import.meta.url), 'utf8');

@@ -691,7 +691,7 @@ export function createGevActionRunner({
       const style = normalizeStyle(args.style);
       if (!style)
         throw new Error(`Unknown visual style: ${args.style || 'missing'}`);
-      styleManager.setStyle(style);
+      styleManager.setStyle(style, { userInitiated: true });
       return { ok: true, action: 'set_visual_style', style };
     }
 
@@ -4870,6 +4870,13 @@ async function runAnalystQuery(
   // arbitrary points — only "how many aircraft around <this contact>" is
   // unified, because that is the question the panel is already answering.
   if (entityWindow) {
+    // The detached Contacts snapshot keeps its own coverage; carry the same
+    // viewport note so both answer shapes say what they measured.
+    if (viewportScoped && entityWindow.coverage)
+      entityWindow.coverage = {
+        ...entityWindow.coverage,
+        note: result.coverage?.note,
+      };
     return entityWindow;
   }
 

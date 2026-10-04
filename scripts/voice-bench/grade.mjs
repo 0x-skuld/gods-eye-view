@@ -13,6 +13,7 @@
  * is matched through its comma-joined string form, so `{ layers: 'earthquakes' }`
  * matches `layers: ['earthquakes']`.
  */
+import { GEV_ACTION_SCHEMAS } from '../../src/voice/actionSchemas.js';
 export function matchArgs(expected, actual) {
   return Object.entries(expected).every(([k, v]) => {
     const got = actual?.[k];
@@ -211,7 +212,14 @@ export function validateArgs(schema, value, where = 'args') {
 export function validateCall(tools, c) {
   const tool = tools.find((t) => t.name === c.name);
   if (!tool) return [`unknown tool ${c.name}`];
-  return validateArgs(tool.parameters, c.args ?? {});
+  // The runner validates app actions against their full schema, including
+  // top-level rules (anyOf) that the model-facing tools must omit.
+  const action = GEV_ACTION_SCHEMAS.find((schema) => schema.name === c.name);
+  const rules = action?.parameters
+    ? { ...tool.parameters, anyOf: action.parameters.anyOf }
+    : tool.parameters;
+  if (!rules.anyOf) delete rules.anyOf;
+  return validateArgs(rules, c.args ?? {});
 }
 
 // ── Coverage probe grading ─────────────────────────────────────────────────

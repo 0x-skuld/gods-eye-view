@@ -901,11 +901,19 @@ export function createActionTools(descriptions = {}) {
     if (!schemas.some((schema) => schema.name === name))
       throw new TypeError('Unknown action description: ' + name);
   }
-  return schemas.map((schema) => ({
-    type: 'function',
-    ...describe(schema, descriptions[schema.name] || {}),
-  }));
+  return schemas.map((schema) => {
+    const tool = {
+      type: 'function',
+      ...describe(schema, descriptions[schema.name] || {}),
+    };
+    // Function-calling APIs reject anyOf/oneOf/allOf at the top level of
+    // parameters; the runner and benchmark validate those rules themselves.
+    for (const key of TOP_LEVEL_COMBINATORS) delete tool.parameters?.[key];
+    return tool;
+  });
 }
+
+const TOP_LEVEL_COMBINATORS = ['anyOf', 'oneOf', 'allOf'];
 
 function describe(schema, metadata, allowDescription = true) {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata))

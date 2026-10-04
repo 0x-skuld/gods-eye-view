@@ -31,6 +31,7 @@ import {
   readStoredVoiceLimits,
   writeStoredVoiceTier,
   writeStoredVoiceLimits,
+  withToolCatalog,
 } from './gevRealtime.js';
 import { createVoiceCostTracker } from './voiceCost.js';
 
@@ -3725,3 +3726,43 @@ test('a claimed Space hold barges in on the assistant; a short tap never does', 
 const testPlaceSearch = () => createStandalonePlaceSearch({ resolveApiKey: () => globalThis.window?.__GOOGLE_MAPS_API_KEY__ });
 function createGevActionRunner(options) { return createActionRunner({ placeSearch: testPlaceSearch(), ...options }); }
 function controlRadio(viewer, manager, args, options) { return runControlRadio(viewer, manager, args, { placeSearch: testPlaceSearch(), ...options }); }
+
+test('voice runs app actions itself and other tools through the catalog', async () => {
+  const actions = [];
+  const runner = async (name, args) => {
+    actions.push([name, args]);
+    return { ok: true, action: name };
+  };
+  const calls = [];
+  let loads = 0;
+  const catalog = {
+    get: (name) => (name === 'get_wind' ? { name } : undefined),
+    async call(name, args, options) {
+      calls.push([name, args, options.signal]);
+      return { summary: 'Calm.', data: { calm: true } };
+    },
+  };
+  const run = withToolCatalog(runner, async () => {
+    loads += 1;
+    return catalog;
+  });
+  const signal = new AbortController().signal;
+  assert.deepEqual(await run('zoom_to_globe', {}), {
+    ok: true,
+    action: 'zoom_to_globe',
+  });
+  assert.equal(loads, 0);
+  assert.deepEqual(
+    await run('get_wind', { location: { place: 'Oslo' } }, { signal }),
+    { ok: true, tool: 'get_wind', summary: 'Calm.', data: { calm: true } },
+  );
+  assert.deepEqual(calls, [
+    ['get_wind', { location: { place: 'Oslo' } }, signal],
+  ]);
+  await run('not_a_tool', {});
+  assert.deepEqual(
+    actions.map(([name]) => name),
+    ['zoom_to_globe', 'not_a_tool'],
+  );
+  assert.equal(withToolCatalog(runner, undefined), runner);
+});
