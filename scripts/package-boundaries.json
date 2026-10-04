@@ -3168,6 +3168,15 @@
     ],
     "external": []
   },
+  "tools-panel": {
+    "exports": ["./tools/panel"],
+    "modules": [
+      "src/tools/panel.js",
+      "src/tools/globePanel.js",
+      "src/app/globePanelRuntime.js"
+    ],
+    "external": []
+  },
   "tools-services": {
     "exports": ["./tools/services"],
     "modules": [
