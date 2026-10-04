@@ -3025,6 +3025,16 @@ group in `src/data/layerState.js` and its modules to
 keyless provider registers, `requiresKeyId` on the layer becomes null and the
 key gate moves to the chips, by design.
 
+Street Level has two browser gates. `npm run qa:street-level -- --url <dev
+server>` is the live run: with `MAPILLARY_CLIENT_TOKEN` it covers everything
+up to opening, expanding and closing a photo. `npm run
+qa:street-level:fixtures -- --url <dev server>` is hermetic: the page's
+Mapillary status and coverage-tile requests are answered from generated
+fixtures (`providers/mapillary/coverageFixture.mjs`), so it needs no token or
+Mapillary network, skips only the photo steps, and asserts that the 360° and
+SINCE filters actually remove sequences. CI runs the fixture gate and
+`qa:panel-resize` against a key-less dev server.
+
 Directions is a keyless front end to the routing the voice agent already
 uses. Its row chips are the whole interface: DRIVE / WALK / BIKE pick the
 profile; SET A and SET B arm the next globe click (Escape or a second press

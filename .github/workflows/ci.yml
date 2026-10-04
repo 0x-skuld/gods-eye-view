@@ -59,6 +59,51 @@ jobs:
       - name: Build production bundle
         run: npm run build
 
+  street-level-browser:
+    # The Street Level gate in its hermetic mode: Mapillary status and coverage
+    # tiles are answered from generated fixtures, so no token or Mapillary
+    # network is needed. The steps that open a photo need live imagery and
+    # are skipped here; run `npm run qa:street-level` with a token for them.
+    name: Street Level browser gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GEV_REQUIRE_ALLOCATION_GATE: '0'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.14.0
+          cache: npm
+
+      - name: Install locked dependencies and headless Chrome
+        run: npm ci
+
+      - name: Start the dev server
+        run: |
+          npx vite --port 4173 --strictPort > vite.log 2>&1 &
+          for attempt in $(seq 1 90); do
+            curl -sf http://localhost:4173/ > /dev/null && exit 0
+            sleep 2
+          done
+          cat vite.log
+          exit 1
+
+      - name: Street Level gate with Mapillary fixtures
+        run: npm run qa:street-level:fixtures -- --url http://localhost:4173
+
+      - name: Portable panel gate
+        run: npm run qa:panel-resize -- --url http://localhost:4173
+
+      - name: Dev server log
+        if: failure()
+        run: cat vite.log
+
   windows-onboarding:
     name: Windows onboarding
     runs-on: windows-latest

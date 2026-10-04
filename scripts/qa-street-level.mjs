@@ -6,10 +6,19 @@
  * filter and SINCE slider, the viewer (visible without scrolling, expanded
  * dialog, close) and the panel as a floating, resizable window. Run with `npm run qa:street-level -- --url http://localhost:4173`.
  * Without MAPILLARY_CLIENT_TOKEN on the server only the keyless steps run.
+ *
+ * `--fixtures` makes the run hermetic for Mapillary (the CI mode): the page's
+ * Mapillary status and coverage-tile requests are answered with generated
+ * fixtures (see fixtureTile) and nothing reaches mapillary.com, so no token
+ * is needed. The steps that open a photo need MapillaryJS and real imagery
+ * and are skipped; everything else runs, with stricter filter assertions
+ * because the fixture data is known.
  */
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { LAYER_STATE_REGISTRY } from '../src/data/layerState.js';
+import { tileBounds } from '../src/layers/streetLevel/tileMath.js';
+import { encodeCoverageTile } from '../src/layers/streetLevel/providers/mapillary/coverageFixture.mjs';
 
 /** Viewports every layout assertion runs at. */
 export const VIEWPORTS = Object.freeze([
@@ -41,11 +50,100 @@ export function isCollapsed(classList) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const DAY_MS = 86_400_000;
+
+/**
+ * Synthetic coverage for any tile, so fixture runs are deterministic: at
+ * street zooms a grid of four east-west and four north-south sequences (half
+ * 360°, half captured three years ago), at overview zooms a few points.
+ * @returns {Uint8Array} empty for zooms that carry nothing
+ */
+export function fixtureTile(z, x, y, now = Date.now()) {
+  const tile = { x, y, z };
+  const { west, east, south, north } = tileBounds(x, y, z);
+  const at = (t, lo, hi) => lo + (hi - lo) * t;
+  if (z <= 5)
+    return encodeCoverageTile(tile, {
+      overview: [0.25, 0.5, 0.75].map((t, i) => ({
+        id: `fx-${z}-${x}-${y}-o${i}`,
+        lon: at(t, west, east),
+        lat: at(t, south, north),
+        isPano: i === 1,
+        capturedAt: now - 30 * DAY_MS,
+      })),
+    });
+  if (z < 11) return new Uint8Array(0);
+  const margin = (east - west) * 0.05;
+  const sequences = [];
+  for (let i = 1; i <= 4; i++) {
+    const t = i / 5;
+    const old = i > 2;
+    sequences.push({
+      id: `fx-${z}-${x}-${y}-h${i}`,
+      isPano: i % 2 === 0,
+      capturedAt: now - (old ? 1100 : 30) * DAY_MS,
+      parts: [
+        [
+          [west + margin, at(t, south, north)],
+          [east - margin, at(t, south, north)],
+        ],
+      ],
+    });
+    sequences.push({
+      id: `fx-${z}-${x}-${y}-v${i}`,
+      isPano: i % 2 === 1,
+      capturedAt: now - (old ? 30 : 1100) * DAY_MS,
+      parts: [
+        [
+          [at(t, west, east), south + margin],
+          [at(t, west, east), north - margin],
+        ],
+      ],
+    });
+  }
+  return encodeCoverageTile(tile, { sequences });
+}
+
+/** Answer the page's Mapillary requests from fixtures; nothing reaches mapillary.com. */
+async function serveFixtures(page) {
+  await page.setRequestInterception(true);
+  page.on('request', (request) => {
+    const address = new URL(request.url());
+    if (address.pathname === '/api/mapillary/status')
+      return request.respond({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ configured: true }),
+      });
+    const tile = address.pathname.match(
+      /^\/api\/mapillary\/tiles\/coverage\/(\d+)\/(\d+)\/(\d+)$/,
+    );
+    if (tile) {
+      const bytes = fixtureTile(
+        Number(tile[1]),
+        Number(tile[2]),
+        Number(tile[3]),
+      );
+      return bytes.length
+        ? request.respond({
+            status: 200,
+            contentType: 'application/x-protobuf',
+            body: Buffer.from(bytes),
+          })
+        : request.respond({ status: 204, body: '' });
+    }
+    if (/(^|\.)mapillary\.com$/.test(address.hostname))
+      return request.respond({ status: 503, body: '' });
+    return request.continue();
+  });
+}
+
 async function main() {
   const { default: puppeteer } = await import('puppeteer');
   const args = process.argv.slice(2);
   const urlIndex = args.indexOf('--url');
   const url = urlIndex >= 0 ? args[urlIndex + 1] : 'http://localhost:4173';
+  const fixtures = args.includes('--fixtures');
   const browser = await puppeteer.launch({
     headless: true,
     executablePath:
@@ -62,8 +160,13 @@ async function main() {
     console.log(`ok ${passed} ${label}`);
     return result;
   };
+  // Opening a photo needs MapillaryJS and real imagery: live runs only.
+  const photoStep = fixtures
+    ? async (label) => console.log(`skip (fixtures) ${label}`)
+    : step;
   try {
     const page = await browser.newPage();
+    if (fixtures) await serveFixtures(page);
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     // The layer swallows listener exceptions into a console warning; surface them.
@@ -342,6 +445,8 @@ async function main() {
         await sleep(600);
         const after = (await ui()).coverage.count;
         assert.ok(after <= before, `${after} ≤ ${before}`);
+        // The fixtures hold flat sequences too, so the filter must drop some.
+        if (fixtures) assert.ok(after < before, `${after} < ${before}`);
         assert.equal((await ui()).filter.pano, 'pano');
         // The click is a user params request, so the share link records it
         // under Street Level's share token, whatever the ledger assigned.
@@ -376,6 +481,11 @@ async function main() {
         await sleep(600);
         const narrowed = await ui();
         assert.equal(narrowed.filter.sinceDays, 365);
+        if (fixtures)
+          assert.ok(
+            narrowed.coverage.count < before,
+            `fixtures hold older sequences: ${narrowed.coverage.count} < ${before}`,
+          );
         assert.ok(
           narrowed.coverage.count <= before,
           `${narrowed.coverage.count} ≤ ${before}`,
@@ -393,7 +503,7 @@ async function main() {
         );
       },
     );
-    await step(
+    await photoStep(
       'opening the nearest image shows the viewer with a caption',
       async () => {
         // Fire and forget: the open can outlive one CDP call, so poll instead.
@@ -604,7 +714,7 @@ async function main() {
         await setStack(original);
       },
     );
-    await step(
+    await photoStep(
       'EXPAND opens a modal dialog and Esc returns focus to the button',
       async () => {
         await page.click('#sl-viewer-expand');
@@ -637,18 +747,21 @@ async function main() {
         );
       },
     );
-    await step('× closes the image and deselects it on the globe', async () => {
-      await page.click('#sl-viewer-close');
-      await sleep(500);
-      const after = await page.evaluate(() => {
-        const u = window.__godsEyeView.dataManager.layers
-          .get('street-level')
-          .module.getUIState();
-        return { open: u.street.open, sequence: u.sequence.selectedId };
-      });
-      assert.equal(after.open, false);
-      assert.equal(after.sequence, null);
-    });
+    await photoStep(
+      '× closes the image and deselects it on the globe',
+      async () => {
+        await page.click('#sl-viewer-close');
+        await sleep(500);
+        const after = await page.evaluate(() => {
+          const u = window.__godsEyeView.dataManager.layers
+            .get('street-level')
+            .module.getUIState();
+          return { open: u.street.open, sequence: u.sequence.selectedId };
+        });
+        assert.equal(after.open, false);
+        assert.equal(after.sequence, null);
+      },
+    );
     const floating = () =>
       page.$eval('#street-level-panel', (node) =>
         node.classList.contains('panel-floating'),
@@ -672,7 +785,7 @@ async function main() {
         'a header drag lifts the panel out of the rail',
       );
     };
-    await step(
+    await photoStep(
       'the panel floats on a header drag, resizes, and the viewer takes the room',
       async () => {
         await page.evaluate((id) => {
@@ -717,7 +830,7 @@ async function main() {
         );
       },
     );
-    await step(
+    await photoStep(
       'SHRINK after EXPAND docks the window back in the rail at its default size',
       async () => {
         await page.click('#sl-viewer-expand');
@@ -765,7 +878,7 @@ async function main() {
         });
       },
     );
-    await step(
+    await photoStep(
       'on a phone the whole photo fits in the docked panel',
       async () => {
         // Width alone drives the phone layout; toggling isMobile would reload.
