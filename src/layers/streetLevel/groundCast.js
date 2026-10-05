@@ -206,10 +206,18 @@ export function createGroundCaster({
     return run;
   }
 
-  /** `prepare` for lines, including the points densifying adds. */
+  /**
+   * `prepare` for lines, including the points densifying adds. `castLine`
+   * densifies finer when mesh heights refine it, and those points can fall in
+   * grid cells the coarse points skip, so both sets are prepared: otherwise
+   * the cast comes back null and the line stays draped over roofs and trees.
+   */
   function prepareLines(lines, options) {
     return prepare(
-      lines.flatMap((coords) => densifyLine(coords)),
+      lines.flatMap((coords) => [
+        ...densifyLine(coords),
+        ...densifyLine(coords, MESH_DENSIFY_DEG),
+      ]),
       options,
     );
   }

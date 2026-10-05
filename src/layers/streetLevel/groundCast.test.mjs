@@ -254,3 +254,31 @@ test('cancelling a prepare cancels its terrain request', async () => {
   assert.equal(seen.length, 1);
   assert.equal(seen[0], controller.signal, 'the tile signal reaches the proxy');
 });
+
+test('prepared lines always cast with the mesh, however their segments cross the grid (review IC8 P1)', async () => {
+  // Seeded walks with 50–300 m segments: the finer mesh densifying used to
+  // land in grid cells the coarse points skipped, so most of them came back
+  // null and stayed draped over roofs.
+  let seed = 7;
+  const random = () => {
+    seed = (seed * 16807) % 2147483647;
+    return seed / 2147483647;
+  };
+  let failures = 0;
+  for (let n = 0; n < 300; n++) {
+    const caster = createGroundCaster({ terrain: fakeTerrain() });
+    const line = [[10 + random() * 0.01, 50 + random() * 0.01]];
+    for (let k = 0; k < 10; k++) {
+      const [lon, lat] = line[line.length - 1];
+      const length = (50 + random() * 250) / 111_000;
+      const angle = random() * 2 * Math.PI;
+      line.push([
+        lon + length * Math.cos(angle),
+        lat + length * Math.sin(angle),
+      ]);
+    }
+    assert.equal(await caster.prepareLines([line]), true);
+    if (caster.castLine(line, { meshAt: () => undefined }) === null) failures++;
+  }
+  assert.equal(failures, 0);
+});
