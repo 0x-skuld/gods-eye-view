@@ -14,6 +14,17 @@
 
 - Street Level coverage no longer floats over trees and bridges on the Google 3D map. At street zoom, sequence lines, image cones and the position marker are placed on the bare earth from the terrain service (with a 2 m lift) instead of being draped on the top of the photoreal mesh, so buildings and tree canopies hide what is behind them; other maps and higher views keep draped lines. Opening a photo no longer flies the camera underground when the Google tiles under it have not loaded yet. Near the camera the placement is refined against the rendered Google 3D surface, so lines also follow freeways in trenches and steep streets, and stay on the road under trees.
 
+- Add Norway's road cameras from Statens vegvesen as a CCTV pack. The camera
+  list is one keyless GeoJSON request to the agency's OGC API view of its
+  DATEX 3.1 CCTV table, so no DATEX account is needed. Every working camera
+  loads (~850; faulty ones are dropped) under one "Norway" category, and the
+  ~135 working cameras that publish HLS play as live video through the existing in-memory
+  relay with the still as fallback. Frames and manifests are pinned to each
+  camera's own path on the agency hosts. `CCTV_VEGVESEN_ENABLED=0` disables
+  the pack, `CCTV_VEGVESEN_MAX_SOURCES` caps it (keeping cameras nearest the
+  largest cities) and `CCTV_VEGVESEN_VIDEO=0` keeps stills only. Attributed
+  under NLOD 2.0.
+
 ## [0.2.1] — 2026-10-02 — God's Eye View through Your Agent (with security fixes and other features)
 
 - Ship each bundled data pack once. The region, marine, admin-boundary,
@@ -438,6 +449,7 @@
 Add feed provenance to analyst/view answers and HUD context while retaining existing response fields and runner ownership (Matt Van Horn, #347).
 
 Analyst records for loaded satellites, datacenters and dams, with explicit bounded count/rank coverage (Matt Van Horn, #351).
+
 - New Fire Perimeters layer (Events group): live NIFC WFIGS interagency
   wildfire incident perimeters as ground-clamped polygons with a
   containment-colored fire line, refreshed every 5 minutes from the public
@@ -713,7 +725,6 @@ This changelog records public product changes. For the authoritative description
 of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md).
 
 ### Other changes
-
 
 - Add ECMWF IFS model selection to Wind (#464, thanks @beneduzi), with model-scoped forecast-step caches, cancellation of replaced requests, and separate issue/valid timestamps.
 
@@ -1523,4 +1534,3 @@ represent previously published GitHub Releases.
 ## [0.1.0] — 2026-02-09
 
 - Initial project version.
-
