@@ -8,9 +8,12 @@ import {
   TILE_DISK_TTL_MS,
   TILE_DISK_SWEEP_INTERVAL_MS,
   TILE_DISK_MAX_BYTES,
+  TILE_DISK_FILE_OVERHEAD_BYTES,
   TILE_MAX_BYTES,
   TILE_MEMORY_BUDGET_BYTES,
+  TILE_MEMORY_ENTRY_OVERHEAD_BYTES,
   TILE_FETCH_TIMEOUT_MS,
+  TILE_UPSTREAM_CONCURRENCY,
   TILE_KEY_REJECTED_HOLD_MS,
   TILE_RATE_LIMIT_HOLD_MS,
   TILE_RATE_LIMIT_MAX_HOLD_MS,
@@ -108,7 +111,9 @@ export function normalizeTileAddress({ layer, z, x, y }) {
 
 /** @type {Map<string, {bytes: Buffer, at: number}>} insertion-ordered LRU */
 const _memory = new Map();
+/** Charged bytes: every entry's size plus a fixed overhead (empty tiles too). */
 let _memoryBytes = 0;
+const memoryCost = (bytes) => bytes.length + TILE_MEMORY_ENTRY_OVERHEAD_BYTES;
 /**
  * Upstream fetches in progress, shared by every request for the same tile.
  * A flight owns its controller; callers only count as waiters, and the last
@@ -124,7 +129,7 @@ function memoryGet(key) {
   // serving stale (or empty) coverage until eviction.
   if (Date.now() - hit.at > TILE_DISK_TTL_MS) {
     _memory.delete(key);
-    _memoryBytes -= hit.bytes.length;
+    _memoryBytes -= memoryCost(hit.bytes);
     return null;
   }
   // Re-insert to mark as most recently used.
@@ -135,15 +140,15 @@ function memoryGet(key) {
 
 /** `at` is when Mapillary served the bytes (a disk tile's mtime). */
 function memoryPut(key, bytes, at = Date.now()) {
-  if (bytes.length > TILE_MEMORY_BUDGET_BYTES / 2) return;
+  if (memoryCost(bytes) > TILE_MEMORY_BUDGET_BYTES / 2) return;
   const existing = _memory.get(key);
-  if (existing) _memoryBytes -= existing.bytes.length;
+  if (existing) _memoryBytes -= memoryCost(existing.bytes);
   _memory.set(key, { bytes, at });
-  _memoryBytes += bytes.length;
+  _memoryBytes += memoryCost(bytes);
   while (_memoryBytes > TILE_MEMORY_BUDGET_BYTES && _memory.size) {
     const [oldest, entry] = _memory.entries().next().value;
     _memory.delete(oldest);
-    _memoryBytes -= entry.bytes.length;
+    _memoryBytes -= memoryCost(entry.bytes);
   }
 }
 
@@ -167,27 +172,67 @@ async function readDisk(address) {
 }
 
 /**
+ * Background disk work (tile writes and sweeps) not yet settled. Requests
+ * never wait on it; tests settle it before removing a cache directory.
+ * @type {Set<Promise<void>>}
+ */
+const _background = new Set();
+
+/** Track a background task until it settles; it never rejects. */
+function track(task) {
+  const settled = task
+    .catch(() => {})
+    .finally(() => _background.delete(settled));
+  _background.add(settled);
+  return settled;
+}
+
+/**
+ * Disk writes in progress, by cache file: the sequence number of the newest.
+ * @type {Map<string, number>}
+ */
+const _diskWrites = new Map();
+let _diskWriteSeq = 0;
+
+/** Whether a write of this tile's cache file is still in progress. */
+function diskWritePending(address) {
+  return _diskWrites.has(diskPath(address));
+}
+
+/**
  * Write a tile in the background. `at` dates a rewrite of an existing tile
  * with its original fetch time, so the rewrite does not extend its life.
+ * Each write has its own temporary file, and a write that a newer one of the
+ * same tile overtook steps aside instead of renaming over it.
  */
 function writeDisk(address, bytes, at = null) {
   // The sweep after it covers this write's cache root, even if it has moved.
   const root = _diskDir;
   const file = diskPath(address, root);
-  fsp
-    .mkdir(path.dirname(file), { recursive: true })
-    .then(() => fsp.writeFile(`${file}.tmp`, bytes))
-    .then(
-      () => at != null && fsp.utimes(`${file}.tmp`, new Date(), new Date(at)),
-    )
-    .then(() => fsp.rename(`${file}.tmp`, file))
-    .then(() => scheduleSweep(root))
-    .catch((error) =>
-      console.warn(
-        '[Mapillary Proxy] tile cache write failed:',
-        error?.message || error,
-      ),
-    );
+  const seq = ++_diskWriteSeq;
+  const tmp = `${file}.${process.pid}-${seq}.tmp`;
+  const newest = () => _diskWrites.get(file) === seq;
+  _diskWrites.set(file, seq);
+  return track(
+    fsp
+      .mkdir(path.dirname(file), { recursive: true })
+      .then(() => fsp.writeFile(tmp, bytes))
+      .then(() => at != null && fsp.utimes(tmp, new Date(), new Date(at)))
+      .then(() => {
+        if (!newest()) return fsp.rm(tmp, { force: true });
+        return fsp.rename(tmp, file).then(() => scheduleSweep(root));
+      })
+      .catch(async (error) => {
+        await fsp.rm(tmp, { force: true }).catch(() => {});
+        console.warn(
+          '[Mapillary Proxy] tile cache write failed:',
+          error?.message || error,
+        );
+      })
+      .finally(() => {
+        if (newest()) _diskWrites.delete(file);
+      }),
+  );
 }
 
 let _lastSweepAt = 0;
@@ -199,7 +244,7 @@ function scheduleSweep(root) {
   if (_sweeping || Date.now() - _lastSweepAt < TILE_DISK_SWEEP_INTERVAL_MS)
     return;
   _lastSweepAt = Date.now();
-  _sweeping = sweepTileDisk({ root })
+  const sweep = sweepTileDisk({ root })
     .catch((error) => {
       if (_sweepWarned) return;
       _sweepWarned = true;
@@ -209,8 +254,10 @@ function scheduleSweep(root) {
       );
     })
     .finally(() => {
-      _sweeping = null;
+      if (_sweeping === tracked) _sweeping = null;
     });
+  const tracked = track(sweep);
+  _sweeping = tracked;
 }
 
 /** Every file under `dir` with its size and mtime; a missing dir is empty. */
@@ -237,8 +284,10 @@ async function listCacheFiles(dir) {
 
 /**
  * Bound the disk cache: delete tiles past TILE_DISK_TTL_MS, then the oldest
- * until the rest fit in `maxBytes`. Runs in the background after tile writes.
- * @returns {Promise<{removed: number, bytes: number}>} files deleted, bytes kept
+ * until the rest fit in `maxBytes`. Each file is charged its size plus
+ * TILE_DISK_FILE_OVERHEAD_BYTES, so empty tiles count toward the cap.
+ * Runs in the background after tile writes.
+ * @returns {Promise<{removed: number, bytes: number}>} files deleted, charged bytes kept
  */
 export async function sweepTileDisk({
   root = _diskDir,
@@ -246,12 +295,13 @@ export async function sweepTileDisk({
 } = {}) {
   const now = Date.now();
   const files = (await listCacheFiles(root)).sort((a, b) => a.at - b.at);
-  let bytes = files.reduce((sum, { size }) => sum + size, 0);
+  const cost = (size) => size + TILE_DISK_FILE_OVERHEAD_BYTES;
+  let bytes = files.reduce((sum, { size }) => sum + cost(size), 0);
   let removed = 0;
   for (const { file, size, at } of files) {
     if (now - at <= TILE_DISK_TTL_MS && bytes <= maxBytes) break;
     await fsp.rm(file, { force: true });
-    bytes -= size;
+    bytes -= cost(size);
     removed++;
   }
   return { removed, bytes };
@@ -264,8 +314,10 @@ async function fetchUpstream(address, signal) {
   if (held) throw held;
   const url = `${MAPILLARY_TILE_HOST}/${address.upstream}/2/${address.z}/${address.x}/${address.y}?access_token=${encodeURIComponent(token)}`;
   const timeout = AbortSignal.timeout(TILE_FETCH_TIMEOUT_MS);
+  // Aborts the request itself once its body runs past the size cap.
+  const oversize = new AbortController();
   const response = await fetch(url, {
-    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    signal: AbortSignal.any([signal, timeout, oversize.signal].filter(Boolean)),
     headers: { Accept: 'application/x-protobuf' },
   });
   if (response.status === 404 || response.status === 204) {
@@ -293,10 +345,70 @@ async function fetchUpstream(address, signal) {
     await response.body?.cancel().catch(() => {});
     throw new TileUpstreamError(502, 'Mapillary tile exceeds size cap');
   }
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.length > TILE_MAX_BYTES)
-    throw new TileUpstreamError(502, 'Mapillary tile exceeds size cap');
-  return bytes;
+  return readCapped(response, () => oversize.abort());
+}
+
+/**
+ * Read a tile body, counting as it arrives: a chunked or compressed response
+ * has no Content-Length to check first, so the request is aborted as soon as
+ * the running total passes TILE_MAX_BYTES rather than after buffering it all.
+ */
+async function readCapped(response, abortRequest) {
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > TILE_MAX_BYTES) {
+      abortRequest();
+      await reader.cancel().catch(() => {});
+      throw new TileUpstreamError(502, 'Mapillary tile exceeds size cap');
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks, total);
+}
+
+/**
+ * Upstream fetch slots: at most TILE_UPSTREAM_CONCURRENCY run at once, and
+ * further flights wait in order. Replaced whole by the test reset.
+ * @type {{active: number, queue: Array<() => void>}}
+ */
+let _slots = { active: 0, queue: [] };
+
+/**
+ * Wait for an upstream fetch slot. Resolves with its release function. A
+ * flight aborted while it waits leaves the queue and never fetches.
+ * @param {AbortSignal} signal
+ * @returns {Promise<() => void>}
+ */
+function acquireUpstreamSlot(signal) {
+  const slots = _slots;
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason);
+    const onAbort = () => {
+      const index = slots.queue.indexOf(grant);
+      if (index !== -1) slots.queue.splice(index, 1);
+      reject(signal.reason);
+    };
+    function grant() {
+      signal.removeEventListener('abort', onAbort);
+      slots.active++;
+      let released = false;
+      resolve(() => {
+        if (released) return;
+        released = true;
+        slots.active--;
+        slots.queue.shift()?.();
+      });
+    }
+    if (slots.active < TILE_UPSTREAM_CONCURRENCY) return grant();
+    signal.addEventListener('abort', onAbort, { once: true });
+    slots.queue.push(grant);
+  });
 }
 
 /** Strip the layers this proxy never serves for the address's layer spec. */
@@ -328,11 +440,15 @@ export async function fetchTile(request, { signal } = {}) {
   if (disk) {
     // Older cache files may still hold the untrimmed tile: trim and replace,
     // keeping the original fetch time so the tile still expires on schedule.
+    // Concurrent hits on one such tile rewrite it once.
     const bytes = trim(address, disk.bytes);
-    if (bytes !== disk.bytes) writeDisk(address, bytes, disk.at);
+    if (bytes !== disk.bytes && !diskWritePending(address))
+      writeDisk(address, bytes, disk.at);
     memoryPut(address.key, bytes, disk.at);
     return { bytes, source: 'disk', address };
   }
+  // A caller gone while the disk was read must not start a fetch nobody joins.
+  signal?.throwIfAborted();
   let flight = _inFlight.get(address.key);
   const joined = Boolean(flight) && !flight.controller.signal.aborted;
   if (!joined) flight = startFlight(address);
@@ -340,11 +456,17 @@ export async function fetchTile(request, { signal } = {}) {
   return { bytes, source: joined ? 'inflight' : 'upstream', address };
 }
 
-/** Start the one upstream fetch for a tile, owned by the flight itself. */
+/**
+ * Start the one upstream fetch for a tile, owned by the flight itself. It
+ * waits for an upstream slot first; the slot is held until the body is read.
+ */
 function startFlight(address) {
   const controller = new AbortController();
   const flight = { controller, waiters: 0, promise: null };
-  flight.promise = fetchUpstream(address, controller.signal)
+  flight.promise = acquireUpstreamSlot(controller.signal)
+    .then((release) =>
+      fetchUpstream(address, controller.signal).finally(release),
+    )
     .then((raw) => trim(address, raw))
     .then((bytes) => {
       memoryPut(address.key, bytes);
@@ -399,6 +521,20 @@ export function _resetTileMemoryForTest() {
   _memoryBytes = 0;
   _inFlight.clear();
   _upstreamHold = null;
+  _slots = { active: 0, queue: [] };
+}
+
+/** Test seam: how many tiles memory holds and the bytes charged for them. */
+export function _tileMemoryForTest() {
+  return { entries: _memory.size, bytes: _memoryBytes };
+}
+
+/**
+ * Test seam: wait until every background tile write and sweep has settled,
+ * including sweeps those writes start, so a test may remove its cache dir.
+ */
+export async function _settleTileWritesForTest() {
+  while (_background.size) await Promise.allSettled([..._background]);
 }
 
 /** Test seam: keep the disk cache in `dir` (null restores the default). */

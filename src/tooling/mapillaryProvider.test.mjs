@@ -11,11 +11,19 @@ import {
 } from '../../server/providers/mapillary/trim.js';
 import * as tiles from '../../server/providers/mapillary/tiles.js';
 import {
+  TILE_DISK_FILE_OVERHEAD_BYTES,
+  TILE_MAX_BYTES,
+  TILE_MEMORY_ENTRY_OVERHEAD_BYTES,
+  TILE_ROUTE_MAX_PER_MIN,
+  TILE_UPSTREAM_CONCURRENCY,
+} from '../../server/providers/mapillary/constants.js';
+import {
   fetchTile,
   normalizeTileAddress,
   TileRequestError,
   _resetTileMemoryForTest,
   _setTileCacheDirForTest,
+  _settleTileWritesForTest,
 } from '../../server/providers/mapillary/tiles.js';
 
 // Every tile these tests cache lands in a throwaway directory, never in the
@@ -23,8 +31,12 @@ import {
 const cacheDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gev-mly-tiles-'));
 _setTileCacheDirForTest(cacheDir);
 // The directory is not switched back: a background write still landing must
-// never sweep the real cache.
-after(() => fsp.rm(cacheDir, { recursive: true, force: true }));
+// never sweep the real cache. Background writes and sweeps settle first, so
+// none lands in the directory while it is being removed.
+after(async () => {
+  await tiles._settleTileWritesForTest();
+  await fsp.rm(cacheDir, { recursive: true, force: true });
+});
 const tileFile = ({ z, x, y }, root = cacheDir) =>
   path.join(root, 'coverage', String(z), `${x}-${y}.pbf`);
 const HOUR = 60 * 60 * 1000;
@@ -52,7 +64,11 @@ const exists = (file) =>
     () => false,
   );
 
-/** Mount the plugin and return a caller keyed by route. */
+/**
+ * Mount the plugin and return callers keyed by route. `start` returns at once
+ * with the response, its `close` trigger and the handler's `done` promise;
+ * `call` waits for the handler.
+ */
 function install(plugin, mode = 'configureServer') {
   const routes = new Map();
   plugin[mode]({
@@ -62,10 +78,17 @@ function install(plugin, mode = 'configureServer') {
       },
     },
   });
-  const call = async (route, url = '/', method = 'GET', body) => {
+  const start = (
+    route,
+    url = '/',
+    method = 'GET',
+    body,
+    requestHeaders = {},
+  ) => {
     const handler = routes.get(route);
     assert.ok(handler, `route ${route} is mounted`);
     const headers = {};
+    const resListeners = {};
     const res = {
       statusCode: 200,
       headersSent: false,
@@ -84,13 +107,15 @@ function install(plugin, mode = 'configureServer') {
         this.body = payload;
         this.writableEnded = true;
       },
-      on() {},
+      on(event, fn) {
+        resListeners[event] = fn;
+      },
     };
     const listeners = {};
     const req = {
       url,
       method,
-      headers: {},
+      headers: requestHeaders,
       on(event, fn) {
         listeners[event] = fn;
       },
@@ -98,10 +123,15 @@ function install(plugin, mode = 'configureServer') {
         if (body) yield Buffer.from(body);
       },
     };
-    await handler(req, res);
+    const done = Promise.resolve(handler(req, res));
+    return { res, headers, done, close: () => resListeners.close?.() };
+  };
+  const call = async (...args) => {
+    const { res, headers, done } = start(...args);
+    await done;
     return { ...res, headers };
   };
-  return { routes, call };
+  return { routes, call, start };
 }
 
 const json = (res) => JSON.parse(String(res.body));
@@ -170,8 +200,11 @@ async function withUpstream(answer, run) {
     return answer(calls.length);
   };
   try {
-    await run({ calls, call: install(mapillaryProxy()).call });
+    const { call, start } = install(mapillaryProxy());
+    await run({ calls, call, start });
   } finally {
+    // No background write or sweep (dated by a mocked clock) outlives the test.
+    await tiles._settleTileWritesForTest();
     globalThis.fetch = savedFetch;
     if (savedToken === undefined) delete process.env.MAPILLARY_CLIENT_TOKEN;
     else process.env.MAPILLARY_CLIENT_TOKEN = savedToken;
@@ -339,15 +372,15 @@ test('a tile held in memory past the 24 h TTL is fetched again', async (t) => {
   const tile = { layer: 'coverage', z: 14, x: 3, y: 3 };
   await withDeferredUpstream([tile], async ({ upstream, settle }) => {
     const first = fetchTile(tile);
-    await settle();
+    await waitFor(() => upstream.length === 1, 'the upstream fetch');
     upstream[0].release();
     assert.equal((await first).source, 'upstream');
     assert.equal((await fetchTile(tile)).source, 'memory');
     const now = Date.now();
     t.mock.method(Date, 'now', () => now + 25 * 60 * 60 * 1000);
     const again = fetchTile(tile);
-    await settle();
-    assert.equal(upstream.length, 2, 'neither cache answers a stale tile');
+    // Neither cache answers a stale tile: Mapillary is asked again.
+    await waitFor(() => upstream.length === 2, 'a second upstream fetch');
     upstream[1].release();
     assert.equal((await again).source, 'upstream');
   });
@@ -370,10 +403,8 @@ test('a disk tile keeps its age in memory and through a retrim rewrite (review P
       assert.deepEqual(listTileLayers(first.bytes), ['sequence']);
       // The untrimmed file is replaced by the trimmed tile, still dated when
       // Mapillary served it.
-      await waitFor(
-        async () => (await fsp.stat(file)).size === first.bytes.length,
-        'the trimmed rewrite',
-      );
+      await tiles._settleTileWritesForTest();
+      assert.equal((await fsp.stat(file)).size, first.bytes.length);
       assert.ok(
         Math.abs((await fsp.stat(file)).mtimeMs - writtenAt) < 1000,
         'the rewrite keeps the original mtime',
@@ -383,11 +414,8 @@ test('a disk tile keeps its age in memory and through a retrim rewrite (review P
       const later = await fetchTile(address);
       assert.equal(later.source, 'upstream', '25 h old: no cache serves it');
       assert.equal(calls.length, 1);
-      // Let the refetched tile land before the next test moves the cache.
-      await waitFor(
-        async () => (await fsp.stat(file)).mtimeMs > writtenAt + HOUR,
-        'the refetched tile write',
-      );
+      await tiles._settleTileWritesForTest();
+      assert.ok((await fsp.stat(file)).mtimeMs > writtenAt + HOUR);
     },
   );
 });
@@ -399,6 +427,7 @@ async function withCacheDir(run) {
   try {
     await run(dir);
   } finally {
+    await tiles._settleTileWritesForTest();
     tiles._setTileCacheDirForTest(cacheDir);
     await fsp.rm(dir, { recursive: true, force: true });
   }
@@ -425,8 +454,9 @@ test('the disk sweep evicts the oldest tiles past the size cap (review P2)', asy
     });
     for (const { file, age } of files)
       await writeAged(file, Buffer.alloc(100, age), age * HOUR);
-    const result = await tiles.sweepTileDisk({ maxBytes: 250 });
-    assert.deepEqual(result, { removed: 1, bytes: 200 });
+    const charged = 100 + TILE_DISK_FILE_OVERHEAD_BYTES;
+    const result = await tiles.sweepTileDisk({ maxBytes: 2.5 * charged });
+    assert.deepEqual(result, { removed: 1, bytes: 2 * charged });
     assert.equal(await exists(files[0].file), false, 'the oldest goes first');
     assert.equal(await exists(files[1].file), true);
     assert.equal(await exists(files[2].file), true);
@@ -500,6 +530,7 @@ async function withDeferredUpstream(tiles, run) {
   try {
     await run({ upstream, settle, body });
   } finally {
+    await _settleTileWritesForTest();
     globalThis.fetch = savedFetch;
     if (savedToken === undefined) delete process.env.MAPILLARY_CLIENT_TOKEN;
     else process.env.MAPILLARY_CLIENT_TOKEN = savedToken;
@@ -513,7 +544,7 @@ test('a joined tile request survives the first caller abandoning it', async () =
     const first = new AbortController();
     const second = new AbortController();
     const a = fetchTile(tile, { signal: first.signal });
-    await settle();
+    await waitFor(() => upstream.length === 1, 'the upstream fetch');
     const b = fetchTile(tile, { signal: second.signal });
     await settle();
     assert.equal(upstream.length, 1, 'one upstream request for both');
@@ -534,7 +565,7 @@ test('a joined caller that aborts leaves at once and the first still gets the ti
     const first = new AbortController();
     const second = new AbortController();
     const a = fetchTile(tile, { signal: first.signal });
-    await settle();
+    await waitFor(() => upstream.length === 1, 'the upstream fetch');
     const b = fetchTile(tile, { signal: second.signal });
     await settle();
     second.abort();
@@ -551,7 +582,7 @@ test('the upstream tile fetch is cancelled once every waiter has left', async ()
     const first = new AbortController();
     const second = new AbortController();
     const a = fetchTile(tile, { signal: first.signal });
-    await settle();
+    await waitFor(() => upstream.length === 1, 'the upstream fetch');
     const b = fetchTile(tile, { signal: second.signal });
     await settle();
     first.abort();
@@ -562,11 +593,417 @@ test('the upstream tile fetch is cancelled once every waiter has left', async ()
     assert.equal(upstream[0].aborted, true, 'the last waiter cancels it');
     // A later request for the same tile starts a fresh fetch.
     const again = fetchTile(tile);
-    await settle();
-    assert.equal(upstream.length, 2);
+    await waitFor(() => upstream.length === 2, 'a fresh fetch');
     upstream[1].release();
     assert.equal((await again).source, 'upstream');
   });
+});
+
+// ── Route: success path, refusals, gate and limiter (review gekh) ──
+
+/** Every header value and the body, as text, for a token-leak check. */
+const leakText = (res) =>
+  [
+    ...Object.values(res.headers).map(String),
+    Buffer.isBuffer(res.body) ? res.body.toString('latin1') : String(res.body),
+  ].join('\n');
+
+test('the tile route serves a trimmed protobuf tile, then from memory (review gekh P0)', async () => {
+  const address = { layer: 'coverage', z: 14, x: 9, y: 9 };
+  await fsp.rm(tileFile(address), { force: true });
+  const upstream = tile([
+    { name: 'sequence' },
+    { name: 'image', payload: Buffer.alloc(4000, 1) },
+  ]);
+  await withUpstream(
+    () =>
+      new Response(upstream, {
+        status: 200,
+        headers: { 'content-type': 'application/x-protobuf' },
+      }),
+    async ({ calls, call }) => {
+      const res = await call('/api/mapillary/tiles', '/coverage/14/9/9');
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['content-type'], 'application/x-protobuf');
+      assert.equal(res.headers['cache-control'], 'public, max-age=3600');
+      assert.equal(res.headers['x-gev-cache'], 'upstream');
+      assert.ok(Buffer.isBuffer(res.body));
+      assert.deepEqual(listTileLayers(res.body), ['sequence']);
+      assert.deepEqual(res.body, tile([{ name: 'sequence' }]));
+      assert.doesNotMatch(leakText(res), /MLY\|/);
+      const again = await call('/api/mapillary/tiles', '/coverage/14/9/9');
+      assert.equal(again.statusCode, 200);
+      assert.equal(again.headers['x-gev-cache'], 'memory');
+      assert.deepEqual(again.body, res.body);
+      assert.equal(calls.length, 1);
+    },
+  );
+});
+
+for (const status of [204, 404])
+  test(`an empty upstream tile (${status}) is a 204 with no body (review gekh P0)`, async () => {
+    const address = { layer: 'coverage', z: 14, x: 10, y: status };
+    await fsp.rm(tileFile(address), { force: true });
+    await withUpstream(
+      () => new Response(null, { status }),
+      async ({ call }) => {
+        const res = await call(
+          '/api/mapillary/tiles',
+          `/coverage/14/10/${status}`,
+        );
+        assert.equal(res.statusCode, 204);
+        assert.equal(res.body, undefined);
+        assert.equal(res.headers['content-type'], 'application/x-protobuf');
+        assert.equal(res.headers['x-gev-cache'], 'upstream');
+        assert.doesNotMatch(leakText(res), /MLY\|/);
+      },
+    );
+  });
+
+test('closing the response mid-flight aborts the upstream fetch (review gekh P0)', async () => {
+  const address = { layer: 'coverage', z: 14, x: 11, y: 11 };
+  await withDeferredUpstream([address], async ({ upstream }) => {
+    const { start } = install(mapillaryProxy());
+    const pending = start('/api/mapillary/tiles', '/coverage/14/11/11');
+    await waitFor(() => upstream.length === 1, 'the upstream fetch');
+    assert.equal(upstream[0].aborted, false);
+    pending.close();
+    await pending.done;
+    assert.equal(upstream[0].aborted, true, 'the last waiter left');
+    assert.equal(pending.res.writableEnded, false, 'nothing is written');
+  });
+});
+
+for (const status of [400, 410, 422])
+  test(`an upstream ${status} is a 502, not the client's fault (review gekh)`, async () => {
+    await withUpstream(
+      () => new Response('{}', { status }),
+      async ({ call }) => {
+        const res = await call('/api/mapillary/tiles', '/coverage/14/12/12');
+        assert.equal(res.statusCode, 502);
+        assert.deepEqual(json(res), {
+          error: `Mapillary tiles HTTP ${status}`,
+        });
+      },
+    );
+  });
+
+test('cross-site requests are refused on both routes; the app itself passes (review gekh)', async () => {
+  await withUpstream(
+    () => new Response(tile([{ name: 'sequence' }]), { status: 200 }),
+    async ({ calls, call }) => {
+      const host = 'localhost:5173';
+      const refused = [
+        { host, 'sec-fetch-site': 'cross-site' }, // <img>, navigation
+        { host, 'sec-fetch-site': 'same-site' },
+        { host, origin: 'https://evil.example' }, // fetch from another page
+        { host, origin: 'null' }, // sandboxed frame
+        { host, 'x-forwarded-for': '203.0.113.9' }, // through a proxy
+      ];
+      for (const headers of refused)
+        for (const [route, url] of [
+          ['/api/mapillary/status', '/'],
+          ['/api/mapillary/tiles', '/coverage/14/13/13'],
+        ]) {
+          const res = await call(route, url, 'GET', undefined, headers);
+          assert.equal(
+            res.statusCode,
+            403,
+            `${route} ${JSON.stringify(headers)}`,
+          );
+        }
+      assert.equal(calls.length, 0, 'Mapillary is never asked');
+      const app = {
+        host,
+        origin: `http://${host}`,
+        'sec-fetch-site': 'same-origin',
+      };
+      const status = await call(
+        '/api/mapillary/status',
+        '/',
+        'GET',
+        undefined,
+        app,
+      );
+      assert.equal(status.statusCode, 200);
+      assert.deepEqual(json(status), { configured: true });
+      const res = await call(
+        '/api/mapillary/tiles',
+        '/coverage/14/13/14',
+        'GET',
+        undefined,
+        { host, 'sec-fetch-site': 'same-origin' }, // a same-origin GET has no Origin
+      );
+      assert.notEqual(res.statusCode, 403);
+      assert.equal(calls.length, 1);
+    },
+  );
+});
+
+test('the tile route answers 429 past its per-IP budget (review gekh)', async () => {
+  const saved = process.env.MAPILLARY_CLIENT_TOKEN;
+  delete process.env.MAPILLARY_CLIENT_TOKEN;
+  try {
+    const { call } = install(mapillaryProxy());
+    for (let i = 0; i < TILE_ROUTE_MAX_PER_MIN; i++) {
+      const res = await call('/api/mapillary/tiles', '/coverage/14/1/2');
+      assert.equal(res.statusCode, 503, `request ${i + 1} is within budget`);
+    }
+    const over = await call('/api/mapillary/tiles', '/coverage/14/1/2');
+    assert.equal(over.statusCode, 429);
+    assert.equal(over.headers['retry-after'], '5');
+    assert.deepEqual(json(over), {
+      error: 'Too many tile requests',
+      retryAfter: 5,
+    });
+    const status = await call('/api/mapillary/status');
+    assert.equal(status.statusCode, 200, 'the status route is not limited');
+  } finally {
+    if (saved === undefined) delete process.env.MAPILLARY_CLIENT_TOKEN;
+    else process.env.MAPILLARY_CLIENT_TOKEN = saved;
+  }
+});
+
+// ── Tile cache and upstream bounds (review gekh) ──
+
+test('concurrent disk hits on an untrimmed tile rewrite it once, keeping its age (review gekh)', async (t) => {
+  const address = { layer: 'coverage', z: 14, x: 14, y: 14 };
+  const file = tileFile(address);
+  await writeAged(
+    file,
+    tile([
+      { name: 'sequence' },
+      { name: 'image', payload: Buffer.alloc(4000, 1) },
+    ]),
+    23 * HOUR,
+  );
+  const writtenAt = (await fsp.stat(file)).mtimeMs;
+  const writeFile = fsp.writeFile;
+  const writes = [];
+  t.mock.method(fsp, 'writeFile', (target, ...rest) => {
+    if (String(target).startsWith(file)) writes.push(String(target));
+    return writeFile.call(fsp, target, ...rest);
+  });
+  const warn = t.mock.method(console, 'warn', () => {});
+  await withUpstream(
+    () => assert.fail('a disk hit never asks Mapillary'),
+    async () => {
+      const hits = await Promise.all([1, 2, 3].map(() => fetchTile(address)));
+      for (const hit of hits) {
+        assert.equal(hit.source, 'disk');
+        assert.deepEqual(listTileLayers(hit.bytes), ['sequence']);
+      }
+      await tiles._settleTileWritesForTest();
+    },
+  );
+  assert.equal(writes.length, 1, 'one rewrite for three hits');
+  assert.equal(warn.mock.callCount(), 0);
+  const stat = await fsp.stat(file);
+  assert.equal(stat.size, tile([{ name: 'sequence' }]).length);
+  assert.ok(Math.abs(stat.mtimeMs - writtenAt) < 1000, 'no fresh 24 h of life');
+});
+
+test('a rewrite overtaken by a fresh tile write steps aside cleanly (review gekh)', async (t) => {
+  const address = { layer: 'coverage', z: 14, x: 15, y: 15 };
+  const file = tileFile(address);
+  await writeAged(
+    file,
+    tile([
+      { name: 'sequence' },
+      { name: 'image', payload: Buffer.alloc(4000, 1) },
+    ]),
+    23 * HOUR,
+  );
+  const writtenAt = (await fsp.stat(file)).mtimeMs;
+  // Hold the retrim's re-dating step until the fresh write has landed.
+  const utimes = fsp.utimes;
+  let held = null;
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  t.mock.method(fsp, 'utimes', async (target, ...rest) => {
+    if (String(target).startsWith(file)) {
+      held = String(target);
+      await gate;
+    }
+    return utimes.call(fsp, target, ...rest);
+  });
+  const warn = t.mock.method(console, 'warn', () => {});
+  const fresh = tile([{ name: 'sequence' }, { name: 'overview' }]);
+  await withUpstream(
+    () => new Response(fresh, { status: 200 }),
+    async ({ calls }) => {
+      assert.equal((await fetchTile(address)).source, 'disk');
+      await waitFor(() => held, 'the retrim write');
+      // Two hours on, the disk copy is past its 24 h: Mapillary is asked.
+      _resetTileMemoryForTest();
+      const now = Date.now();
+      t.mock.method(Date, 'now', () => now + 2 * HOUR);
+      assert.equal((await fetchTile(address)).source, 'upstream');
+      assert.equal(calls.length, 1);
+      await waitFor(
+        async () => (await fsp.stat(file)).mtimeMs > writtenAt + HOUR,
+        'the fresh tile write',
+      );
+      release();
+      await tiles._settleTileWritesForTest();
+    },
+  );
+  assert.equal(warn.mock.callCount(), 0, 'no ENOENT from a shared temp file');
+  assert.deepEqual(await fsp.readFile(file), fresh, 'the fresh tile stays');
+  assert.ok((await fsp.stat(file)).mtimeMs > writtenAt + HOUR);
+  const left = await fsp.readdir(path.dirname(file));
+  assert.deepEqual(
+    left.filter((name) => name.endsWith('.tmp')),
+    [],
+    'no temporary file is left behind',
+  );
+});
+
+test('at most a few upstream fetches run at once; a queued abort never fetches (review gekh)', async () => {
+  const addresses = Array.from(
+    { length: TILE_UPSTREAM_CONCURRENCY + 2 },
+    (_, i) => ({
+      layer: 'coverage',
+      z: 13,
+      x: 100 + i,
+      y: 100,
+    }),
+  );
+  await withDeferredUpstream(addresses, async ({ upstream, settle }) => {
+    const controllers = addresses.map(() => new AbortController());
+    const begin = (i) =>
+      fetchTile(addresses[i], { signal: controllers[i].signal });
+    // Fill every slot first, so the two extra misses are the ones that wait.
+    const results = [];
+    for (let i = 0; i < TILE_UPSTREAM_CONCURRENCY; i++) results.push(begin(i));
+    await waitFor(
+      () => upstream.length === TILE_UPSTREAM_CONCURRENCY,
+      'every slot in use',
+    );
+    const queued = TILE_UPSTREAM_CONCURRENCY;
+    const aborted = queued + 1;
+    results.push(begin(queued), begin(aborted));
+    await settle();
+    assert.equal(upstream.length, TILE_UPSTREAM_CONCURRENCY, 'the rest wait');
+    controllers[aborted].abort();
+    await assert.rejects(results[aborted], { name: 'AbortError' });
+    upstream[0].release();
+    await waitFor(
+      () => upstream.length === TILE_UPSTREAM_CONCURRENCY + 1,
+      'the queued miss taking the freed slot',
+    );
+    assert.match(upstream.at(-1).url, new RegExp(`/13/${100 + queued}/100\\?`));
+    for (const call of upstream) call.release();
+    for (const result of results.slice(0, aborted))
+      assert.equal((await result).source, 'upstream');
+    await settle();
+    assert.equal(
+      upstream.length,
+      TILE_UPSTREAM_CONCURRENCY + 1,
+      'the aborted miss never reached Mapillary',
+    );
+  });
+});
+
+test('a caller gone while the disk cache is read starts no upstream fetch (review gekh)', async () => {
+  const address = { layer: 'coverage', z: 13, x: 120, y: 100 };
+  await withDeferredUpstream([address], async ({ upstream, settle }) => {
+    const controller = new AbortController();
+    const pending = fetchTile(address, { signal: controller.signal });
+    controller.abort(); // fetchTile is still reading the disk cache
+    await assert.rejects(pending, { name: 'AbortError' });
+    await settle();
+    assert.equal(upstream.length, 0, 'Mapillary is not asked');
+  });
+});
+
+test('empty tiles are charged against the memory budget (review gekh)', async () => {
+  const addresses = [16, 17, 18].map((x) => ({
+    layer: 'coverage',
+    z: 14,
+    x,
+    y: 16,
+  }));
+  for (const address of addresses)
+    await fsp.rm(tileFile(address), { force: true });
+  await withUpstream(
+    () => new Response(null, { status: 204 }),
+    async () => {
+      for (const address of addresses)
+        assert.equal((await fetchTile(address)).bytes.length, 0);
+      assert.deepEqual(tiles._tileMemoryForTest(), {
+        entries: 3,
+        bytes: 3 * TILE_MEMORY_ENTRY_OVERHEAD_BYTES,
+      });
+    },
+  );
+});
+
+test('empty tile files count toward the disk cap (review gekh)', async () => {
+  await withCacheDir(async (dir) => {
+    const files = [3, 2, 1].map((age) => ({
+      file: tileFile({ z: 13, x: age, y: age }, dir),
+      age,
+    }));
+    for (const { file, age } of files)
+      await writeAged(file, Buffer.alloc(0), age * HOUR);
+    const result = await tiles.sweepTileDisk({
+      maxBytes: 2 * TILE_DISK_FILE_OVERHEAD_BYTES,
+    });
+    assert.deepEqual(result, {
+      removed: 1,
+      bytes: 2 * TILE_DISK_FILE_OVERHEAD_BYTES,
+    });
+    assert.equal(await exists(files[0].file), false, 'the oldest goes first');
+    assert.equal(await exists(files[2].file), true);
+  });
+});
+
+test('a body past the size cap aborts the upstream request as it streams (review gekh)', async () => {
+  const address = { layer: 'coverage', z: 14, x: 19, y: 19 };
+  await fsp.rm(tileFile(address), { force: true });
+  const MB = 1024 * 1024;
+  const chunk = new Uint8Array(MB);
+  let pulled = 0;
+  let cancelled = false;
+  let upstreamSignal = null;
+  const savedFetch = globalThis.fetch;
+  const savedToken = process.env.MAPILLARY_CLIENT_TOKEN;
+  process.env.MAPILLARY_CLIENT_TOKEN = 'MLY|test|token';
+  _resetTileMemoryForTest();
+  // Chunked, no Content-Length: only a running count can see it is too big.
+  globalThis.fetch = async (_url, { signal } = {}) => {
+    upstreamSignal = signal;
+    const body = new ReadableStream({
+      pull(controller) {
+        controller.enqueue(chunk);
+        pulled += chunk.byteLength;
+        if (pulled >= TILE_MAX_BYTES + 8 * MB) controller.close();
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    return new Response(body, { status: 200 });
+  };
+  try {
+    await assert.rejects(fetchTile(address), {
+      name: 'TileUpstreamError',
+      status: 502,
+      message: 'Mapillary tile exceeds size cap',
+    });
+    assert.equal(upstreamSignal.aborted, true, 'the request is aborted');
+    assert.equal(cancelled, true, 'the body is cancelled');
+    assert.ok(
+      pulled <= TILE_MAX_BYTES + 2 * MB,
+      `stopped after ${pulled} bytes`,
+    );
+  } finally {
+    globalThis.fetch = savedFetch;
+    if (savedToken === undefined) delete process.env.MAPILLARY_CLIENT_TOKEN;
+    else process.env.MAPILLARY_CLIENT_TOKEN = savedToken;
+    _resetTileMemoryForTest();
+  }
 });
 
 // ── Tile trimming (relocated from server/providers/mapillary/trim.test.mjs) ──

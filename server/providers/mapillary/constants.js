@@ -39,13 +39,40 @@ export const TILE_DISK_TTL_MS = 24 * 60 * 60 * 1000;
  */
 export const TILE_DISK_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 export const TILE_DISK_MAX_BYTES = 1024 * 1024 * 1024;
+/**
+ * What each cached file costs against TILE_DISK_MAX_BYTES on top of its size:
+ * one filesystem block and its directory entry. An empty (no coverage) tile is
+ * 0 bytes but still a file, so without this ocean tiles would never count.
+ */
+export const TILE_DISK_FILE_OVERHEAD_BYTES = 4096;
 
 /** A z14 image tile over a dense city is ~11 MB; anything past this is wrong. */
 export const TILE_MAX_BYTES = 48 * 1024 * 1024;
 
 /** In-memory tile cache budget (bytes) and upstream fetch timeout. */
 export const TILE_MEMORY_BUDGET_BYTES = 96 * 1024 * 1024;
+/**
+ * What each in-memory entry costs against the budget on top of its bytes (the
+ * key, the map entry and the Buffer object), so empty tiles count too.
+ */
+export const TILE_MEMORY_ENTRY_OVERHEAD_BYTES = 1024;
 export const TILE_FETCH_TIMEOUT_MS = 60_000;
+/**
+ * Upstream tile fetches running at once; further misses queue for a slot. A
+ * view asks for at most 25 tiles, so a few slots keep it quick while a burst
+ * of distinct misses cannot open thousands of buffered requests at once.
+ */
+export const TILE_UPSTREAM_CONCURRENCY = 6;
+/**
+ * Tile requests per client IP per minute (cache hits included). The app asks
+ * only for tiles it has not loaded yet, at most 9 street + 16 overview tiles
+ * per view after a 320 ms camera debounce (src/layers/streetLevel/providers/
+ * mapillary/policy.js), and the browser keeps each answer for an hour. 600 is
+ * 24 entirely new views a minute, one every 2.5 s, which a person flying the
+ * camera does not reach; it still stops one page from draining the shared
+ * token into Mapillary rate limits that would hold every miss for everyone.
+ */
+export const TILE_ROUTE_MAX_PER_MIN = 600;
 /**
  * After Mapillary rejects the token (401/403), tile misses are answered from
  * that verdict for this long instead of asking again on every camera move.

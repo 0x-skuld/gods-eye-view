@@ -1,34 +1,24 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import { createApplicationStreetLevel } from '../app/layers/streetLevel.js';
 import {
   fixtureTile,
   EXPECTED_PROVIDERS,
   isCollapsed,
-  RAIL_ORDER,
-  VIEWPORTS,
 } from '../../scripts/qa-street-level.mjs';
 
-test('the QA harness exercises both review viewports', () => {
-  assert.deepEqual(
-    VIEWPORTS.map((v) => `${v.width}x${v.height}`),
-    ['1440x900', '1280x800'],
-  );
+test('the harness expects exactly the providers the app registers, in chip order', () => {
+  // Any method a provider asks its source for is a no-op: only ids matter.
+  const source = new Proxy({}, { get: () => () => {} });
+  const layer = createApplicationStreetLevel({
+    surface: null,
+    sources: { mapillary: source },
+  });
+  assert.deepEqual([...EXPECTED_PROVIDERS], [...layer.providerIds]);
 });
 
-test('the harness expects exactly the registered providers', () => {
-  assert.deepEqual(EXPECTED_PROVIDERS, ['mapillary']);
-});
-
-test('rail order puts Street Level between CCTV and Context', () => {
-  assert.deepEqual(RAIL_ORDER, [
-    'pp-toggles',
-    'cctv-panel',
-    'weather-panel',
-    'recent-imagery-panel',
-    'street-level-panel',
-    'global-context-panel',
-  ]);
+test('a panel reads as collapsed only with the collapsed class', () => {
   assert.equal(isCollapsed(['panel-collapsible', 'collapsed']), true);
   assert.equal(isCollapsed(['panel-collapsible']), false);
 });

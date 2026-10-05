@@ -1,5 +1,7 @@
+import { sameSiteGated } from '../common/same-site.js';
+import { makeRateLimiter, clientKey } from '../common/rate-limit.js';
 import { fetchTile, TileRequestError, TileUpstreamError } from './tiles.js';
-import { mapillaryToken } from './constants.js';
+import { mapillaryToken, TILE_ROUTE_MAX_PER_MIN } from './constants.js';
 
 function sendJson(res, status, payload) {
   res.statusCode = status;
@@ -16,9 +18,16 @@ function handleStatus(req, res) {
 }
 
 /** GET /api/mapillary/tiles/coverage/{z}/{x}/{y} — cached protobuf tile. */
-async function handleTile(req, res) {
+async function handleTile(req, res, allow) {
   if (req.method !== 'GET')
     return sendJson(res, 405, { error: 'Method not allowed' });
+  if (!allow(clientKey(req))) {
+    res.setHeader('Retry-After', '5');
+    return sendJson(res, 429, {
+      error: 'Too many tile requests',
+      retryAfter: 5,
+    });
+  }
   const match = /^\/(coverage)\/(\d{1,2})\/(\d{1,6})\/(\d{1,6})$/.exec(
     (req.url || '').split('?')[0],
   );
@@ -61,16 +70,30 @@ async function handleTile(req, res) {
           retryAfter,
         });
       }
-      return sendJson(res, error.status >= 500 ? 502 : error.status, {
-        error: error.message,
-      });
+      // Any other refusal is Mapillary's fault, not the client's: an
+      // upstream 400 must not read as a malformed request to this proxy.
+      return sendJson(res, 502, { error: error.message });
     }
     sendJson(res, 502, { error: error?.message || 'Tile fetch failed' });
   }
 }
 
-/** Attach every Mapillary route to a connect-style middleware stack. */
+/**
+ * Attach every Mapillary route to a connect-style middleware stack. Both
+ * refuse cross-site browser requests (server/providers/common/same-site.js):
+ * another page could otherwise spend the user's token, and one Mapillary 429
+ * it provokes holds every tile miss. Tiles are also rate-limited per client
+ * IP (TILE_ROUTE_MAX_PER_MIN).
+ */
 export function installMapillaryRoutes(middlewares) {
-  middlewares.use('/api/mapillary/status', handleStatus);
-  middlewares.use('/api/mapillary/tiles', handleTile);
+  const allow = makeRateLimiter({
+    windowMs: 60_000,
+    max: TILE_ROUTE_MAX_PER_MIN,
+    globalMax: TILE_ROUTE_MAX_PER_MIN * 4,
+  });
+  middlewares.use('/api/mapillary/status', sameSiteGated(handleStatus));
+  middlewares.use(
+    '/api/mapillary/tiles',
+    sameSiteGated((req, res) => handleTile(req, res, allow)),
+  );
 }
