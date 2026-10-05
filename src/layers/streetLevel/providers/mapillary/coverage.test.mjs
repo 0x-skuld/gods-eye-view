@@ -3,6 +3,12 @@ import test from 'node:test';
 import * as Cesium from 'cesium';
 import { createCoverage } from './coverage.js';
 import { encodeCoverageTile } from './coverageFixture.mjs';
+import {
+  COLORS,
+  COVERAGE_MAX_SEQUENCES,
+  COVERAGE_MAX_TILES,
+} from './policy.js';
+import { createGroundCaster } from '../../groundCast.js';
 import { lonToTileX, latToTileY, tileBounds } from '../../tileMath.js';
 
 const RAD = Math.PI / 180;
@@ -42,9 +48,11 @@ function tileCentre(lon, lat) {
 /** A viewer looking straight down on a 0.004° square around `view`. */
 function fakeViewer(view) {
   const postRender = new Set();
+  const preRender = new Set();
   return {
     view,
     postRender,
+    preRender,
     scene: {
       canvas: { clientWidth: 100, clientHeight: 100 },
       globe: { show: false, ellipsoid: Cesium.Ellipsoid.WGS84 },
@@ -54,6 +62,12 @@ function fakeViewer(view) {
         addEventListener(listener) {
           postRender.add(listener);
           return () => postRender.delete(listener);
+        },
+      },
+      preRender: {
+        addEventListener(listener) {
+          preRender.add(listener);
+          return () => preRender.delete(listener);
         },
       },
     },
@@ -89,7 +103,11 @@ function deferredSource() {
   };
 }
 
-function setup({ surface = 'draped', groundCaster = null } = {}) {
+function setup({
+  surface = 'draped',
+  groundCaster = null,
+  meshSampler = null,
+} = {}) {
   const centre = tileCentre(-121.4944, 38.5816);
   const viewer = fakeViewer({ lon: centre.lon, lat: centre.lat, height: 900 });
   const source = deferredSource();
@@ -103,7 +121,7 @@ function setup({ surface = 'draped', groundCaster = null } = {}) {
       notify() {},
       getSurface: () => surface,
       groundCaster,
-      meshSampler: null,
+      meshSampler,
     },
     coverage: {
       zoom: null,
@@ -140,7 +158,12 @@ function setup({ surface = 'draped', groundCaster = null } = {}) {
   const onGlobe = () =>
     viewer.scene.groundPrimitives.items.size +
     viewer.scene.primitives.items.size;
-  return { viewer, source, state, coverage, bytes, tileKey, onGlobe };
+  return { viewer, source, state, coverage, bytes, tileKey, onGlobe, centre };
+}
+
+/** Run one frame's listeners, as Cesium's render loop would. */
+function frame(listeners) {
+  for (const listener of [...listeners]) listener();
 }
 
 test('a superseded tile request cannot strand lines on the globe (review P0 #2)', async () => {
@@ -323,4 +346,215 @@ test('a rate limit keeps the drawn tiles and asks again once the wait is over (r
   assert.equal(state.coverage.lastError, null);
   coverage.clear();
   coverage.resetErrors();
+});
+
+test('overview points behind the horizon are hidden, not drawn through the globe', async () => {
+  const { viewer, source, state, coverage } = setup();
+  const { view } = viewer;
+  view.height = 20_000_000;
+  Object.defineProperty(viewer.camera, 'positionWC', {
+    get: () => Cesium.Cartesian3.fromDegrees(view.lon, view.lat, view.height),
+  });
+  coverage.refresh();
+  // One dot under the camera (Sacramento), one near its antipode.
+  source.calls[0].resolve(
+    encodeCoverageTile(
+      { x: 0, y: 0, z: 0 },
+      {
+        overview: [
+          { id: 'near', lon: -121.5, lat: 38.6 },
+          { id: 'far', lon: 58.5, lat: -38.6 },
+        ],
+      },
+    ),
+  );
+  await settle();
+  const [entry] = state.coverage.tiles.values();
+  const points = [0, 1].map((i) => entry.primitive.get(i));
+  const west = (point) =>
+    Cesium.Cartographic.fromCartesian(point.position).longitude < 0;
+  const near = points.find(west);
+  const far = points.find((point) => !west(point));
+  frame(viewer.preRender);
+  assert.equal(near.show, true, 'the near side stays visible');
+  assert.equal(far.show, false, 'the far side does not show through');
+  // Fly round to the other hemisphere: the two swap.
+  view.lon = 58.5;
+  view.lat = -38.6;
+  frame(viewer.preRender);
+  assert.equal(near.show, false);
+  assert.equal(far.show, true);
+  coverage.clear();
+  assert.equal(viewer.preRender.size, 0, 'the cull listener is gone');
+});
+
+test('a cast tile whose heights were evicted is cast again, not left draped', async () => {
+  const terrain = {
+    calls: 0,
+    async resolveEllipsoidalGround(coords) {
+      this.calls++;
+      return coords.map(() => ({ ellipsoid: 20, source: 'reearth' }));
+    },
+  };
+  // Room for one tile's corners at a time.
+  const groundCaster = createGroundCaster({
+    terrain,
+    maxCorners: 16,
+    cacheMax: 20,
+  });
+  let sampled = null;
+  const meshSampler = {
+    onSampled: (listener) => (sampled = listener),
+    request() {},
+    meshAt: () => undefined,
+  };
+  const { source, state, coverage, bytes, centre } = setup({
+    surface: 'terrain',
+    groundCaster,
+    meshSampler,
+  });
+  const isCast = () => {
+    const [entry] = state.coverage.tiles.values();
+    return (
+      entry.primitives.length > 0 &&
+      entry.primitives.every(({ onGround }) => !onGround)
+    );
+  };
+  coverage.refresh();
+  source.calls[0].resolve(bytes);
+  await settle();
+  await settle();
+  assert.ok(isCast(), 'cast once the heights are in');
+  // Another region fills the cache and evicts this tile's corners...
+  await groundCaster.prepare([[centre.lon + 0.05, centre.lat + 0.05]]);
+  assert.equal(groundCaster.groundAt(centre.lon - 0.001, centre.lat), null);
+  // ...then mesh samples redraw the tile, which can only drape now.
+  sampled([[centre.lon, centre.lat]]);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  coverage.refresh();
+  await settle();
+  await settle();
+  assert.ok(isCast(), 'the tile is cast again');
+  coverage.clear();
+});
+
+test('a tile left draped by a failed terrain lookup is cast on the next refresh', async () => {
+  let up = false;
+  let prepares = 0;
+  let heightsReady = false;
+  const groundCaster = {
+    prepareLines: async () => {
+      prepares++;
+      heightsReady = up;
+      return up;
+    },
+    castLine: (coords) =>
+      heightsReady ? coords.flatMap(([lon, lat]) => [lon, lat, 30]) : null,
+  };
+  const { viewer, source, coverage, bytes } = setup({
+    surface: 'terrain',
+    groundCaster,
+  });
+  coverage.refresh();
+  source.calls[0].resolve(bytes);
+  await settle();
+  await settle();
+  assert.equal(prepares, 1);
+  assert.equal(viewer.scene.primitives.items.size, 0, 'draped');
+  await settle();
+  assert.equal(prepares, 1, 'no retry loop while the proxy is down');
+  up = true; // the proxy is back
+  coverage.refresh();
+  await settle();
+  assert.equal(prepares, 2, 'the next refresh tries again');
+  assert.equal(viewer.scene.primitives.items.size, 1, 'cast lines added');
+  coverage.clear();
+});
+
+test('the per-tile cap applies after the imagery filter, so a dense tile keeps its 360° lines', async () => {
+  const { state, source, coverage, centre } = setup();
+  const line = (n) => [
+    [
+      [centre.lon - 0.001, centre.lat + n * 1e-6],
+      [centre.lon + 0.001, centre.lat + n * 1e-6],
+    ],
+  ];
+  // 700 newer flat sequences, then 300 older 360° ones.
+  const sequences = [];
+  for (let i = 0; i < 700; i++)
+    sequences.push({
+      id: `flat-${i}`,
+      parts: line(i),
+      capturedAt: 2_000_000_000_000 + i,
+    });
+  for (let i = 0; i < 300; i++)
+    sequences.push({
+      id: `pano-${i}`,
+      parts: line(i),
+      capturedAt: 1_000_000_000_000 + i,
+      isPano: true,
+    });
+  state.filter = { pano: 'pano', sinceMs: null };
+  coverage.refresh();
+  source.calls[0].resolve(encodeCoverageTile(centre.tile, { sequences }));
+  await settle();
+  const [entry] = state.coverage.tiles.values();
+  const cap = Math.floor(COVERAGE_MAX_SEQUENCES / COVERAGE_MAX_TILES);
+  assert.equal(entry.count, Math.min(300, cap), 'every 360° line is drawn');
+  assert.equal(coverage.sequenceCount(), Math.min(300, cap));
+  assert.ok(coverage.findSequence('pano-0'), 'drawn lines can be looked up');
+  assert.equal(coverage.findSequence('flat-699'), null);
+  state.filter = { pano: 'all', sinceMs: null };
+  coverage.rebuild();
+  assert.equal(entry.count, cap, 'all imagery is capped as before');
+  assert.ok(coverage.findSequence('flat-699'), 'the newest flat line is drawn');
+  assert.equal(coverage.findSequence('pano-299'), null, 'over the cap');
+  coverage.clear();
+});
+
+test('a selection made or cleared while a tile builds is applied once it is ready', async () => {
+  const { viewer, source, state, coverage, bytes } = setup();
+  coverage.refresh();
+  source.calls[0].resolve(bytes);
+  await settle();
+  const [entry] = state.coverage.tiles.values();
+  const value = (selected) =>
+    Array.from(
+      Cesium.ColorGeometryInstanceAttribute.toValue(
+        selected
+          ? Cesium.Color.fromCssColorString(COLORS.selected)
+          : Cesium.Color.fromCssColorString(COLORS.coverage).withAlpha(0.92),
+      ),
+    );
+  /** Stand in for a primitive the worker has not finished, with its colours. */
+  function building(record) {
+    const control = { ready: false, attributes: { color: undefined } };
+    Object.defineProperty(record.primitive, 'ready', {
+      get: () => control.ready,
+    });
+    record.primitive.getGeometryInstanceAttributes = (id) =>
+      id === 'mly:seq:seq-1' ? control.attributes : undefined;
+    return control;
+  }
+
+  // Selected while its line is still building: nothing to recolour yet...
+  const first = building(entry.primitives[0]);
+  state.sequence.selectedId = 'seq-1';
+  coverage.recolorSequence('seq-1', true);
+  assert.equal(first.attributes.color, undefined);
+  // ...so the highlight lands once it is ready.
+  first.ready = true;
+  frame(viewer.postRender);
+  assert.deepEqual(Array.from(first.attributes.color), value(true));
+
+  // Rebuilt with the highlight baked in, then cleared mid-build: not stuck.
+  coverage.rebuild();
+  const second = building(entry.primitives[0]);
+  coverage.recolorSequence('seq-1', false);
+  state.sequence.selectedId = null;
+  second.ready = true;
+  frame(viewer.postRender);
+  assert.deepEqual(Array.from(second.attributes.color), value(false));
+  coverage.clear();
+  assert.equal(viewer.postRender.size, 0, 'the selection watch is gone');
 });

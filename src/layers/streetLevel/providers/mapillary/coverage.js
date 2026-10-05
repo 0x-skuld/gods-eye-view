@@ -116,22 +116,35 @@ export function createCoverage({ state, source }) {
   }
 
   /**
+   * The sequences a tile draws: newest first, past the imagery filter, then
+   * capped. Capping before the filter could leave a dense tile of newer flat
+   * captures with no 360° lines at all.
+   */
+  function drawnSequences(entry) {
+    const drawn = [];
+    for (const sequence of entry.sequenceList) {
+      if (drawn.length >= PER_TILE_SEQUENCE_CAP) break;
+      if (passesImageryFilter(sequence, filter())) drawn.push(sequence);
+    }
+    return drawn;
+  }
+
+  /**
    * Primitives for a tile's sequences, in draw batches: ground primitives
    * draped on the globe, plus (in terrain mode) plain polylines at the cast
    * heights for every part whose heights are cached. Each part of a sequence
-   * with a capture gap is its own line.
+   * with a capture gap is its own line. Each batch remembers the selection
+   * its colours were built with.
    */
   function buildSequencePrimitives(sequences) {
     const ground = terrainMode() ? state.context.groundCaster : null;
     const meshAt = ground ? state.context.meshSampler?.meshAt : undefined;
+    const selectedId = state.sequence.selectedId ?? null;
     const draped = [];
     const cast = [];
-    let drawn = 0;
     for (const sequence of sequences) {
-      if (!passesImageryFilter(sequence, filter())) continue;
-      drawn++;
       const color = Cesium.ColorGeometryInstanceAttribute.fromColor(
-        sequenceColor({ selected: sequence.id === state.sequence.selectedId }),
+        sequenceColor({ selected: sequence.id === selectedId }),
       );
       const ids = partIds(sequence);
       sequence.parts.forEach((coordinates, index) => {
@@ -169,6 +182,7 @@ export function createCoverage({ state, source }) {
     for (let i = 0; i < draped.length; i += SEQUENCE_PRIMITIVE_BATCH)
       primitives.push({
         onGround: true,
+        selectedId,
         primitive: new Cesium.GroundPolylinePrimitive({
           geometryInstances: draped.slice(i, i + SEQUENCE_PRIMITIVE_BATCH),
           appearance: new Cesium.PolylineColorAppearance(),
@@ -180,6 +194,7 @@ export function createCoverage({ state, source }) {
     for (let i = 0; i < cast.length; i += SEQUENCE_PRIMITIVE_BATCH)
       primitives.push({
         onGround: false,
+        selectedId,
         primitive: new Cesium.Primitive({
           geometryInstances: cast.slice(i, i + SEQUENCE_PRIMITIVE_BATCH),
           appearance: new Cesium.PolylineColorAppearance({ translucent: true }),
@@ -187,27 +202,36 @@ export function createCoverage({ state, source }) {
           allowPicking: true,
         }),
       });
-    return { primitives, count: drawn, draped };
+    return { primitives, draped, cast: cast.length };
   }
 
   /**
    * Fetch the terrain heights a tile's lines need, then redraw the tile cast.
-   * Runs once per tile entry; unresolved lines stay draped.
+   * `castRequested` holds while the tile's castable lines are cast; a cast
+   * that resolves nothing (terrain proxy down, tile too big) clears it, so
+   * the next refresh tries again rather than this retrying in a loop.
    */
   function castTile(entry) {
-    if (entry.castRequested || !terrainMode()) return;
+    // `castAbort` is set while a cast is in flight.
+    if (entry.castRequested || entry.castAbort || !terrainMode()) return;
     entry.castRequested = true;
     entry.castAbort = new AbortController();
     const { signal } = entry.castAbort;
-    const lines = entry.sequenceList
-      .filter((sequence) => passesImageryFilter(sequence, filter()))
-      .flatMap((sequence) => sequence.parts);
+    const lines = [...entry.sequences.values()].flatMap(
+      (sequence) => sequence.parts,
+    );
     const caster = state.context.groundCaster;
     caster.prepareLines(lines, { signal }).then(() => {
+      if (entry.castAbort?.signal === signal) entry.castAbort = null;
       const attached = [...state.coverage.tiles.values()].includes(entry);
       if (signal.aborted || !attached || !terrainMode()) return;
-      // Nothing new to cast (terrain proxy down, tile too big): keep it draped.
-      if (!lines.some((coords) => caster.castLine(coords))) return;
+      // Nothing new to cast: keep it draped until the next refresh.
+      if (!lines.some((coords) => caster.castLine(coords))) {
+        entry.castRequested = false;
+        return;
+      }
+      // A remesh may have cleared the flag while this was in flight.
+      entry.castRequested = true;
       // Keep the draped lines until the cast ones are built, so nothing blinks.
       const previous = entry.primitives;
       entry.primitives = [];
@@ -217,11 +241,11 @@ export function createCoverage({ state, source }) {
     });
   }
 
-  /** The mesh cells under a tile's lines, built once per tile. */
+  /** The mesh cells under a tile's drawn lines, built once per filter. */
   function meshCells(entry) {
     if (entry.meshCells) return entry.meshCells;
     const cells = new Map();
-    for (const sequence of entry.sequenceList)
+    for (const sequence of entry.sequences.values())
       for (const [lon, lat] of sequence.parts.flatMap((part) =>
         densifyLine(part, MESH_DENSIFY_DEG),
       ))
@@ -342,37 +366,101 @@ export function createCoverage({ state, source }) {
     const green = Cesium.Color.fromCssColorString(COLORS.coverage).withAlpha(
       0.85,
     );
-    let count = 0;
+    const drawn = [];
     for (const point of points) {
       if (!passesImageryFilter(point, filter())) continue;
-      collection.add({
-        position: Cesium.Cartesian3.fromDegrees(point.lon, point.lat),
-        color: green,
-        pixelSize: COVERAGE_OVERVIEW_POINT_PX,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      });
-      count++;
+      drawn.push(
+        collection.add({
+          position: Cesium.Cartesian3.fromDegrees(point.lon, point.lat),
+          color: green,
+          pixelSize: COVERAGE_OVERVIEW_POINT_PX,
+          // Google 3D terrain and clouds must not hide the near side's dots;
+          // `cullHorizon` hides the far side's, which this lets through.
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        }),
+      );
     }
-    return { collection, count };
+    return { collection, points: drawn };
+  }
+
+  /**
+   * Hide the overview points behind the horizon, as the cyclones layer does.
+   * They skip the depth test, so nothing else stops the far hemisphere's
+   * coverage drawing over this one at whole-earth zooms; a finite skip
+   * distance cannot do it, as the horizon's distance moves with the camera.
+   */
+  function cullHorizon() {
+    const position = state.viewer?.camera?.positionWC;
+    if (!position) return;
+    const entries = [
+      ...state.coverage.tiles.values(),
+      ...state.coverage.stale.values(),
+    ].filter((entry) => entry.overviewPoints);
+    if (!entries.length) {
+      stopHorizonCull();
+      return;
+    }
+    const from = state.coverage.cullFrom;
+    if (from && Cesium.Cartesian3.equals(from, position)) return;
+    state.coverage.cullFrom = Cesium.Cartesian3.clone(position, from);
+    let changed = false;
+    for (const entry of entries)
+      if (cullPoints(entry.overviewPoints, position)) changed = true;
+    if (changed) requestRender();
+  }
+
+  /** Show the points in front of the horizon seen from `position`, hide the rest. */
+  function cullPoints(points, position) {
+    const occluder = (state.coverage.occluder ||=
+      new Cesium.EllipsoidalOccluder(Cesium.Ellipsoid.WGS84));
+    occluder.cameraPosition = position;
+    let changed = false;
+    for (const point of points) {
+      const show = occluder.isPointVisible(point.position);
+      if (point.show !== show) {
+        point.show = show;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  function stopHorizonCull() {
+    state.coverage.stopHorizonCull?.();
+    state.coverage.stopHorizonCull = null;
+    state.coverage.cullFrom = null;
   }
 
   function attachPrimitive(entry) {
     const scene = state.viewer?.scene;
     if (!scene) return;
     if (entry.kind === 'sequence') {
-      const { primitives, count, draped } = buildSequencePrimitives(
-        entry.sequenceList,
-      );
+      // Lookup, picking and counts follow what is drawn, not the whole tile.
+      const sequences = drawnSequences(entry);
+      entry.sequences = new Map(sequences.map((s) => [s.id, s]));
+      const { primitives, draped, cast } = buildSequencePrimitives(sequences);
       entry.primitives = primitives;
-      entry.count = count;
+      entry.count = sequences.length;
       for (const { primitive, onGround } of primitives)
         (onGround ? scene.groundPrimitives : scene.primitives).add(primitive);
+      // Fewer lines cast than last time: the caster has dropped heights this
+      // tile used (a full cache), so it must be cast again.
+      if (cast < (entry.castLines || 0)) entry.castRequested = false;
+      entry.castLines = cast;
+      entry.drapedLines = draped.length;
       if (draped.length) castTile(entry);
+      watchSelection();
     } else {
-      const { collection, count } = buildOverviewCollection(entry.points);
+      const { collection, points } = buildOverviewCollection(entry.points);
       entry.primitive = collection;
-      entry.count = count;
+      entry.overviewPoints = points;
+      entry.count = points.length;
       scene.primitives.add(collection);
+      // Cull the new points now, then every frame the camera has moved.
+      const camera = state.viewer.camera?.positionWC;
+      if (camera) cullPoints(points, camera);
+      state.coverage.stopHorizonCull ||=
+        scene.preRender?.addEventListener(cullHorizon) || null;
     }
   }
 
@@ -401,6 +489,7 @@ export function createCoverage({ state, source }) {
         /* already gone */
       }
       entry.primitive = null;
+      entry.overviewPoints = null;
     }
   }
 
@@ -458,12 +547,11 @@ export function createCoverage({ state, source }) {
         north: bounds.north + pad,
       };
       if (kind === 'sequence') {
-        // Newest first, capped per tile so a dense city stays within budget.
-        const sequences = decoded.sequences
-          .sort((a, b) => (b.capturedAt || 0) - (a.capturedAt || 0))
-          .slice(0, PER_TILE_SEQUENCE_CAP);
-        entry.sequenceList = sequences;
-        entry.sequences = new Map(sequences.map((s) => [s.id, s]));
+        // Newest first; the per-tile cap applies to what passes the filter.
+        entry.sequenceList = decoded.sequences.sort(
+          (a, b) => (b.capturedAt || 0) - (a.capturedAt || 0),
+        );
+        entry.sequences = new Map();
         entry.total = decoded.sequences.length;
       } else {
         entry.points = decoded.overview;
@@ -642,10 +730,12 @@ export function createCoverage({ state, source }) {
       }
     for (const tile of tiles) loadTile(tile, kind);
     if (!state.coverage.pending.size) purgeStale();
-    // The camera moved: cells that were out of the sampler's range may not be.
+    // The camera moved: cells that were out of the sampler's range may not be,
+    // and a tile left draped by a failed or dropped cast gets another try.
     if (terrainMode())
       for (const entry of state.coverage.tiles.values())
         if (entry.castRequested) requestMesh(entry);
+        else if (entry.drapedLines) castTile(entry);
     notify();
   }
 
@@ -687,6 +777,8 @@ export function createCoverage({ state, source }) {
     clearTimeout(state.coverage.remeshTimer);
     state.coverage.remeshTimer = null;
     state.coverage.remeshDirty.clear();
+    stopSelectionWatch();
+    stopHorizonCull();
     requestRender();
   }
 
@@ -696,6 +788,7 @@ export function createCoverage({ state, source }) {
     for (const entry of state.coverage.tiles.values()) {
       cancelCast(entry);
       entry.castRequested = false;
+      entry.meshCells = null;
       detachPrimitive(entry);
       attachPrimitive(entry);
     }
@@ -723,29 +816,81 @@ export function createCoverage({ state, source }) {
     return null;
   }
 
+  /** Recolour every part of a sequence in one ready primitive. */
+  function recolorInstances(primitive, sequence, selected) {
+    const value = sequenceColor({ selected });
+    for (const instanceId of partIds(sequence)) {
+      try {
+        const attributes = primitive.getGeometryInstanceAttributes(instanceId);
+        if (attributes)
+          attributes.color = Cesium.ColorGeometryInstanceAttribute.toValue(
+            value,
+            attributes.color,
+          );
+      } catch {
+        /* instance not in this primitive */
+      }
+    }
+  }
+
   /** Recolour one sequence, every part of it, in place (selection highlight). */
   function recolorSequence(id, selected) {
-    const value = sequenceColor({ selected });
     for (const entry of state.coverage.tiles.values()) {
       const sequence = entry.sequences.get(id);
       if (!sequence) continue;
-      for (const instanceId of partIds(sequence))
-        for (const { primitive } of entry.primitives || []) {
-          if (!primitive.ready) continue;
-          try {
-            const attributes =
-              primitive.getGeometryInstanceAttributes(instanceId);
-            if (attributes)
-              attributes.color = Cesium.ColorGeometryInstanceAttribute.toValue(
-                value,
-                attributes.color,
-              );
-          } catch {
-            /* instance not in this primitive */
-          }
-        }
+      for (const record of entry.primitives || []) {
+        // Still building: `syncSelection` catches it up once it is ready.
+        if (!record.primitive.ready) continue;
+        recolorInstances(record.primitive, sequence, selected);
+        if (selected) record.selectedId = id;
+        else if (record.selectedId === id) record.selectedId = null;
+      }
     }
     requestRender();
+  }
+
+  /**
+   * Bring a ready primitive's highlight up to the current selection, when
+   * it was built with another one (or none). True when it changed.
+   */
+  function syncSelection(entry, record) {
+    const current = state.sequence.selectedId ?? null;
+    if (record.selectedId === current || !record.primitive.ready) return false;
+    const previous =
+      record.selectedId && entry.sequences.get(record.selectedId);
+    if (previous) recolorInstances(record.primitive, previous, false);
+    const next = current && entry.sequences.get(current);
+    if (next) recolorInstances(record.primitive, next, true);
+    record.selectedId = current;
+    return true;
+  }
+
+  /**
+   * Colours are baked in when a tile's lines are built, and a primitive
+   * cannot be recoloured until it is ready. Cast swaps and remeshes rebuild
+   * tiles all the time, so while any primitive is building, catch each one
+   * up with the selection made or cleared meanwhile as it becomes ready.
+   */
+  function watchSelection() {
+    const scene = state.viewer?.scene;
+    if (state.coverage.stopSelectionWatch || !scene?.postRender) return;
+    const stop = scene.postRender.addEventListener(() => {
+      let building = false;
+      let changed = false;
+      for (const entry of state.coverage.tiles.values())
+        for (const record of entry.primitives || []) {
+          if (!record.primitive.ready) building = true;
+          else if (syncSelection(entry, record)) changed = true;
+        }
+      if (changed) requestRender();
+      if (!building) stopSelectionWatch();
+    });
+    state.coverage.stopSelectionWatch = stop;
+  }
+
+  function stopSelectionWatch() {
+    state.coverage.stopSelectionWatch?.();
+    state.coverage.stopSelectionWatch = null;
   }
 
   function sequenceCount() {

@@ -239,6 +239,27 @@ test('a full cache is cleared before a request counts its corners, so the reques
   assert.ok(caster.castLine(line), 'the whole line casts');
 });
 
+test('a full cache drops its oldest corners, not every corner', async () => {
+  const caster = createGroundCaster({
+    terrain: fakeTerrain(),
+    step: 0.001,
+    maxCorners: 4,
+    cacheMax: 12,
+  });
+  // Three cells apart from each other, four corners each: the cache is full.
+  const cells = [10.0005, 10.0105, 10.0205, 10.0305].map((lon) => [
+    lon,
+    50.0005,
+  ]);
+  for (const cell of cells.slice(0, 3))
+    assert.equal(await caster.prepare([cell]), true);
+  // A fourth makes room by dropping the first cell only.
+  assert.equal(await caster.prepare([cells[3]]), true);
+  assert.equal(caster.heightAt(...cells[0]), null, 'oldest dropped');
+  for (const cell of cells.slice(1))
+    assert.notEqual(caster.heightAt(...cell), null, 'newer cells kept');
+});
+
 test('cancelling a prepare cancels its terrain request', async () => {
   const seen = [];
   const caster = createGroundCaster({

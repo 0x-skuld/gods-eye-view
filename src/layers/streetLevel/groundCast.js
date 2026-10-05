@@ -22,7 +22,7 @@ export const GROUND_CAST_DENSIFY_DEG = 0.0005;
 export const GROUND_CAST_LIFT_M = 2;
 /** Grid corners one prepare call may request; more stays draped. */
 export const GROUND_CAST_MAX_CORNERS = 1024;
-/** Cached grid corners before the cache is dropped and refilled. */
+/** Cached grid corners before the oldest are dropped to make room. */
 const GROUND_CAST_CACHE_MAX = 50_000;
 
 /**
@@ -170,9 +170,13 @@ export function createGroundCaster({
 
   async function resolve(points, signal) {
     if (signal?.aborted) return false;
-    // Make room first: clearing after counting would drop corners this
-    // request already treated as cached.
-    if (heights.size + maxCorners > cacheMax) heights.clear();
+    // Make room first: evicting after counting would drop corners this
+    // request already treated as cached. Oldest first (a Map keeps insertion
+    // order), so the tiles cast last, likely still on screen, keep theirs.
+    for (const key of heights.keys()) {
+      if (heights.size + maxCorners <= cacheMax) break;
+      heights.delete(key);
+    }
     const missing = missingCorners(points);
     if (!missing.length) return true;
     if (missing.length > maxCorners) return false;
