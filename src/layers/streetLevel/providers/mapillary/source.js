@@ -7,14 +7,22 @@ import {
   SEQUENCE_IMAGES_LIMIT,
 } from './policy.js';
 
-/** Error carrying the HTTP status and any server-provided payload. */
+/**
+ * Error carrying the HTTP status and any server-provided payload: no token
+ * (`keyRequired`), a token Mapillary rejected (`keyRejected`), or a rate
+ * limit with the seconds to wait (`retryAfterSec`).
+ */
 export class MapillarySourceError extends Error {
-  constructor(message, { status = 0, payload = null } = {}) {
+  constructor(message, { status = 0, payload = null, retryAfterSec } = {}) {
     super(message);
     this.name = 'MapillarySourceError';
     this.status = status;
     this.payload = payload;
     this.keyRequired = payload?.keyRequired ?? payload?.error === 'no_key';
+    this.keyRejected = payload?.keyRejected === true;
+    const wait = Number(retryAfterSec ?? payload?.retryAfter);
+    this.retryAfterSec =
+      status === 429 ? (Number.isFinite(wait) && wait > 0 ? wait : 60) : null;
   }
 }
 
@@ -102,6 +110,7 @@ export function createMapillarySource({
           {
             status: response.status,
             payload,
+            retryAfterSec: response.headers?.get?.('retry-after') ?? undefined,
           },
         );
       }

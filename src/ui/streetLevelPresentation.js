@@ -65,6 +65,8 @@ function formatDate(ms) {
 function presentStatus(state) {
   const pressed = state.enabled === true;
   const title = pressed ? 'Turn Street Level off' : 'Turn Street Level on';
+  if (state.keyRejected)
+    return { text: 'KEY REJECTED', tone: 'warn', pressed, title };
   if (state.keyRequired)
     return { text: 'KEY REQUIRED', tone: 'warn', pressed, title };
   if (state.coverage.loading)
@@ -85,7 +87,9 @@ function presentProviders(state) {
     const keyRequired = provider.keyRequired === true;
     const on = enabled && provider.on === true;
     let title = `${provider.name} imagery ${on ? 'on' : 'off'}`;
-    if (keyRequired && provider.requiresKeyId)
+    if (provider.keyRejected && provider.error)
+      title = `${provider.name}: ${provider.error}`;
+    else if (keyRequired && provider.requiresKeyId)
       title = `${provider.name}: ${keySetupRequirement(provider.requiresKeyId)}`;
     else if (provider.error) title = `${provider.name}: ${provider.error}`;
     return {

@@ -46,10 +46,25 @@ async function handleTile(req, res) {
     if (res.writableEnded || abandoned.signal.aborted) return;
     if (error instanceof TileRequestError)
       return sendJson(res, error.status, { error: error.message });
-    if (error instanceof TileUpstreamError)
+    if (error instanceof TileUpstreamError) {
+      // A rejected token is a key problem the panel can name, not a fault.
+      if (error.keyRejected)
+        return sendJson(res, 403, {
+          error: 'Mapillary rejected the access token',
+          keyRejected: true,
+        });
+      if (error.status === 429) {
+        const retryAfter = error.retryAfterSec || 60;
+        res.setHeader('Retry-After', String(retryAfter));
+        return sendJson(res, 429, {
+          error: 'Mapillary is rate-limiting tile requests',
+          retryAfter,
+        });
+      }
       return sendJson(res, error.status >= 500 ? 502 : error.status, {
         error: error.message,
       });
+    }
     sendJson(res, 502, { error: error?.message || 'Tile fetch failed' });
   }
 }

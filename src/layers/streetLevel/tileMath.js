@@ -93,14 +93,58 @@ export function countTilesForBbox(bbox, z) {
 }
 
 /**
+ * Squared distance (in tiles) from tile (x, y)'s centre to the segment
+ * `from` → `to` at zoom z, measured the short way round the date line.
+ */
+function segmentDistance2(tile, from, to, z) {
+  const n = 2 ** z;
+  /** Unfloored tile coordinates of a point. */
+  const tileX = (lon) => ((lon + 180) / 360) * n;
+  const tileY = (lat) => {
+    const rad = (clampLat(lat) * Math.PI) / 180;
+    return (
+      ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n
+    );
+  };
+  const px = tile.x + 0.5;
+  const py = tile.y + 0.5;
+  const ax = tileX(from.lon);
+  const ay = tileY(from.lat);
+  let bx = to ? tileX(to.lon) : ax;
+  const by = to ? tileY(to.lat) : ay;
+  if (bx - ax > n / 2) bx -= n;
+  else if (ax - bx > n / 2) bx += n;
+  let best = Infinity;
+  for (const shift of [-n, 0, n]) {
+    const x = px + shift;
+    const vx = bx - ax;
+    const vy = by - ay;
+    const len2 = vx * vx + vy * vy;
+    const t = len2
+      ? Math.max(0, Math.min(1, ((x - ax) * vx + (py - ay) * vy) / len2))
+      : 0;
+    const dx = x - (ax + t * vx);
+    const dy = py - (ay + t * vy);
+    best = Math.min(best, dx * dx + dy * dy);
+  }
+  return best;
+}
+
+/**
  * Enumerate the tiles at zoom z covering a bbox (west > east means it crosses
  * the date line), ordered from the centre of
  * the box outwards so a progressive renderer fills in what the user is most
  * likely looking at first. `limit` caps the list; the result reports whether
  * the cap was hit.
+ *
+ * `focus` ranks by distance from the line between `focus.from` (the ground
+ * under the camera) and `focus.to` (the ground at the centre of the screen)
+ * instead: a tilted view's box reaches far past what the user looks at, and
+ * its centre can sit kilometres ahead of both.
+ * @param {{limit?: number, focus?: {from: {lon: number, lat: number}, to?: {lon: number, lat: number}|null}|null}} [options]
  * @returns {{tiles: Array<{x:number,y:number,z:number}>, truncated: boolean, total: number}}
  */
-export function tilesForBbox(bbox, z, { limit = Infinity } = {}) {
+export function tilesForBbox(bbox, z, { limit = Infinity, focus = null } = {}) {
   // A box across the date line comes as west > east: split it at ±180°.
   if (Array.isArray(bbox) && Number(bbox[0]) > Number(bbox[2])) {
     const [west, south, east, north] = bbox.map(Number);
@@ -114,10 +158,17 @@ export function tilesForBbox(bbox, z, { limit = Infinity } = {}) {
     const cx = ((x0 + x1) / 2) % n;
     const cy = (latToTileY(north, z) + latToTileY(south, z)) / 2;
     const dx = (x) => Math.min(Math.abs(x - cx), n - Math.abs(x - cx));
-    tiles.sort(
-      (a, b) =>
-        dx(a.x) ** 2 + (a.y - cy) ** 2 - (dx(b.x) ** 2 + (b.y - cy) ** 2),
-    );
+    if (focus?.from)
+      tiles.sort(
+        (a, b) =>
+          segmentDistance2(a, focus.from, focus.to, z) -
+          segmentDistance2(b, focus.from, focus.to, z),
+      );
+    else
+      tiles.sort(
+        (a, b) =>
+          dx(a.x) ** 2 + (a.y - cy) ** 2 - (dx(b.x) ** 2 + (b.y - cy) ** 2),
+      );
     const truncated = tiles.length > limit;
     return {
       tiles: truncated ? tiles.slice(0, limit) : tiles,
@@ -137,10 +188,17 @@ export function tilesForBbox(bbox, z, { limit = Infinity } = {}) {
   const tiles = [];
   for (let y = y0; y <= y1; y++)
     for (let x = x0; x <= x1; x++) tiles.push({ x, y, z });
-  tiles.sort(
-    (a, b) =>
-      (a.x - cx) ** 2 + (a.y - cy) ** 2 - ((b.x - cx) ** 2 + (b.y - cy) ** 2),
-  );
+  if (focus?.from)
+    tiles.sort(
+      (a, b) =>
+        segmentDistance2(a, focus.from, focus.to, z) -
+        segmentDistance2(b, focus.from, focus.to, z),
+    );
+  else
+    tiles.sort(
+      (a, b) =>
+        (a.x - cx) ** 2 + (a.y - cy) ** 2 - ((b.x - cx) ** 2 + (b.y - cy) ** 2),
+    );
   const truncated = tiles.length > limit;
   return { tiles: truncated ? tiles.slice(0, limit) : tiles, truncated, total };
 }

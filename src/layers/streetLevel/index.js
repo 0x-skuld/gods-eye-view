@@ -263,7 +263,9 @@ export function createStreetLevelLayer({
         label: entry.def.label,
         on: entry.on,
         configured: entry.status ? entry.status.configured === true : null,
-        keyRequired: stats.keyRequired === true,
+        // A rejected key gates the provider exactly like a missing one.
+        keyRequired: stats.keyRequired === true || stats.keyRejected === true,
+        keyRejected: stats.keyRejected === true,
         requiresKeyId: entry.def.requiresKeyId || null,
         loading: stats.loading === true,
         count: stats.count || 0,
@@ -376,7 +378,8 @@ export function createStreetLevelLayer({
       // The lifecycle polls this every second: summarise, don't snapshot.
       const coverage = summarizeCoverage(providerSnapshots());
       let loadingLabel = '';
-      if (coverage.keyRequired) loadingLabel = 'KEY REQUIRED';
+      const keyLabel = coverage.keyRejected ? 'KEY REJECTED' : 'KEY REQUIRED';
+      if (coverage.keyRequired) loadingLabel = keyLabel;
       else if (coverage.loading) loadingLabel = 'loading coverage...';
       else if (coverage.hint && state.enabled) loadingLabel = coverage.hint;
       return {
@@ -384,7 +387,11 @@ export function createStreetLevelLayer({
         sequences: coverage.count,
         loading: coverage.loading,
         keyRequired: coverage.keyRequired,
-        error: coverage.keyRequired ? 'KEY REQUIRED' : coverage.error,
+        error: coverage.keyRequired
+          ? coverage.keyRejected
+            ? coverage.error || keyLabel
+            : keyLabel
+          : coverage.error,
         loadingLabel,
       };
     },

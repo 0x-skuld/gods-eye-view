@@ -1,7 +1,7 @@
 import * as Cesium from 'cesium';
 import { decodeCoverageTile } from './decode.js';
 import { passesImageryFilter } from '../../filter.js';
-import { cameraHeightAboveGround, visibleBbox } from '../../view.js';
+import { groundUnderCamera, viewFocus, visibleBbox } from '../../view.js';
 import { densifyLine, MESH_DENSIFY_DEG } from '../../groundCast.js';
 import { MESH_CELL_DEG } from '../../meshSampler.js';
 import {
@@ -18,7 +18,12 @@ import {
   COVERAGE_MOVE_DEBOUNCE_MS,
   COVERAGE_OVERVIEW_MAX_TILES,
   COVERAGE_OVERVIEW_POINT_PX,
+  KEY_REJECTED_MESSAGE,
   PICK_PREFIX,
+  RATE_LIMITED_MESSAGE,
+  SEQUENCE_VIEW_NEAR_M,
+  SEQUENCE_VIEW_RANGE_MIN_M,
+  SEQUENCE_VIEW_RANGE_PER_HEIGHT,
 } from './policy.js';
 
 /** Draped lines stay at most this long while a tile's cast lines build. */
@@ -477,6 +482,12 @@ export function createCoverage({ state, source }) {
         return;
       state.coverage.lastError = error?.message || 'Coverage tile failed';
       if (error?.keyRequired) state.keyRequired = true;
+      if (error?.keyRejected) {
+        // Every other tile would be refused too: stop asking.
+        state.keyRejected = true;
+        state.coverage.lastError = KEY_REJECTED_MESSAGE;
+      }
+      if (error?.retryAfterSec) holdFor(error.retryAfterSec);
     } finally {
       // Only the request that still owns the key settles it: a superseded one
       // must not drop a newer request's entry or its loading count.
@@ -487,6 +498,32 @@ export function createCoverage({ state, source }) {
       }
       notify();
     }
+  }
+
+  /**
+   * Mapillary is rate-limiting: keep what is drawn, request nothing until the
+   * wait is over, then refresh once.
+   */
+  function holdFor(seconds) {
+    clearTimeout(state.coverage.holdTimer);
+    state.coverage.holdUntil = Date.now() + seconds * 1000;
+    state.coverage.lastError = RATE_LIMITED_MESSAGE;
+    state.coverage.holdTimer = setTimeout(() => {
+      state.coverage.holdTimer = null;
+      state.coverage.holdUntil = 0;
+      if (state.coverage.lastError === RATE_LIMITED_MESSAGE)
+        state.coverage.lastError = null;
+      refresh();
+    }, seconds * 1000);
+  }
+
+  /** Forget refusals when the provider goes off, so the next run asks again. */
+  function resetErrors() {
+    clearTimeout(state.coverage.holdTimer);
+    state.coverage.holdTimer = null;
+    state.coverage.holdUntil = 0;
+    state.coverage.lastError = null;
+    state.keyRejected = false;
   }
 
   /** Drop the previous zoom's tiles once the new ones are on screen. */
@@ -523,18 +560,55 @@ export function createCoverage({ state, source }) {
     state.context.notify();
   }
 
+  /**
+   * Whether the screen centre meets the ground further ahead than the camera
+   * is high (a view tilted above 45°), or misses it.
+   */
+  function isTilted({ nadir, ahead }, height) {
+    if (!ahead) return true;
+    const dLat = (ahead.lat - nadir.lat) * 111_320;
+    const dLon =
+      (ahead.lon - nadir.lon) * 111_320 * Math.cos((nadir.lat * Math.PI) / 180);
+    return Math.hypot(dLat, dLon) > Math.max(1, height);
+  }
+
   /** Recompute the tile set for the current camera and reconcile primitives. */
   function refresh() {
     const viewer = state.viewer;
     if (!viewer || !state.context.isActive() || state.keyRequired) return;
-    const height = cameraHeightAboveGround(viewer, {
+    if (state.keyRejected || state.coverage.holdUntil > Date.now()) return;
+    const ground = groundUnderCamera(viewer, {
       groundAt: state.context.groundCaster?.groundAt,
     });
+    const cameraHeight = viewer.camera?.positionCartographic?.height;
+    const height = Number.isFinite(cameraHeight)
+      ? cameraHeight - (ground ?? 0)
+      : null;
     const sequenceZoom = coverageZoomForHeight(height);
     const overviewZoom = sequenceZoom ? null : overviewZoomForHeight(height);
     const zoom = sequenceZoom ?? overviewZoom;
     const kind = sequenceZoom ? 'sequence' : 'overview';
-    let bbox = visibleBbox(viewer);
+    // At street zooms the rays meet the ground where it really is (1,600 m up
+    // in Denver; Google 3D hides the globe) and stop short of the horizon.
+    const ranged =
+      kind === 'sequence'
+        ? {
+            groundHeight: ground,
+            maxRange: Math.max(
+              SEQUENCE_VIEW_RANGE_MIN_M,
+              height * SEQUENCE_VIEW_RANGE_PER_HEIGHT,
+            ),
+          }
+        : {};
+    // Tilted street views rank tiles along the line of sight, from the ground
+    // under the camera to the ground at the centre of the screen.
+    const focus = kind === 'sequence' ? viewFocus(viewer, ranged) : null;
+    let bbox = visibleBbox(viewer, {
+      ...ranged,
+      // A tilted view's screen rows jump from the first metres to the horizon:
+      // keep the ground around the camera too. Looking down needs no help.
+      nearRange: focus && isTilted(focus, height) ? SEQUENCE_VIEW_NEAR_M : null,
+    });
     if (kind === 'overview' && (!bbox || zoom <= 1))
       bbox = [-180, -85, 180, 85];
     if (zoom == null || !bbox) {
@@ -553,6 +627,7 @@ export function createCoverage({ state, source }) {
     const { tiles } = tilesForBbox(bbox, zoom, {
       limit:
         kind === 'sequence' ? COVERAGE_MAX_TILES : COVERAGE_OVERVIEW_MAX_TILES,
+      focus: focus && { from: focus.nadir, to: focus.ahead },
     });
     const wanted = new Set(tiles.map(tileKey));
     for (const key of [...state.coverage.tiles.keys()])
@@ -684,6 +759,7 @@ export function createCoverage({ state, source }) {
     detach,
     refresh,
     clear,
+    resetErrors,
     rebuild,
     setSurface,
     findSequence,

@@ -32,6 +32,8 @@ function createProviderState(context) {
     services: context.services,
     viewer: null,
     keyRequired: false,
+    /** Mapillary refused the configured token: nothing is requested until re-enabled. */
+    keyRejected: false,
     status: null,
     filter: context.getFilter(),
     coverage: {
@@ -44,6 +46,9 @@ function createProviderState(context) {
       pending: new Map(),
       loading: 0,
       lastError: null,
+      /** While Mapillary rate-limits: no requests before this time (ms). */
+      holdUntil: 0,
+      holdTimer: null,
       debounceTimer: null,
       removeCameraListener: null,
       terrainReady: null,
@@ -131,6 +136,7 @@ export function createMapillaryProvider({ source }) {
         deactivate() {
           parts.coverage.detach();
           parts.coverage.clear();
+          parts.coverage.resetErrors();
           parts.sequences.clearSelection();
           parts.sequences.setVisible(false);
         },
@@ -138,6 +144,7 @@ export function createMapillaryProvider({ source }) {
         destroy(cesiumViewer) {
           parts.coverage.detach();
           parts.coverage.clear();
+          parts.coverage.resetErrors();
           parts.sequences.destroy(cesiumViewer);
         },
 
@@ -164,6 +171,7 @@ export function createMapillaryProvider({ source }) {
             hint: state.coverage.hint,
             error: state.coverage.lastError,
             keyRequired: state.keyRequired,
+            keyRejected: state.keyRejected,
           };
         },
 

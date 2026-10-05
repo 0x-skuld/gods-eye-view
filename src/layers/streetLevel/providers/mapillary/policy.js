@@ -28,6 +28,21 @@ export const COVERAGE_MOVE_DEBOUNCE_MS = 320;
 export const COVERAGE_MAX_TILES = 9;
 /** Overview (z0–5) coverage points seen from orbit. */
 export const COVERAGE_OVERVIEW_MAX_TILES = 16;
+/** Shown when Mapillary refuses the server's token (401/403). */
+export const KEY_REJECTED_MESSAGE =
+  'Mapillary rejected MAPILLARY_CLIENT_TOKEN — replace it in Provider Settings';
+/** Shown while Mapillary rate-limits tile requests (429). */
+export const RATE_LIMITED_MESSAGE =
+  'Mapillary is rate-limiting coverage requests — it resumes on its own';
+/**
+ * How far from the camera a street-zoom view may reach for coverage: a tilted
+ * view sees to the horizon, but only the ground within this range is ranked
+ * and boxed. Scales with camera height, never below the floor.
+ */
+export const SEQUENCE_VIEW_RANGE_MIN_M = 2_500;
+export const SEQUENCE_VIEW_RANGE_PER_HEIGHT = 10;
+/** Ground always covered around the camera at street zooms, in metres. */
+export const SEQUENCE_VIEW_NEAR_M = 1_000;
 export const COVERAGE_OVERVIEW_POINT_PX = 2.5;
 export const COVERAGE_MAX_SEQUENCES = 6000;
 export const COVERAGE_LINE_WIDTH_PX = 2.5;

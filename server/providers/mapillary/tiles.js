@@ -9,6 +9,9 @@ import {
   TILE_MAX_BYTES,
   TILE_MEMORY_BUDGET_BYTES,
   TILE_FETCH_TIMEOUT_MS,
+  TILE_KEY_REJECTED_HOLD_MS,
+  TILE_RATE_LIMIT_HOLD_MS,
+  TILE_RATE_LIMIT_MAX_HOLD_MS,
   mapillaryToken,
 } from './constants.js';
 
@@ -21,13 +24,50 @@ export class TileRequestError extends Error {
   }
 }
 
-/** Thrown when Mapillary answered with an error status. */
+/**
+ * Thrown when Mapillary answered with an error status. A 401/403 means the
+ * token was rejected (`keyRejected`); a 429 carries how long to wait.
+ */
 export class TileUpstreamError extends Error {
-  constructor(status, message) {
+  constructor(status, message, { retryAfterSec = null } = {}) {
     super(message || `Mapillary tiles HTTP ${status}`);
     this.name = 'TileUpstreamError';
     this.status = status;
+    this.keyRejected = status === 401 || status === 403;
+    this.retryAfterSec = retryAfterSec;
   }
+}
+
+/**
+ * The last refusal from Mapillary that every tile miss shares: a rejected
+ * token (until the token changes or the hold ends) or a rate limit (until its
+ * Retry-After). Cached tiles are still served meanwhile.
+ * @type {{status: number, until: number, token: string}|null}
+ */
+let _upstreamHold = null;
+
+/** Milliseconds to wait from a Retry-After header (seconds or an HTTP date). */
+function retryAfterMs(header, now = Date.now()) {
+  const text = String(header ?? '').trim();
+  let ms = NaN;
+  if (/^\d+$/.test(text)) ms = Number(text) * 1000;
+  else if (text) ms = Date.parse(text) - now;
+  if (!Number.isFinite(ms) || ms <= 0) return TILE_RATE_LIMIT_HOLD_MS;
+  return Math.min(ms, TILE_RATE_LIMIT_MAX_HOLD_MS);
+}
+
+/** The refusal to answer a miss with, while one holds for this token. */
+function heldRefusal(token) {
+  const hold = _upstreamHold;
+  if (!hold) return null;
+  const left = hold.until - Date.now();
+  if (left <= 0 || hold.token !== token) {
+    _upstreamHold = null;
+    return null;
+  }
+  return new TileUpstreamError(hold.status, undefined, {
+    retryAfterSec: Math.ceil(left / 1000),
+  });
 }
 
 /**
@@ -135,6 +175,8 @@ function writeDisk(address, bytes) {
 async function fetchUpstream(address, signal) {
   const token = mapillaryToken();
   if (!token) throw new TileRequestError('Mapillary token not configured', 503);
+  const held = heldRefusal(token);
+  if (held) throw held;
   const url = `${MAPILLARY_TILE_HOST}/${address.upstream}/2/${address.z}/${address.x}/${address.y}?access_token=${encodeURIComponent(token)}`;
   const timeout = AbortSignal.timeout(TILE_FETCH_TIMEOUT_MS);
   const response = await fetch(url, {
@@ -147,7 +189,19 @@ async function fetchUpstream(address, signal) {
   }
   if (!response.ok) {
     await response.body?.cancel().catch(() => {});
-    throw new TileUpstreamError(response.status);
+    const error = new TileUpstreamError(response.status);
+    if (error.keyRejected)
+      _upstreamHold = {
+        status: response.status,
+        until: Date.now() + TILE_KEY_REJECTED_HOLD_MS,
+        token,
+      };
+    else if (response.status === 429) {
+      const wait = retryAfterMs(response.headers.get('retry-after'));
+      _upstreamHold = { status: 429, until: Date.now() + wait, token };
+      error.retryAfterSec = Math.ceil(wait / 1000);
+    }
+    throw error;
   }
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > TILE_MAX_BYTES) {
@@ -258,4 +312,5 @@ export function _resetTileMemoryForTest() {
   _memory.clear();
   _memoryBytes = 0;
   _inFlight.clear();
+  _upstreamHold = null;
 }

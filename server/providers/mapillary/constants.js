@@ -37,6 +37,16 @@ export const TILE_MAX_BYTES = 48 * 1024 * 1024;
 /** In-memory tile cache budget (bytes) and upstream fetch timeout. */
 export const TILE_MEMORY_BUDGET_BYTES = 96 * 1024 * 1024;
 export const TILE_FETCH_TIMEOUT_MS = 60_000;
+/**
+ * After Mapillary rejects the token (401/403), tile misses are answered from
+ * that verdict for this long instead of asking again on every camera move.
+ * A changed token is asked at once.
+ */
+export const TILE_KEY_REJECTED_HOLD_MS = 5 * 60 * 1000;
+/** After a 429 without a usable Retry-After, hold tile misses this long. */
+export const TILE_RATE_LIMIT_HOLD_MS = 60_000;
+/** The longest Retry-After honoured, so a bad header cannot stall coverage. */
+export const TILE_RATE_LIMIT_MAX_HOLD_MS = 10 * 60 * 1000;
 
 /** The client token lives in the browser by design; the server adds it to tile URLs too. */
 export function mapillaryToken() {

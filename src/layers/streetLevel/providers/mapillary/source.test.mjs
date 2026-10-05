@@ -109,3 +109,40 @@ test('the source exposes only imagery lookups', () => {
   for (const gone of ['queryFeatures', 'plan', 'geocode', 'spriteUrl'])
     assert.equal(source[gone], undefined, gone);
 });
+
+test('a rejected key and a rate limit are told apart from other tile errors (review IC8 P2)', async () => {
+  const rejectedSource = createMapillarySource({
+    token: 'MLY|1|abc',
+    fetchImpl: fakeFetch(() =>
+      jsonResponse(
+        { error: 'Mapillary rejected the access token', keyRejected: true },
+        403,
+      ),
+    ).fetchImpl,
+  });
+  await assert.rejects(
+    () => rejectedSource.getTile('coverage', 14, 1, 1),
+    (error) =>
+      error.keyRejected === true &&
+      error.keyRequired === false &&
+      error.retryAfterSec === null,
+  );
+  const limitedSource = createMapillarySource({
+    token: 'MLY|1|abc',
+    fetchImpl: fakeFetch(
+      () =>
+        new Response(
+          JSON.stringify({ error: 'rate limited', retryAfter: 45 }),
+          {
+            status: 429,
+            headers: { 'retry-after': '30' },
+          },
+        ),
+    ).fetchImpl,
+  });
+  await assert.rejects(
+    () => limitedSource.getTile('coverage', 14, 1, 1),
+    (error) => error.retryAfterSec === 30 && error.keyRejected === false,
+    'the Retry-After header wins over the body',
+  );
+});

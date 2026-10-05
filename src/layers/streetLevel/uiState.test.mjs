@@ -124,9 +124,30 @@ test('summarizeCoverage is what getStats reports, without building a snapshot', 
       hint: 'Look down',
       error: 'boom',
       keyRequired: false,
+      keyRejected: false,
     },
   );
   assert.equal(summarizeCoverage([]).keyRequired, false);
+});
+
+test('a rejected key gates like a missing one and is named as rejected (review IC8 P2)', () => {
+  const rejected = provider({
+    keyRequired: true,
+    keyRejected: true,
+    error: 'Mapillary rejected MAPILLARY_CLIENT_TOKEN',
+  });
+  const summary = summarizeCoverage([rejected]);
+  assert.equal(summary.keyRequired, true);
+  assert.equal(summary.keyRejected, true);
+  assert.equal(summary.error, 'Mapillary rejected MAPILLARY_CLIENT_TOKEN');
+  const state = composeUIState({ ...base, providers: [rejected] });
+  assert.equal(state.keyRequired, true);
+  assert.equal(state.keyRejected, true);
+  // A provider that is merely missing its key is not "rejected".
+  assert.equal(
+    summarizeCoverage([provider({ keyRequired: true })]).keyRejected,
+    false,
+  );
 });
 
 test('the surface mode defaults to draped and passes through', () => {

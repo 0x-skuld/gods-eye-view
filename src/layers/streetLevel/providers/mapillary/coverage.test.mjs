@@ -277,3 +277,50 @@ test('zoom 0 is a zoom: the whole-earth view still shows coverage', () => {
   );
   coverage.clear();
 });
+
+test('a rejected key stops coverage requests until the layer goes off (review IC8 P2)', async () => {
+  const { viewer, source, state, coverage } = setup();
+  coverage.refresh();
+  const rejected = Object.assign(
+    new Error('Mapillary rejected the access token'),
+    {
+      keyRejected: true,
+    },
+  );
+  source.calls[0].reject(rejected);
+  await settle();
+  assert.equal(state.keyRejected, true);
+  assert.match(state.coverage.lastError, /rejected MAPILLARY_CLIENT_TOKEN/);
+  viewer.view.lon += 0.05;
+  coverage.refresh();
+  assert.equal(source.calls.length, 1, 'panning asks for nothing more');
+  // Turning the provider off forgets the verdict; the next run asks again.
+  coverage.clear();
+  coverage.resetErrors();
+  assert.equal(state.keyRejected, false);
+  assert.equal(state.coverage.lastError, null);
+  coverage.refresh();
+  assert.equal(source.calls.length, 2);
+  coverage.clear();
+});
+
+test('a rate limit keeps the drawn tiles and asks again once the wait is over (review IC8 P2)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const { viewer, source, state, coverage } = setup();
+  coverage.refresh();
+  source.calls[0].reject(
+    Object.assign(new Error('rate limited'), { retryAfterSec: 30 }),
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.match(state.coverage.lastError, /rate-limiting/);
+  viewer.view.lon += 0.05;
+  coverage.refresh();
+  assert.equal(source.calls.length, 1, 'held: nothing is requested');
+  t.mock.timers.tick(30_000);
+  assert.equal(source.calls.length, 2, 'one refresh once the wait is over');
+  assert.equal(state.coverage.lastError, null);
+  coverage.clear();
+  coverage.resetErrors();
+});

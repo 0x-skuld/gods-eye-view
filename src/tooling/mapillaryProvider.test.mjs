@@ -117,6 +117,76 @@ test('tile route validates the path and refuses to proxy without a token', async
   }
 });
 
+/**
+ * Drive the tile route against a scripted upstream: `answer(call)` returns the
+ * Response for each upstream fetch. Coordinates use z9 (never requested by
+ * the app) and refusals are never cached, so no disk tile is written.
+ */
+async function withUpstream(answer, run) {
+  const savedFetch = globalThis.fetch;
+  const savedToken = process.env.MAPILLARY_CLIENT_TOKEN;
+  process.env.MAPILLARY_CLIENT_TOKEN = 'MLY|test|token';
+  _resetTileMemoryForTest();
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return answer(calls.length);
+  };
+  try {
+    await run({ calls, call: install(mapillaryProxy()).call });
+  } finally {
+    globalThis.fetch = savedFetch;
+    if (savedToken === undefined) delete process.env.MAPILLARY_CLIENT_TOKEN;
+    else process.env.MAPILLARY_CLIENT_TOKEN = savedToken;
+    _resetTileMemoryForTest();
+  }
+}
+
+for (const status of [401, 403])
+  test(`an upstream ${status} is a rejected key, and misses stop asking Mapillary (review IC8 P2)`, async () => {
+    await withUpstream(
+      () => new Response('{}', { status }),
+      async ({ calls, call }) => {
+        for (const tile of ['/coverage/9/5/5', '/coverage/9/6/6']) {
+          const res = await call('/api/mapillary/tiles', tile);
+          assert.equal(res.statusCode, 403);
+          assert.deepEqual(json(res), {
+            error: 'Mapillary rejected the access token',
+            keyRejected: true,
+          });
+          assert.doesNotMatch(String(res.body), /MLY\|/);
+        }
+        assert.equal(calls.length, 1, 'the second miss is answered locally');
+        // A new token is asked at once.
+        process.env.MAPILLARY_CLIENT_TOKEN = 'MLY|new|token';
+        await call('/api/mapillary/tiles', '/coverage/9/7/7');
+        assert.equal(calls.length, 2);
+      },
+    );
+  });
+
+test('a 429 passes its Retry-After on and holds misses until it is over (review IC8 P2)', async (t) => {
+  await withUpstream(
+    () => new Response('{}', { status: 429, headers: { 'Retry-After': '30' } }),
+    async ({ calls, call }) => {
+      const first = await call('/api/mapillary/tiles', '/coverage/9/5/5');
+      assert.equal(first.statusCode, 429);
+      assert.equal(first.headers['retry-after'], '30');
+      assert.deepEqual(json(first), {
+        error: 'Mapillary is rate-limiting tile requests',
+        retryAfter: 30,
+      });
+      const held = await call('/api/mapillary/tiles', '/coverage/9/6/6');
+      assert.equal(held.statusCode, 429);
+      assert.equal(calls.length, 1, 'held: Mapillary is not asked again');
+      const now = Date.now();
+      t.mock.method(Date, 'now', () => now + 31_000);
+      await call('/api/mapillary/tiles', '/coverage/9/6/6');
+      assert.equal(calls.length, 2, 'asked again once the wait is over');
+    },
+  );
+});
+
 test('normalizeTileAddress enforces layer names, zoom ranges and tile bounds', () => {
   assert.equal(
     normalizeTileAddress({ layer: 'coverage', z: 3, x: 1, y: 2 }).key,

@@ -7,7 +7,8 @@ import { COLORS } from './policy.js';
  * @property {string} label
  * @property {boolean} on
  * @property {boolean|null} configured   null until the status call answers
- * @property {boolean} keyRequired
+ * @property {boolean} keyRequired   no usable key: missing or rejected
+ * @property {boolean} [keyRejected] the provider refused the configured key
  * @property {string|null} requiresKeyId
  * @property {boolean} loading
  * @property {number} count
@@ -18,7 +19,8 @@ import { COLORS } from './policy.js';
 
 /**
  * What the switched-on providers add up to: summed counts, any loading, the
- * first hint and error, and whether every one of them lacks its key.
+ * first hint and error, whether every one of them lacks its key, and whether
+ * that is because a provider rejected the key it was given.
  * @param {Array<ProviderSnapshot>} providers
  */
 export function summarizeCoverage(providers) {
@@ -30,6 +32,10 @@ export function summarizeCoverage(providers) {
     error: active.find((p) => p.error)?.error || null,
     keyRequired:
       active.length > 0 && active.every((p) => p.keyRequired === true),
+    keyRejected:
+      active.length > 0 &&
+      active.every((p) => p.keyRequired === true) &&
+      active.some((p) => p.keyRejected === true),
   };
 }
 
@@ -51,7 +57,8 @@ export function composeUIState({
   surface = 'draped',
 }) {
   const active = providers.filter((p) => p.on);
-  const { keyRequired, ...coverage } = summarizeCoverage(providers);
+  const { keyRequired, keyRejected, ...coverage } =
+    summarizeCoverage(providers);
   const legend = active.map((provider) => ({
     key: provider.id,
     label: provider.name,
@@ -62,6 +69,7 @@ export function composeUIState({
   return {
     enabled,
     keyRequired,
+    keyRejected,
     filter: { ...filter },
     providers: providers.map((p) => ({ ...p })),
     coverage,

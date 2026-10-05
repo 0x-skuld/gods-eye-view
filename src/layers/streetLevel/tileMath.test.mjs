@@ -109,3 +109,22 @@ test('a box across the date line takes tiles on both sides of it, not the far si
   const limited = tilesForBbox([170, -1, -170, 1], 8, { limit: 4 }).tiles;
   assert.ok(limited.every((tile) => tile.x <= 8 || tile.x >= 247));
 });
+
+test('a focus ranks tiles along the line of sight, not from the box centre (review IC8 P1)', () => {
+  // A box that runs far north of the camera, as a tilted view's does: the
+  // box centre is kilometres from both the camera and the screen centre.
+  const from = { lon: -121.4944, lat: 38.5816 };
+  const to = { lon: -121.4944, lat: 38.596 };
+  const bbox = [-121.6, 38.57, -121.38, 38.9];
+  const z = 14;
+  const key = (t) => `${t.x}/${t.y}`;
+  const under = `${lonToTileX(from.lon, z)}/${latToTileY(from.lat, z)}`;
+  const centre = `${lonToTileX(to.lon, z)}/${latToTileY(to.lat, z)}`;
+  const plain = tilesForBbox(bbox, z, { limit: 9 }).tiles.map(key);
+  assert.equal(plain.includes(under), false, 'the old ranking drops them');
+  const ranked = tilesForBbox(bbox, z, { limit: 9, focus: { from, to } });
+  const keys = ranked.tiles.map(key);
+  assert.ok(keys.includes(under), 'the tile under the camera');
+  assert.ok(keys.includes(centre), 'the tile at the centre of the screen');
+  assert.equal(ranked.total > 9, true);
+});

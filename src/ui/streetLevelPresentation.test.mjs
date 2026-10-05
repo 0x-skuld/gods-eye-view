@@ -78,6 +78,26 @@ test('a key-gated layer disables every control and flags KEY REQUIRED', () => {
   assert.equal(view.status.tone, 'warn');
 });
 
+test('a key Mapillary rejected reads KEY REJECTED and names the fix (review IC8 P2)', () => {
+  const error =
+    'Mapillary rejected MAPILLARY_CLIENT_TOKEN — replace it in Provider Settings';
+  const view = presentStreetLevelPanel(
+    snapshot({
+      enabled: true,
+      keyRequired: true,
+      keyRejected: true,
+      coverage: { error },
+      providers: [provider({ keyRequired: true, keyRejected: true, error })],
+    }),
+  );
+  assert.equal(view.status.text, 'KEY REJECTED');
+  assert.equal(view.status.tone, 'warn');
+  assert.equal(view.controlsDisabled, true);
+  assert.equal(view.error, error);
+  assert.equal(view.providers[0].state, 'error');
+  assert.equal(view.providers[0].title, `Mapillary: ${error}`);
+});
+
 test('the header pill is the on/off switch and reads OFF, LOADING or ON', () => {
   assert.deepEqual(presentStreetLevelPanel(snapshot()).status, {
     text: 'OFF',

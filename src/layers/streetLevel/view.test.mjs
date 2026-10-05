@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as Cesium from 'cesium';
-import { cameraHeightAboveGround, viewCentre, visibleBbox } from './view.js';
+import {
+  cameraHeightAboveGround,
+  viewCentre,
+  viewFocus,
+  visibleBbox,
+} from './view.js';
 
 const RAD = Math.PI / 180;
 /** A viewer 300 m above a street 1,600 m up (Denver-like). */
@@ -75,4 +80,97 @@ test('an ordinary view keeps west < east', () => {
   assert.ok(
     Math.abs(viewCentre(gridViewer([10, 11, 12], [50, 51])).lon - 11) < 1e-6,
   );
+});
+
+/**
+ * A pinhole camera `agl` metres above ground `ground` m up, looking north at
+ * `pitch` degrees, whose rays meet whatever ellipsoid they are given (real
+ * Cesium ray maths, as `camera.pickEllipsoid` does it).
+ */
+function pinhole({ lon, lat, ground, agl, pitch, w = 1600, h = 900 }) {
+  const position = Cesium.Cartesian3.fromDegrees(lon, lat, ground + agl);
+  const frame = Cesium.Transforms.eastNorthUpToFixedFrame(position);
+  const p = pitch * RAD;
+  const forward = [0, Math.cos(p), Math.sin(p)];
+  const up = [0, -Math.sin(p), Math.cos(p)];
+  const half = Math.tan(30 * RAD);
+  return {
+    scene: {
+      canvas: { clientWidth: w, clientHeight: h },
+      globe: { show: false, ellipsoid: Cesium.Ellipsoid.WGS84 },
+    },
+    camera: {
+      positionWC: position,
+      positionCartographic: Cesium.Cartographic.fromDegrees(
+        lon,
+        lat,
+        ground + agl,
+      ),
+      pickEllipsoid(point, ellipsoid = Cesium.Ellipsoid.WGS84) {
+        const sx = ((2 * point.x) / w - 1) * half * (w / h);
+        const sy = (1 - (2 * point.y) / h) * half;
+        const local = [0, 1, 2].map(
+          (i) => forward[i] + sx * (i === 0 ? 1 : 0) + sy * up[i],
+        );
+        const direction = Cesium.Cartesian3.normalize(
+          Cesium.Matrix4.multiplyByPointAsVector(
+            frame,
+            new Cesium.Cartesian3(...local),
+            new Cesium.Cartesian3(),
+          ),
+          new Cesium.Cartesian3(),
+        );
+        const ray = new Cesium.Ray(position, direction);
+        const hit = Cesium.IntersectionTests.rayEllipsoid(ray, ellipsoid);
+        return hit ? Cesium.Ray.getPoint(ray, hit.start) : undefined;
+      },
+      computeViewRectangle: () => undefined,
+    },
+  };
+}
+
+test('a tilted street view over high ground boxes the streets it looks at, not the horizon (review IC8 P1)', () => {
+  // Denver, 600 m above a street 1,610 m up, looking 20° down: the centre of
+  // the screen meets the street about 1.65 km north of the camera.
+  const view = pinhole({
+    lon: -104.99,
+    lat: 39.74,
+    ground: 1610,
+    agl: 600,
+    pitch: -20,
+  });
+  const ahead = 39.74 + 1648 / 111_000;
+  const unranged = visibleBbox(view);
+  // Rays to the bare ellipsoid travel 1.6 km further down: the old box was
+  // 20 km wide and started past the street at the centre of the screen.
+  assert.ok(unranged[2] - unranged[0] > 0.2);
+  assert.ok(unranged[1] > ahead, 'the old box missed the street in view');
+  const options = { groundHeight: 1610, maxRange: 6000, nearRange: 1000 };
+  const [west, south, east, north] = visibleBbox(view, options);
+  assert.ok(north - south < 0.08 && east - west < 0.08, 'a street-sized box');
+  assert.ok(south < 39.74 && north > ahead, 'camera and screen centre inside');
+  const focus = viewFocus(view, options);
+  assert.ok(Math.abs(focus.nadir.lat - 39.74) < 1e-9);
+  assert.ok(
+    Math.abs(focus.ahead.lat - ahead) < 0.002,
+    'centre ray on the street',
+  );
+  assert.ok(Math.abs(focus.ahead.lon - -104.99) < 1e-6);
+});
+
+test('looking at the horizon from eye height still boxes the ground around the camera', () => {
+  const view = pinhole({
+    lon: -121.4944,
+    lat: 38.5816,
+    ground: 10,
+    agl: 2,
+    pitch: -5,
+  });
+  const [west, south, east, north] = visibleBbox(view, {
+    groundHeight: 10,
+    maxRange: 2500,
+    nearRange: 1000,
+  });
+  assert.ok(north - 38.5816 > 0.008 && 38.5816 - south > 0.008);
+  assert.ok(east - -121.4944 > 0.008 && -121.4944 - west > 0.008);
 });
