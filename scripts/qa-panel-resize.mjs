@@ -131,6 +131,22 @@ async function main() {
           stored: localStorage.getItem(`godsEyeView.v8.panelPos.${id}`),
         };
       }, PANEL_ID);
+    /** Wait until the CCTV box has held still for ten animation frames. */
+    const settle = () =>
+      page.waitForFunction(
+        (id) => {
+          const r = document.getElementById(id).getBoundingClientRect();
+          const box = `${r.left},${r.top},${r.width},${r.height}`;
+          if (window.__qaLastBox === box) window.__qaStill += 1;
+          else {
+            window.__qaLastBox = box;
+            window.__qaStill = 0;
+          }
+          return window.__qaStill >= 10;
+        },
+        { polling: 'raf', timeout: 15_000 },
+        PANEL_ID,
+      );
     const headerPoint = async () => {
       const rect = await page.evaluate((id) => {
         const title = document.querySelector(
@@ -170,23 +186,49 @@ async function main() {
       {},
       PANEL_ID,
     );
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    // The rail animates panel heights, and on a slow software renderer the
+    // panels above CCTV can still be moving after a fixed sleep.
+    await settle();
     const docked = await readPanel();
     assert.equal(docked.floating, false);
     assert.equal(docked.inRail, true);
 
-    // Lift out: drag the header 200px left and 100px up.
+    // Lift out: drag the header 200px left and 100px up. The window must lift
+    // from wherever the panel sits when the pointer goes down, so record that
+    // box in the page instead of trusting the earlier read.
+    await page.evaluate((id) => {
+      window.addEventListener(
+        'pointerdown',
+        () => {
+          const r = document.getElementById(id).getBoundingClientRect();
+          window.__qaPressBox = { left: r.left, top: r.top, width: r.width };
+        },
+        { capture: true, once: true },
+      );
+    }, PANEL_ID);
     await drag(await headerPoint(), -200, -100);
     const lifted = await readPanel();
+    const pressed = await page.evaluate(() => window.__qaPressBox);
     assert.equal(lifted.floating, true, 'a header drag lifts the panel out');
     assert.equal(
       lifted.collapsed,
       false,
       'the drag-ending click must not collapse',
     );
-    near(lifted.left, Math.max(6, docked.left - 200), 2, 'lifted left');
-    near(lifted.top, Math.max(6, docked.top - 100), 2, 'lifted top');
-    near(lifted.width, docked.width, 2, 'lifted width');
+    const moved = `docked at ${docked.left},${docked.top}; pressed at ${pressed.left},${pressed.top}`;
+    near(
+      lifted.left,
+      Math.max(6, pressed.left - 200),
+      2,
+      `lifted left (${moved})`,
+    );
+    near(
+      lifted.top,
+      Math.max(6, pressed.top - 100),
+      2,
+      `lifted top (${moved})`,
+    );
+    near(lifted.width, pressed.width, 2, 'lifted width');
     await new Promise((resolve) => setTimeout(resolve, 700));
     const afterLayout = await readPanel();
     assert.equal(afterLayout.allocated, '', 'the rail no longer allocates it');
