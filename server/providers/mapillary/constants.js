@@ -6,12 +6,13 @@ export const MAPILLARY_TILE_HOST = 'https://tiles.mapillary.com/maps/vtp';
 /** Public tile layer names this proxy exposes, mapped to Mapillary's ids. */
 export const TILE_LAYERS = Object.freeze({
   // Overview points (z0–5), sequences (z6–14) and image points (z14 only).
+  // The app asks for overview z0–5 and sequences z11–14 only (see
+  // src/layers/streetLevel/tileMath.js); region-sized z6–10 tiles are refused.
   // The z14 `image` point layer is ~98% of a 10 MB tile and unused here:
   // image positions come from the graph API per sequence. Dropped in transit.
   coverage: Object.freeze({
     upstream: 'mly1_public',
-    minZoom: 0,
-    maxZoom: 14,
+    zoomRanges: Object.freeze([Object.freeze([0, 5]), Object.freeze([11, 14])]),
     dropLayers: Object.freeze(['image']),
   }),
 });
@@ -30,6 +31,14 @@ export const TILE_DISK_DIR = path.join(MAPILLARY_CACHE_DIR, 'tiles');
  * re-downloading its tiles on every camera move.
  */
 export const TILE_DISK_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Disk cache bound. A tile write starts a background sweep at most this often:
+ * it deletes files past TILE_DISK_TTL_MS, then the oldest files until the
+ * cache fits in TILE_DISK_MAX_BYTES (thousands of trimmed street-level tiles).
+ */
+export const TILE_DISK_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
+export const TILE_DISK_MAX_BYTES = 1024 * 1024 * 1024;
 
 /** A z14 image tile over a dense city is ~11 MB; anything past this is wrong. */
 export const TILE_MAX_BYTES = 48 * 1024 * 1024;

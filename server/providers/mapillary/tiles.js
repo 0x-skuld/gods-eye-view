@@ -6,6 +6,8 @@ import {
   TILE_LAYERS,
   TILE_DISK_DIR,
   TILE_DISK_TTL_MS,
+  TILE_DISK_SWEEP_INTERVAL_MS,
+  TILE_DISK_MAX_BYTES,
   TILE_MAX_BYTES,
   TILE_MEMORY_BUDGET_BYTES,
   TILE_FETCH_TIMEOUT_MS,
@@ -72,22 +74,23 @@ function heldRefusal(token) {
 
 /**
  * Validate and normalize a tile address. Layer names are the proxy's public
- * ids (coverage/points/signs); zoom must be inside the layer's published range.
+ * ids (coverage only); zoom must be inside one of the layer's zoom ranges.
  * @returns {{layer:string, upstream:string, z:number, x:number, y:number, key:string}}
  */
 export function normalizeTileAddress({ layer, z, x, y }) {
-  const spec = TILE_LAYERS[layer];
+  const spec = Object.hasOwn(TILE_LAYERS, layer) ? TILE_LAYERS[layer] : null;
   if (!spec) throw new TileRequestError(`Unknown tile layer: ${layer}`);
   const zi = Number(z);
   const xi = Number(x);
   const yi = Number(y);
   if (
     ![zi, xi, yi].every((v) => Number.isInteger(v) && v >= 0) ||
-    zi < spec.minZoom ||
-    zi > spec.maxZoom
+    !spec.zoomRanges.some(([min, max]) => zi >= min && zi <= max)
   )
     throw new TileRequestError(
-      `Tile zoom for ${layer} must be ${spec.minZoom}–${spec.maxZoom}`,
+      `Tile zoom for ${layer} must be ${spec.zoomRanges
+        .map(([min, max]) => `${min}–${max}`)
+        .join(' or ')}`,
     );
   const n = 2 ** zi;
   if (xi >= n || yi >= n)
@@ -130,11 +133,12 @@ function memoryGet(key) {
   return hit.bytes;
 }
 
-function memoryPut(key, bytes) {
+/** `at` is when Mapillary served the bytes (a disk tile's mtime). */
+function memoryPut(key, bytes, at = Date.now()) {
   if (bytes.length > TILE_MEMORY_BUDGET_BYTES / 2) return;
   const existing = _memory.get(key);
   if (existing) _memoryBytes -= existing.bytes.length;
-  _memory.set(key, { bytes, at: Date.now() });
+  _memory.set(key, { bytes, at });
   _memoryBytes += bytes.length;
   while (_memoryBytes > TILE_MEMORY_BUDGET_BYTES && _memory.size) {
     const [oldest, entry] = _memory.entries().next().value;
@@ -143,33 +147,114 @@ function memoryPut(key, bytes) {
   }
 }
 
-function diskPath({ layer, z, x, y }) {
-  return path.join(TILE_DISK_DIR, layer, String(z), `${x}-${y}.pbf`);
+/** Disk cache root; tests point it at a temporary directory. */
+let _diskDir = TILE_DISK_DIR;
+
+function diskPath({ layer, z, x, y }, root = _diskDir) {
+  return path.join(root, layer, String(z), `${x}-${y}.pbf`);
 }
 
+/** Disk-cache read; the tile's age comes from the file's mtime. */
 async function readDisk(address) {
   const file = diskPath(address);
   try {
     const stat = await fsp.stat(file);
     if (Date.now() - stat.mtimeMs > TILE_DISK_TTL_MS) return null;
-    return await fsp.readFile(file);
+    return { bytes: await fsp.readFile(file), at: stat.mtimeMs };
   } catch {
     return null;
   }
 }
 
-function writeDisk(address, bytes) {
-  const file = diskPath(address);
+/**
+ * Write a tile in the background. `at` dates a rewrite of an existing tile
+ * with its original fetch time, so the rewrite does not extend its life.
+ */
+function writeDisk(address, bytes, at = null) {
+  // The sweep after it covers this write's cache root, even if it has moved.
+  const root = _diskDir;
+  const file = diskPath(address, root);
   fsp
     .mkdir(path.dirname(file), { recursive: true })
     .then(() => fsp.writeFile(`${file}.tmp`, bytes))
+    .then(
+      () => at != null && fsp.utimes(`${file}.tmp`, new Date(), new Date(at)),
+    )
     .then(() => fsp.rename(`${file}.tmp`, file))
+    .then(() => scheduleSweep(root))
     .catch((error) =>
       console.warn(
         '[Mapillary Proxy] tile cache write failed:',
         error?.message || error,
       ),
     );
+}
+
+let _lastSweepAt = 0;
+let _sweeping = null;
+let _sweepWarned = false;
+
+/** Start a background sweep of `root` unless one ran within the interval. */
+function scheduleSweep(root) {
+  if (_sweeping || Date.now() - _lastSweepAt < TILE_DISK_SWEEP_INTERVAL_MS)
+    return;
+  _lastSweepAt = Date.now();
+  _sweeping = sweepTileDisk({ root })
+    .catch((error) => {
+      if (_sweepWarned) return;
+      _sweepWarned = true;
+      console.warn(
+        '[Mapillary Proxy] tile cache sweep failed:',
+        error?.message || error,
+      );
+    })
+    .finally(() => {
+      _sweeping = null;
+    });
+}
+
+/** Every file under `dir` with its size and mtime; a missing dir is empty. */
+async function listCacheFiles(dir) {
+  let entries;
+  try {
+    entries = await fsp.readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }
+  const files = [];
+  for (const entry of entries) {
+    const file = path.join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...(await listCacheFiles(file)));
+    else if (entry.isFile()) {
+      // A file renamed or swept away meanwhile is simply skipped.
+      const stat = await fsp.stat(file).catch(() => null);
+      if (stat) files.push({ file, size: stat.size, at: stat.mtimeMs });
+    }
+  }
+  return files;
+}
+
+/**
+ * Bound the disk cache: delete tiles past TILE_DISK_TTL_MS, then the oldest
+ * until the rest fit in `maxBytes`. Runs in the background after tile writes.
+ * @returns {Promise<{removed: number, bytes: number}>} files deleted, bytes kept
+ */
+export async function sweepTileDisk({
+  root = _diskDir,
+  maxBytes = TILE_DISK_MAX_BYTES,
+} = {}) {
+  const now = Date.now();
+  const files = (await listCacheFiles(root)).sort((a, b) => a.at - b.at);
+  let bytes = files.reduce((sum, { size }) => sum + size, 0);
+  let removed = 0;
+  for (const { file, size, at } of files) {
+    if (now - at <= TILE_DISK_TTL_MS && bytes <= maxBytes) break;
+    await fsp.rm(file, { force: true });
+    bytes -= size;
+    removed++;
+  }
+  return { removed, bytes };
 }
 
 async function fetchUpstream(address, signal) {
@@ -241,10 +326,11 @@ export async function fetchTile(request, { signal } = {}) {
   if (memory) return { bytes: memory, source: 'memory', address };
   const disk = await readDisk(address);
   if (disk) {
-    // Older cache files may still hold the untrimmed tile: trim and replace.
-    const bytes = trim(address, disk);
-    if (bytes !== disk) writeDisk(address, bytes);
-    memoryPut(address.key, bytes);
+    // Older cache files may still hold the untrimmed tile: trim and replace,
+    // keeping the original fetch time so the tile still expires on schedule.
+    const bytes = trim(address, disk.bytes);
+    if (bytes !== disk.bytes) writeDisk(address, bytes, disk.at);
+    memoryPut(address.key, bytes, disk.at);
     return { bytes, source: 'disk', address };
   }
   let flight = _inFlight.get(address.key);
@@ -313,4 +399,10 @@ export function _resetTileMemoryForTest() {
   _memoryBytes = 0;
   _inFlight.clear();
   _upstreamHold = null;
+}
+
+/** Test seam: keep the disk cache in `dir` (null restores the default). */
+export function _setTileCacheDirForTest(dir) {
+  _diskDir = dir || TILE_DISK_DIR;
+  _lastSweepAt = 0;
 }

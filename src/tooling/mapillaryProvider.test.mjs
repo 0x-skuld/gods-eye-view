@@ -1,19 +1,56 @@
 import assert from 'node:assert/strict';
 import { promises as fsp } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 import { PbfWriter } from 'pbf';
 import { mapillaryProxy } from 'gods-eye-view/server/providers/mapillary';
 import {
   listTileLayers,
   stripTileLayers,
 } from '../../server/providers/mapillary/trim.js';
+import * as tiles from '../../server/providers/mapillary/tiles.js';
 import {
   fetchTile,
   normalizeTileAddress,
   TileRequestError,
   _resetTileMemoryForTest,
+  _setTileCacheDirForTest,
 } from '../../server/providers/mapillary/tiles.js';
+
+// Every tile these tests cache lands in a throwaway directory, never in the
+// developer's .gev-cache.
+const cacheDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gev-mly-tiles-'));
+_setTileCacheDirForTest(cacheDir);
+// The directory is not switched back: a background write still landing must
+// never sweep the real cache.
+after(() => fsp.rm(cacheDir, { recursive: true, force: true }));
+const tileFile = ({ z, x, y }, root = cacheDir) =>
+  path.join(root, 'coverage', String(z), `${x}-${y}.pbf`);
+const HOUR = 60 * 60 * 1000;
+
+/** Write a cache file dated `ageMs` ago. */
+async function writeAged(file, bytes, ageMs) {
+  await fsp.mkdir(path.dirname(file), { recursive: true });
+  await fsp.writeFile(file, bytes);
+  const at = new Date(Date.now() - ageMs);
+  await fsp.utimes(file, at, at);
+}
+
+/** Poll until `check()` holds (background cache writes are not awaited). */
+async function waitFor(check, what) {
+  for (let i = 0; i < 200; i++) {
+    if (await check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(`timed out waiting for ${what}`);
+}
+
+const exists = (file) =>
+  fsp.stat(file).then(
+    () => true,
+    () => false,
+  );
 
 /** Mount the plugin and return a caller keyed by route. */
 function install(plugin, mode = 'configureServer') {
@@ -119,8 +156,8 @@ test('tile route validates the path and refuses to proxy without a token', async
 
 /**
  * Drive the tile route against a scripted upstream: `answer(call)` returns the
- * Response for each upstream fetch. Coordinates use z9 (never requested by
- * the app) and refusals are never cached, so no disk tile is written.
+ * Response for each upstream fetch. Refusals are never cached, so no disk tile
+ * is written.
  */
 async function withUpstream(answer, run) {
   const savedFetch = globalThis.fetch;
@@ -147,7 +184,7 @@ for (const status of [401, 403])
     await withUpstream(
       () => new Response('{}', { status }),
       async ({ calls, call }) => {
-        for (const tile of ['/coverage/9/5/5', '/coverage/9/6/6']) {
+        for (const tile of ['/coverage/14/5/5', '/coverage/14/6/6']) {
           const res = await call('/api/mapillary/tiles', tile);
           assert.equal(res.statusCode, 403);
           assert.deepEqual(json(res), {
@@ -159,7 +196,7 @@ for (const status of [401, 403])
         assert.equal(calls.length, 1, 'the second miss is answered locally');
         // A new token is asked at once.
         process.env.MAPILLARY_CLIENT_TOKEN = 'MLY|new|token';
-        await call('/api/mapillary/tiles', '/coverage/9/7/7');
+        await call('/api/mapillary/tiles', '/coverage/14/7/7');
         assert.equal(calls.length, 2);
       },
     );
@@ -169,19 +206,19 @@ test('a 429 passes its Retry-After on and holds misses until it is over (review 
   await withUpstream(
     () => new Response('{}', { status: 429, headers: { 'Retry-After': '30' } }),
     async ({ calls, call }) => {
-      const first = await call('/api/mapillary/tiles', '/coverage/9/5/5');
+      const first = await call('/api/mapillary/tiles', '/coverage/14/5/5');
       assert.equal(first.statusCode, 429);
       assert.equal(first.headers['retry-after'], '30');
       assert.deepEqual(json(first), {
         error: 'Mapillary is rate-limiting tile requests',
         retryAfter: 30,
       });
-      const held = await call('/api/mapillary/tiles', '/coverage/9/6/6');
+      const held = await call('/api/mapillary/tiles', '/coverage/14/6/6');
       assert.equal(held.statusCode, 429);
       assert.equal(calls.length, 1, 'held: Mapillary is not asked again');
       const now = Date.now();
       t.mock.method(Date, 'now', () => now + 31_000);
-      await call('/api/mapillary/tiles', '/coverage/9/6/6');
+      await call('/api/mapillary/tiles', '/coverage/14/6/6');
       assert.equal(calls.length, 2, 'asked again once the wait is over');
     },
   );
@@ -213,6 +250,40 @@ test('normalizeTileAddress enforces layer names, zoom ranges and tile bounds', (
     );
 });
 
+test('normalizeTileAddress refuses prototype keys as layer names', () => {
+  for (const layer of ['constructor', '__proto__', 'toString'])
+    assert.throws(
+      () => normalizeTileAddress({ layer, z: 1, x: 0, y: 0 }),
+      TileRequestError,
+      layer,
+    );
+});
+
+test('coverage zooms the app never requests (z6–10) are refused with a 400 (review P2)', async () => {
+  for (const z of [6, 7, 8, 9, 10])
+    assert.throws(
+      () => normalizeTileAddress({ layer: 'coverage', z, x: 0, y: 0 }),
+      TileRequestError,
+      `z${z}`,
+    );
+  for (const z of [0, 5, 11, 14])
+    assert.equal(
+      normalizeTileAddress({ layer: 'coverage', z, x: 0, y: 0 }).z,
+      z,
+    );
+  await withUpstream(
+    () => new Response(null, { status: 204 }),
+    async ({ calls, call }) => {
+      const res = await call('/api/mapillary/tiles', '/coverage/9/5/5');
+      assert.equal(res.statusCode, 400);
+      assert.deepEqual(json(res), {
+        error: 'Tile zoom for coverage must be 0–5 or 11–14',
+      });
+      assert.equal(calls.length, 0, 'Mapillary is not asked');
+    },
+  );
+});
+
 test('fetchTile serves from memory after one upstream fetch and strips the image layer', async () => {
   const savedFetch = globalThis.fetch;
   const savedToken = process.env.MAPILLARY_CLIENT_TOKEN;
@@ -239,7 +310,7 @@ test('fetchTile serves from memory after one upstream fetch and strips the image
     upstreamCalls++;
     assert.match(
       String(url),
-      /tiles\.mapillary\.com\/maps\/vtp\/mly1_public\/2\/10\/0\/0\?access_token=/,
+      /tiles\.mapillary\.com\/maps\/vtp\/mly1_public\/2\/14\/0\/0\?access_token=/,
     );
     return new Response(tile, {
       status: 200,
@@ -247,21 +318,13 @@ test('fetchTile serves from memory after one upstream fetch and strips the image
     });
   };
   try {
-    // z10 is never requested by the app (overview z0–5, sequences z11–14), and
-    // the file is removed first so an earlier test run cannot leave a disk hit.
-    await fsp
-      .rm(
-        path.join(
-          process.cwd(),
-          '.gev-cache/mapillary/tiles/coverage/10/0-0.pbf',
-        ),
-      )
-      .catch(() => {});
-    const first = await fetchTile({ layer: 'coverage', z: 10, x: 0, y: 0 });
+    // The file is removed first so an earlier test cannot leave a disk hit.
+    await fsp.rm(tileFile({ z: 14, x: 0, y: 0 }), { force: true });
+    const first = await fetchTile({ layer: 'coverage', z: 14, x: 0, y: 0 });
     assert.equal(first.source, 'upstream');
     assert.deepEqual(listTileLayers(first.bytes), ['sequence']);
     assert.ok(first.bytes.length < 100, 'image layer stripped in transit');
-    const second = await fetchTile({ layer: 'coverage', z: 10, x: 0, y: 0 });
+    const second = await fetchTile({ layer: 'coverage', z: 14, x: 0, y: 0 });
     assert.equal(second.source, 'memory');
     assert.equal(upstreamCalls, 1);
   } finally {
@@ -273,7 +336,7 @@ test('fetchTile serves from memory after one upstream fetch and strips the image
 });
 
 test('a tile held in memory past the 24 h TTL is fetched again', async (t) => {
-  const tile = { layer: 'coverage', z: 9, x: 3, y: 3 };
+  const tile = { layer: 'coverage', z: 14, x: 3, y: 3 };
   await withDeferredUpstream([tile], async ({ upstream, settle }) => {
     const first = fetchTile(tile);
     await settle();
@@ -290,25 +353,116 @@ test('a tile held in memory past the 24 h TTL is fetched again', async (t) => {
   });
 });
 
+test('a disk tile keeps its age in memory and through a retrim rewrite (review P2)', async (t) => {
+  const address = { layer: 'coverage', z: 14, x: 8, y: 8 };
+  const file = tileFile(address);
+  const untrimmed = tile([
+    { name: 'sequence' },
+    { name: 'image', payload: Buffer.alloc(4000, 1) },
+  ]);
+  await writeAged(file, untrimmed, 23 * HOUR);
+  const writtenAt = (await fsp.stat(file)).mtimeMs;
+  await withUpstream(
+    () => new Response(tile([{ name: 'sequence' }]), { status: 200 }),
+    async ({ calls }) => {
+      const first = await fetchTile(address);
+      assert.equal(first.source, 'disk');
+      assert.deepEqual(listTileLayers(first.bytes), ['sequence']);
+      // The untrimmed file is replaced by the trimmed tile, still dated when
+      // Mapillary served it.
+      await waitFor(
+        async () => (await fsp.stat(file)).size === first.bytes.length,
+        'the trimmed rewrite',
+      );
+      assert.ok(
+        Math.abs((await fsp.stat(file)).mtimeMs - writtenAt) < 1000,
+        'the rewrite keeps the original mtime',
+      );
+      const now = Date.now();
+      t.mock.method(Date, 'now', () => now + 2 * HOUR);
+      const later = await fetchTile(address);
+      assert.equal(later.source, 'upstream', '25 h old: no cache serves it');
+      assert.equal(calls.length, 1);
+      // Let the refetched tile land before the next test moves the cache.
+      await waitFor(
+        async () => (await fsp.stat(file)).mtimeMs > writtenAt + HOUR,
+        'the refetched tile write',
+      );
+    },
+  );
+});
+
+/** Point the disk cache at a fresh directory for one test. */
+async function withCacheDir(run) {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gev-mly-sweep-'));
+  tiles._setTileCacheDirForTest(dir);
+  try {
+    await run(dir);
+  } finally {
+    tiles._setTileCacheDirForTest(cacheDir);
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
+}
+
+test('the disk sweep removes expired tiles and keeps fresh ones (review P2)', async () => {
+  await withCacheDir(async (dir) => {
+    const expired = tileFile({ z: 14, x: 1, y: 1 }, dir);
+    const fresh = tileFile({ z: 14, x: 2, y: 2 }, dir);
+    await writeAged(expired, Buffer.alloc(100, 1), 25 * HOUR);
+    await writeAged(fresh, Buffer.alloc(100, 2), 23 * HOUR);
+    const result = await tiles.sweepTileDisk();
+    assert.equal(result.removed, 1);
+    assert.equal(await exists(expired), false);
+    assert.equal(await exists(fresh), true);
+  });
+});
+
+test('the disk sweep evicts the oldest tiles past the size cap (review P2)', async () => {
+  await withCacheDir(async (dir) => {
+    const files = [3, 2, 1].map((age) => {
+      const file = tileFile({ z: 13, x: age, y: age }, dir);
+      return { file, age };
+    });
+    for (const { file, age } of files)
+      await writeAged(file, Buffer.alloc(100, age), age * HOUR);
+    const result = await tiles.sweepTileDisk({ maxBytes: 250 });
+    assert.deepEqual(result, { removed: 1, bytes: 200 });
+    assert.equal(await exists(files[0].file), false, 'the oldest goes first');
+    assert.equal(await exists(files[1].file), true);
+    assert.equal(await exists(files[2].file), true);
+  });
+});
+
+test('caching a tile sweeps expired files off the disk in the background (review P2)', async () => {
+  await withCacheDir(async (dir) => {
+    const expired = tileFile({ z: 12, x: 1, y: 1 }, dir);
+    const fresh = tileFile({ z: 12, x: 2, y: 2 }, dir);
+    await writeAged(expired, Buffer.alloc(100, 1), 30 * HOUR);
+    await writeAged(fresh, Buffer.alloc(100, 2), HOUR);
+    await withUpstream(
+      () => new Response(tile([{ name: 'sequence' }]), { status: 200 }),
+      async () => {
+        const address = { layer: 'coverage', z: 14, x: 4, y: 4 };
+        assert.equal((await fetchTile(address)).source, 'upstream');
+        await waitFor(() => exists(tileFile(address, dir)), 'the tile write');
+        await waitFor(async () => !(await exists(expired)), 'the sweep');
+        assert.equal(await exists(fresh), true);
+      },
+    );
+  });
+});
+
 /**
  * A deferred upstream for in-flight tests: every fetch waits until released,
- * and records whether its signal was aborted. Coordinates use z9, which the
- * app never requests, and their disk files are removed first.
+ * and records whether its signal was aborted. Their disk files are removed
+ * first.
  */
 async function withDeferredUpstream(tiles, run) {
   const savedFetch = globalThis.fetch;
   const savedToken = process.env.MAPILLARY_CLIENT_TOKEN;
   process.env.MAPILLARY_CLIENT_TOKEN = 'MLY|test|token';
   _resetTileMemoryForTest();
-  for (const { z, x, y } of tiles)
-    await fsp
-      .rm(
-        path.join(
-          process.cwd(),
-          `.gev-cache/mapillary/tiles/coverage/${z}/${x}-${y}.pbf`,
-        ),
-      )
-      .catch(() => {});
+  for (const tile of tiles) await fsp.rm(tileFile(tile), { force: true });
   const body = (() => {
     const writer = new PbfWriter();
     writer.writeMessage(
@@ -354,7 +508,7 @@ async function withDeferredUpstream(tiles, run) {
 }
 
 test('a joined tile request survives the first caller abandoning it', async () => {
-  const tile = { layer: 'coverage', z: 9, x: 1, y: 1 };
+  const tile = { layer: 'coverage', z: 14, x: 1, y: 1 };
   await withDeferredUpstream([tile], async ({ upstream, settle }) => {
     const first = new AbortController();
     const second = new AbortController();
@@ -375,7 +529,7 @@ test('a joined tile request survives the first caller abandoning it', async () =
 });
 
 test('a joined caller that aborts leaves at once and the first still gets the tile', async () => {
-  const tile = { layer: 'coverage', z: 9, x: 2, y: 2 };
+  const tile = { layer: 'coverage', z: 14, x: 2, y: 2 };
   await withDeferredUpstream([tile], async ({ upstream, settle }) => {
     const first = new AbortController();
     const second = new AbortController();
@@ -392,7 +546,7 @@ test('a joined caller that aborts leaves at once and the first still gets the ti
 });
 
 test('the upstream tile fetch is cancelled once every waiter has left', async () => {
-  const tile = { layer: 'coverage', z: 9, x: 3, y: 3 };
+  const tile = { layer: 'coverage', z: 14, x: 3, y: 3 };
   await withDeferredUpstream([tile], async ({ upstream, settle }) => {
     const first = new AbortController();
     const second = new AbortController();
