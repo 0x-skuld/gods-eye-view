@@ -954,6 +954,13 @@ export class StyleManager extends ShellFacade {
           this.setPanelCollapsed('street-level-panel', collapsed, options),
         dockPanel: () => this._panelChrome.dockPanel('street-level-panel'),
         showToast: (message) => this._showToast(message),
+        // Who asked for Street Level to switch on: only a user, voice or tool
+        // request opens the panel, never a saved-state restore.
+        subscribeEnableRequests: (listener) =>
+          this._dataManager?.subscribeVisibilityRequests?.((change) => {
+            if (change?.layerId === 'street-level' && change.enabled)
+              listener(change.origin);
+          }) || null,
       },
     });
     this._streetLevelControls.connect();

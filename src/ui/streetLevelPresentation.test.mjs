@@ -78,6 +78,21 @@ test('a key-gated layer disables every control and flags KEY REQUIRED', () => {
   assert.equal(view.status.tone, 'warn');
 });
 
+test('KEY REQUIRED shows no raw error code under the pill (review P3)', () => {
+  const view = presentStreetLevelPanel(
+    snapshot({
+      enabled: true,
+      keyRequired: true,
+      coverage: { error: 'no_key' },
+      providers: [provider({ keyRequired: true, error: 'no_key' })],
+    }),
+  );
+  assert.equal(view.status.text, 'KEY REQUIRED');
+  assert.equal(view.error, null);
+  // The chip still says how to add the key.
+  assert.match(view.providers[0].title, /^Mapillary: Needs /);
+});
+
 test('a key Mapillary rejected reads KEY REJECTED and names the fix (review IC8 P2)', () => {
   const error =
     'Mapillary rejected MAPILLARY_CLIENT_TOKEN — replace it in Provider Settings';

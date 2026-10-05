@@ -83,6 +83,15 @@ test('the keyless state gates the controls rather than leaving dead buttons', ()
   );
   assert.match(html, /<fieldset id="sl-controls"/);
   assert.match(html, /<div id="sl-provider-chips" class="sl-chips"><\/div>/);
+  // The gate holds the filters only: the provider chips stay reachable, so
+  // their tooltip can say how to add the key (gekh P3).
+  const gate = html.slice(
+    html.indexOf('<fieldset id="sl-controls"'),
+    html.indexOf('</fieldset>', html.indexOf('<fieldset id="sl-controls"')),
+  );
+  assert.doesNotMatch(gate, /sl-provider-chips/);
+  assert.match(gate, /data-sl-pano="all"/);
+  assert.match(gate, /id="sl-since"/);
   assert.match(
     html,
     /<input id="sl-since" class="sl-range" type="range" min="0" max="8" step="1"/,
@@ -136,7 +145,7 @@ test('on phones the viewer is sized from the rail band, not its aspect ratio', (
 });
 
 test('the viewer comes first and the panel is a portable, resizable window', () => {
-  const controlsBlock = html.slice(html.indexOf('<fieldset id="sl-controls"'));
+  const controlsBlock = html.slice(html.indexOf('<div class="sl-main">'));
   assert.ok(
     controlsBlock.indexOf('id="sl-viewer-wrap"') <
       controlsBlock.indexOf('class="sl-settings"'),
@@ -177,4 +186,71 @@ test('the viewer comes first and the panel is a portable, resizable window', () 
     read('src/ui/applicationShell.js'),
     /panelId === 'street-level-panel'\)\s*this\._streetLevelControls\?\.onPanelResized\(\)/,
   );
+});
+
+/* ── gekh review on #768 ───────────────────────────────────────────────── */
+
+test('Clean View, recording and the cockpit hide the expanded viewer on <body> (P2-5)', () => {
+  // EXPAND moves the viewer out of every panel, past the panel-hiding rules.
+  assert.match(
+    read('src/ui/styles/controls.css'),
+    /body\.ui-clean-view \.sl-viewer-wrap-expanded \{\s*opacity: 0 !important;\s*visibility: hidden !important;/,
+  );
+  assert.match(
+    read('src/ui/styles/recording.css'),
+    /body\.recording-mode \.sl-viewer-wrap-expanded \{\s*opacity: 0 !important;\s*visibility: hidden !important;/,
+  );
+  assert.match(
+    read('src/ui/styles/cockpit.css'),
+    /body\.cockpit-mode\s*:is\([^)]*\.sl-viewer-wrap-expanded\s*\)\s*\{\s*display: none !important;/,
+  );
+  // Hidden, it must not keep holding Esc and Tab.
+  assert.match(controls, /_isDialogShown\(\)/);
+});
+
+test('the expanded viewer keeps the panel tokens (P3)', () => {
+  assert.match(
+    panelCss,
+    /#street-level-panel,\s*\.sl-viewer-wrap \{\s*--sl-green:[^}]*--sl-text:[^}]*--sl-text-small:/,
+  );
+});
+
+test('radiogroups are one tab stop and their focus ring is not clipped (P3)', () => {
+  const seg = /\.sl-seg \{([^}]*)\}/.exec(panelCss)[1];
+  assert.doesNotMatch(seg, /overflow/);
+  assert.match(
+    panelCss,
+    /\.sl-seg-btn:focus-visible \{[^}]*outline: 1px solid/,
+  );
+  for (const [group, checked] of [
+    ['data-sl-render', 'letterbox'],
+    ['data-sl-pano', 'all'],
+  ]) {
+    const radios = [
+      ...html.matchAll(
+        new RegExp(`<button [^>]*${group}="([a-z]+)"[^>]*>`, 'g'),
+      ),
+    ];
+    assert.ok(radios.length >= 2, group);
+    for (const [tag, value] of radios)
+      assert.equal(
+        /tabindex="-1"/.test(tag),
+        value !== checked,
+        `${group}="${value}" roving tab stop`,
+      );
+  }
+});
+
+test('the Cyber theme frames the Street Level panel like its rail peers (P3)', () => {
+  const cyber = read('src/ui/styles/cyber.css');
+  const inner = (cyber.match(/\.recent-imagery-panel-inner,/g) || []).length;
+  const panel = (cyber.match(/#recent-imagery-panel,/g) || []).length;
+  assert.ok(inner > 0 && panel > 0);
+  assert.equal(
+    (cyber.match(/\.street-level-panel-inner,/g) || []).length,
+    inner,
+  );
+  assert.equal((cyber.match(/#street-level-panel,/g) || []).length, panel);
+  // A theme header rule must be able to outrank the panel's own.
+  assert.doesNotMatch(panelCss, /#street-level-panel \.panel-header/);
 });

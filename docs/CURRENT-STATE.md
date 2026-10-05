@@ -2935,8 +2935,10 @@ its criteria cannot be silently ignored.
 Fire Perimeters uses capped, timed server reads with stale-on-error caching and a per-client limit. Unchanged snapshots retain geometry; link checks cancel on disable or selection change, and the row legend shows reported containment.
 
 Street Level lives in the right context rail next to CCTV as an ordinary
-collapsible panel (`#street-level-panel`, share token `0`, option owner
-`street-level`) and starts collapsed. It is modelled on the iD editor's photo
+collapsible panel (`#street-level-panel`, layer share token `0`, option owner
+`street-level`, panel `ui` token `t`) and starts collapsed. It opens itself
+only when the user (or voice, or a tool) switches the layer on or a photo
+opens, never on a saved-state restore, and never stores those automatic opens. It is modelled on the iD editor's photo
 overlay: one panel, a PROVIDERS chip per registered imagery provider, shared
 360°/flat and captured-since filters (stored as relative days so a link keeps
 its meaning), one viewer host, and one on-globe credit per active provider.

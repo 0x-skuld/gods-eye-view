@@ -1,14 +1,29 @@
 import { syncChipGroup } from './chipGroup.js';
+import { isExplicitLayerStateOrigin } from '../data/layerState.js';
 import {
   presentStreetLevelPanel,
   SINCE_STOPS,
 } from './streetLevelPresentation.js';
 
 const RENDER_MODE_KEY = 'gev:street-level:render-mode';
-/** Key the panel used before it became provider-neutral. */
-const LEGACY_RENDER_MODE_KEY = 'gev:mapillary:render-mode';
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+/** Arrow keys inside a radiogroup: the step to the next radio. */
+const RADIO_STEPS = Object.freeze({
+  ArrowRight: 1,
+  ArrowDown: 1,
+  ArrowLeft: -1,
+  ArrowUp: -1,
+});
+
+// Renders run on every layer notification, and the rail's MutationObserver
+// relays out on each attribute write: write only what changed.
+const setProp = (node, key, value) => {
+  if (node && node[key] !== value) node[key] = value;
+};
+const setAttr = (node, key, value) => {
+  if (node && node.getAttribute(key) !== value) node.setAttribute(key, value);
+};
 
 /**
  * Own the Street Level panel: the provider chips, the imagery filters, the
@@ -29,6 +44,17 @@ export class StreetLevelControls {
     this._view = null;
     this._wasEnabled = null;
     this._wasStreetOpen = false;
+    // Until the user first touches the app, an off → on is the saved layer
+    // state being restored, not a user switching the layer on.
+    this._restoreWindow = true;
+    /**
+     * Whether the last request to switch the layer on came from the user
+     * (or voice, or a tool) rather than a restore; null when the shell does
+     * not report requests, and the restore window decides instead.
+     */
+    this._explicitEnable = null;
+    this._unsubscribeEnableRequests = null;
+    this._resizeQueued = false;
     this._wrapHome = null;
     this._expandReturnFocus = null;
     this._elements = this._collect();
@@ -37,6 +63,9 @@ export class StreetLevelControls {
 
   _collect() {
     const byId = (id) => this.root?.querySelector(`#${id}`) || null;
+    const all = (selector) => [
+      ...(this.root?.querySelectorAll(selector) || []),
+    ];
     return {
       status: byId('sl-status'),
       controls: byId('sl-controls'),
@@ -56,6 +85,9 @@ export class StreetLevelControls {
       imageWhen: byId('sl-image-when'),
       imageLink: byId('sl-image-link'),
       coverageMeta: byId('sl-coverage-meta'),
+      panoButtons: all('[data-sl-pano]'),
+      // Held, not re-queried: EXPAND moves them to <body> with the viewer.
+      renderButtons: all('[data-sl-render]'),
     };
   }
 
@@ -76,13 +108,21 @@ export class StreetLevelControls {
     this.listen(el.providerChips, 'click', (event) => {
       const button = event.target?.closest?.('.data-toggle-chip');
       if (!button || button.disabled) return;
+      // Without a key the chips stay focusable for their tooltip; a click
+      // says the same thing rather than switching on a layer that cannot draw.
+      if (this._view?.controlsDisabled) {
+        if (button.title) this.actions.showToast?.(button.title);
+        return;
+      }
       this._toggleProvider(button.dataset.chipId);
     });
-    for (const button of this.root.querySelectorAll('[data-sl-pano]')) {
+    for (const button of el.panoButtons) {
       this.listen(button, 'click', () =>
         this._setParams({ pano: button.dataset.slPano }),
       );
     }
+    this._bindRadioGroup(el.panoButtons);
+    this._bindRadioGroup(el.renderButtons);
     // The readout follows the thumb; coverage is rebuilt once, on release.
     const sinceDays = () =>
       SINCE_STOPS[Number(el.sinceRange?.value) || 0]?.days ?? 0;
@@ -101,7 +141,7 @@ export class StreetLevelControls {
     this.listen(el.viewerExpand, 'click', () =>
       this.setViewerExpanded(!this.isViewerExpanded(), { dock: true }),
     );
-    for (const button of this.root.querySelectorAll('[data-sl-render]')) {
+    for (const button of el.renderButtons) {
       this.listen(button, 'click', () => {
         const mode = button.dataset.slRender;
         this.layer.setViewerRenderMode?.(mode);
@@ -113,9 +153,7 @@ export class StreetLevelControls {
       });
     }
     try {
-      const stored =
-        localStorage.getItem(RENDER_MODE_KEY) ??
-        localStorage.getItem(LEGACY_RENDER_MODE_KEY);
+      const stored = localStorage.getItem(RENDER_MODE_KEY);
       if (stored === 'fill' || stored === 'letterbox')
         this.layer.setViewerRenderMode?.(stored);
     } catch {
@@ -128,19 +166,56 @@ export class StreetLevelControls {
     this.listen(document, 'keydown', (event) => this._onDialogKey(event), {
       capture: true,
     });
+    const endRestoreWindow = () => {
+      this._restoreWindow = false;
+    };
+    for (const type of ['pointerdown', 'keydown'])
+      this.listen(document, type, endRestoreWindow, { capture: true });
     // MapillaryJS only tracks window resizes; the panel resizes on its own.
     if (typeof ResizeObserver === 'function' && el.viewer) {
-      let queued = false;
-      this._resizeObserver = new ResizeObserver(() => {
-        if (queued) return;
-        queued = true;
-        requestAnimationFrame(() => {
-          queued = false;
-          this.layer.resizeViewer?.();
-        });
-      });
+      this._resizeObserver = new ResizeObserver(() => this._requestResize());
       this._resizeObserver.observe(el.viewer);
     }
+  }
+
+  /**
+   * One radiogroup (ARIA radio pattern): a single tab stop, arrow keys move
+   * the selection, Home and End jump to the ends. Selecting is the radio's
+   * own click, so the keyboard takes the same path as the pointer.
+   */
+  _bindRadioGroup(buttons) {
+    buttons.forEach((button, index) => {
+      this.listen(button, 'keydown', (event) => {
+        let next = null;
+        if (event.key in RADIO_STEPS) {
+          const count = buttons.length;
+          next = buttons[(index + RADIO_STEPS[event.key] + count) % count];
+        } else if (event.key === 'Home') next = buttons[0];
+        else if (event.key === 'End') next = buttons[buttons.length - 1];
+        if (!next) return;
+        event.preventDefault();
+        next.focus();
+        if (next !== button) next.click();
+      });
+    });
+  }
+
+  /**
+   * Refit the viewer once, on the next frame, however many asked. A hidden
+   * viewer measures 0×0 and would ask for tiles at z=NaN; the observer fires
+   * again once it has a size.
+   */
+  _requestResize() {
+    if (this._resizeQueued) return;
+    this._resizeQueued = true;
+    requestAnimationFrame(() => {
+      this._resizeQueued = false;
+      const viewer = this._elements.viewer;
+      if (this.destroyed) return;
+      if (viewer && (viewer.clientWidth === 0 || viewer.clientHeight === 0))
+        return;
+      this.layer.resizeViewer?.();
+    });
   }
 
   async _ensureEnabled() {
@@ -207,19 +282,24 @@ export class StreetLevelControls {
     this._unsubscribe?.();
     this._unsubscribe = null;
     if (this.destroyed || !this.root) return;
+    this._unsubscribeEnableRequests?.();
+    this._unsubscribeEnableRequests =
+      this.actions.subscribeEnableRequests?.((origin) => {
+        this._explicitEnable = isExplicitLayerStateOrigin(origin);
+      }) || null;
     this._unsubscribe = this.layer.subscribe?.((state) => this.render(state));
     if (this.layer.getUIState) this.render(this.layer.getUIState());
   }
 
   /** The panel window was resized or docked again: refit the viewer. */
   onPanelResized() {
-    requestAnimationFrame(() => this.layer.resizeViewer?.());
+    this._requestResize();
   }
 
   /** Ask the shell to open (or close) the rail panel. */
   setCollapsed(collapsed, options = {}) {
     this.actions.setPanelCollapsed?.(collapsed, options);
-    if (!collapsed) requestAnimationFrame(() => this.layer.resizeViewer?.());
+    if (!collapsed) this._requestResize();
   }
 
   isViewerExpanded() {
@@ -283,7 +363,7 @@ export class StreetLevelControls {
       button.setAttribute('aria-label', on ? 'Shrink' : 'Expand');
     }
     if (!on && dock) this.actions.dockPanel?.();
-    requestAnimationFrame(() => this.layer.resizeViewer?.());
+    this._requestResize();
   }
 
   /** Park focus on a control that stays on screen while the viewer is hidden. */
@@ -294,18 +374,48 @@ export class StreetLevelControls {
     target?.focus?.({ preventScroll: true });
   }
 
+  /**
+   * The expanded viewer holds Esc and Tab only while it is on screen: Clean
+   * View, recording and the cockpit hide it with CSS.
+   */
+  _isDialogShown() {
+    if (!this.isViewerExpanded()) return false;
+    const wrap = this._elements.viewerWrap;
+    return (
+      typeof wrap.checkVisibility !== 'function' ||
+      // `checkVisibilityCSS` is the option's name before Chrome 121.
+      wrap.checkVisibility({
+        visibilityProperty: true,
+        checkVisibilityCSS: true,
+      })
+    );
+  }
+
   _onDialogKey(event) {
-    if (!this.isViewerExpanded()) return;
+    if (event.key !== 'Escape' && event.key !== 'Tab') return;
+    if (!this._isDialogShown()) return;
+    // Only keys meant for the viewer: from inside it, from nowhere (<body>)
+    // or from the globe. A field elsewhere (search) keeps its Esc and Tab.
+    const target = event.target;
+    const wrap = this._elements.viewerWrap;
+    if (
+      !wrap.contains(target) &&
+      target !== document.body &&
+      target !== document.documentElement &&
+      !target?.closest?.('#cesiumContainer')
+    )
+      return;
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
       this.setViewerExpanded(false, { dock: true });
       return;
     }
-    if (event.key !== 'Tab') return;
-    const wrap = this._elements.viewerWrap;
+    // A radio off the roving tab stop (tabindex -1) is not a stop either.
     const focusable = [...wrap.querySelectorAll(FOCUSABLE)].filter(
-      (node) => node.offsetParent !== null || node === document.activeElement,
+      (node) =>
+        node.getAttribute('tabindex') !== '-1' &&
+        (node.offsetParent !== null || node === document.activeElement),
     );
     if (!focusable.length) return;
     const first = focusable[0];
@@ -332,25 +442,28 @@ export class StreetLevelControls {
     this._renderProviders(view);
     this._renderError(view);
     this._renderFilters(view);
-    this._renderViewer(view, state);
+    this._renderViewer(view);
     this._renderMeta(view);
     this._reactToTransitions(view, state);
   }
 
   _renderHeader(view) {
     const el = this._elements;
-    this.root.dataset.slEnabled = String(view.enabled);
+    setProp(this.root.dataset, 'slEnabled', String(view.enabled));
     if (el.status) {
-      el.status.textContent = view.status.text;
-      el.status.className = `sl-status${view.status.tone ? ` is-${view.status.tone}` : ''}`;
-      el.status.setAttribute('aria-pressed', String(view.status.pressed));
-      el.status.title = view.status.title;
+      setProp(el.status, 'textContent', view.status.text);
+      setProp(
+        el.status,
+        'className',
+        `sl-status${view.status.tone ? ` is-${view.status.tone}` : ''}`,
+      );
+      setAttr(el.status, 'aria-pressed', String(view.status.pressed));
+      setProp(el.status, 'title', view.status.title);
     }
   }
 
   _renderGate(view) {
-    const el = this._elements;
-    if (el.controls) el.controls.disabled = view.controlsDisabled;
+    setProp(this._elements.controls, 'disabled', view.controlsDisabled);
   }
 
   _renderProviders(view) {
@@ -360,17 +473,26 @@ export class StreetLevelControls {
   _renderError(view) {
     const el = this._elements;
     if (!el.error) return;
-    el.error.hidden = !view.error;
-    if (el.errorText) el.errorText.textContent = view.error || '';
+    setProp(el.error, 'hidden', !view.error);
+    setProp(el.errorText, 'textContent', view.error || '');
+  }
+
+  /** Mark the checked radio of a group and make it the group's tab stop. */
+  _renderRadios(buttons, isChecked) {
+    for (const button of buttons) {
+      const checked = isChecked(button);
+      button.classList.toggle('is-active', checked);
+      setAttr(button, 'aria-checked', String(checked));
+      setAttr(button, 'tabindex', checked ? '0' : '-1');
+    }
   }
 
   _renderFilters(view) {
     const el = this._elements;
-    for (const button of this.root.querySelectorAll('[data-sl-pano]')) {
-      const active = button.dataset.slPano === view.filter.pano;
-      button.classList.toggle('is-active', active);
-      button.setAttribute('aria-checked', String(active));
-    }
+    this._renderRadios(
+      el.panoButtons,
+      (button) => button.dataset.slPano === view.filter.pano,
+    );
     if (el.sinceRange) {
       // Never move the thumb under the user's hand; once the committed value
       // matches the thumb, show the full readout with its cut-off date.
@@ -381,8 +503,8 @@ export class StreetLevelControls {
       )
         el.sinceRange.value = index;
       if (el.sinceRange.value === index) {
-        if (el.sinceLabel) el.sinceLabel.textContent = view.since.label;
-        el.sinceRange.setAttribute('aria-valuetext', view.since.label);
+        setProp(el.sinceLabel, 'textContent', view.since.label);
+        setAttr(el.sinceRange, 'aria-valuetext', view.since.label);
       }
     }
     // Rebuild when the swatches change, not only their count: one provider
@@ -407,7 +529,7 @@ export class StreetLevelControls {
     }
   }
 
-  _renderViewer(view, state) {
+  _renderViewer(view) {
     const el = this._elements;
     const { viewer } = view;
     const wrap = el.viewerWrap;
@@ -421,49 +543,64 @@ export class StreetLevelControls {
         wrap.contains(document.activeElement)
       )
         this._focusPanelControl();
-      wrap.hidden = !viewer.open;
+      setProp(wrap, 'hidden', !viewer.open);
     }
     if (!viewer.open && this.isViewerExpanded()) this.setViewerExpanded(false);
-    if (el.viewerPlaceholder) el.viewerPlaceholder.hidden = !viewer.loading;
+    setProp(el.viewerPlaceholder, 'hidden', !viewer.loading);
     if (el.followBtn) {
-      el.followBtn.setAttribute('aria-pressed', String(viewer.follow.pressed));
-      el.followBtn.disabled = viewer.follow.disabled;
-      el.followBtn.title = viewer.follow.title;
+      setAttr(el.followBtn, 'aria-pressed', String(viewer.follow.pressed));
+      setProp(el.followBtn, 'disabled', viewer.follow.disabled);
+      setProp(el.followBtn, 'title', viewer.follow.title);
     }
-    for (const button of this.root.querySelectorAll('[data-sl-render]')) {
-      const active = button.dataset.slRender === viewer.renderMode;
-      button.classList.toggle('is-active', active);
-      button.setAttribute('aria-checked', String(active));
-    }
-    // Track open → closed here too, so the next photo gets its resize.
-    const wasOpen = this._viewerWasOpen;
-    this._viewerWasOpen = state.street.open === true;
+    this._renderRadios(
+      el.renderButtons,
+      (button) => button.dataset.slRender === viewer.renderMode,
+    );
     if (!viewer.open) return;
-    if (el.imageBy) el.imageBy.textContent = viewer.captionLeft;
-    if (el.imageWhen) el.imageWhen.textContent = viewer.captionRight;
+    setProp(el.imageBy, 'textContent', viewer.captionLeft);
+    setProp(el.imageWhen, 'textContent', viewer.captionRight);
     if (el.imageLink) {
-      el.imageLink.hidden = !viewer.link;
-      if (viewer.link) el.imageLink.href = viewer.link;
-      if (viewer.linkLabel) el.imageLink.textContent = viewer.linkLabel;
+      setProp(el.imageLink, 'hidden', !viewer.link);
+      if (viewer.link) setAttr(el.imageLink, 'href', viewer.link);
+      if (viewer.linkLabel)
+        setProp(el.imageLink, 'textContent', viewer.linkLabel);
     }
-    // Size changes reach the viewer through the ResizeObserver; resizing on
-    // every render ran each frame while a panorama was dragged. Opening is the
-    // one moment the element may not have reported a size yet.
-    if (state.street.open && !wasOpen) this.layer.resizeViewer?.();
   }
 
   _renderMeta(view) {
-    const el = this._elements;
-    if (el.coverageMeta) el.coverageMeta.textContent = view.meta;
+    setProp(this._elements.coverageMeta, 'textContent', view.meta);
   }
 
-  /** Open the panel at the moments a user would look for it. */
+  /**
+   * Open the panel at the moments a user would look for it. These opens are
+   * never persisted: the stored collapse state stays the user's own choice.
+   */
   _reactToTransitions(view, state) {
     const enabled = view.enabled;
-    if (enabled && this._wasEnabled === false) this.setCollapsed(false);
+    if (enabled && this._wasEnabled === false) {
+      // A restore that turns the saved layer back on must not reopen a panel
+      // the user (or a share link) chose to keep collapsed. With the shell's
+      // request origins the panel opens only for a user, voice or tool
+      // switch-on; without them, the restore window stands in.
+      const preference = this.root.dataset?.collapsedPreference;
+      const restoring =
+        this._explicitEnable === null
+          ? this._restoreWindow &&
+            (preference === 'stored' || preference === 'share')
+          : !this._explicitEnable;
+      if (!restoring) this.setCollapsed(false, { persist: false });
+      this._restoreWindow = false;
+      this._explicitEnable = this._explicitEnable === null ? null : false;
+    }
     this._wasEnabled = enabled;
-    if (state.street.open && !this._wasStreetOpen) this.setCollapsed(false);
-    this._wasStreetOpen = state.street.open === true;
+    // Size changes reach the viewer through the ResizeObserver; resizing on
+    // every render ran each frame while a panorama was dragged. Opening is the
+    // one moment the element may not have reported a size yet, and opening
+    // the panel asks for that one (coalesced) resize.
+    const open = state.street.open === true;
+    if (open && !this._wasStreetOpen)
+      this.setCollapsed(false, { persist: false });
+    this._wasStreetOpen = open;
   }
 
   destroy() {
@@ -475,6 +612,8 @@ export class StreetLevelControls {
     this._resizeObserver = null;
     this._unsubscribe?.();
     this._unsubscribe = null;
+    this._unsubscribeEnableRequests?.();
+    this._unsubscribeEnableRequests = null;
     this.layer.attachViewerHost?.(null);
   }
 }

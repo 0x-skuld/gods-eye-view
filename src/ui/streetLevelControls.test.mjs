@@ -12,6 +12,13 @@ import {
 
 /* ── A small DOM: just what the panel controls touch ───────────────────── */
 
+/**
+ * Every write the page would see as a mutation: an attribute set or removed,
+ * or a reflected property assigned (even to the value it already has).
+ */
+const mutations = { count: 0 };
+const REFLECTED = ['hidden', 'disabled', 'textContent', 'title', 'value'];
+
 class FakeNode {
   constructor(document, tag, { id = null, dataset = {}, classes = [] } = {}) {
     this.listeners = new Map();
@@ -21,11 +28,21 @@ class FakeNode {
     this.dataset = { ...dataset };
     this.children = [];
     this.parent = null;
-    this.hidden = false;
-    this.disabled = false;
-    this.textContent = '';
-    this.title = '';
-    this.value = '';
+    this.props = {
+      hidden: false,
+      disabled: false,
+      textContent: '',
+      title: '',
+      value: '',
+    };
+    for (const key of REFLECTED)
+      Object.defineProperty(this, key, {
+        get: () => this.props[key],
+        set: (value) => {
+          mutations.count++;
+          this.props[key] = value;
+        },
+      });
     this.attributes = new Map();
     const names = new Set(classes);
     this.classList = {
@@ -51,6 +68,7 @@ class FakeNode {
     Object.defineProperty(this, 'className', {
       get: () => [...names].join(' '),
       set: (value) => {
+        mutations.count++;
         names.clear();
         for (const name of String(value).split(/\s+/).filter(Boolean))
           names.add(name);
@@ -61,13 +79,14 @@ class FakeNode {
     return this.children.length;
   }
   setAttribute(key, value) {
+    mutations.count++;
     this.attributes.set(key, String(value));
   }
   getAttribute(key) {
     return this.attributes.get(key) ?? null;
   }
   removeAttribute(key) {
-    this.attributes.delete(key);
+    if (this.attributes.delete(key)) mutations.count++;
   }
   appendChild(child) {
     return this.insertBefore(child, null);
@@ -104,10 +123,13 @@ class FakeNode {
   focus() {
     this.ownerDocument.activeElement = this;
   }
+  /** `.class` or `#id`. */
   closest(selector) {
+    const byId = /^#(.+)$/.exec(selector);
     const name = selector.replace(/^\./, '');
     for (let node = this; node; node = node.parent)
-      if (node.classList?.contains(name)) return node;
+      if (byId ? node.id === byId[1] : node.classList?.contains(name))
+        return node;
     return null;
   }
   *walk() {
@@ -214,22 +236,13 @@ function panelDom() {
   const add = (parent, tag, options) =>
     parent.appendChild(new FakeNode(document, tag, options));
   add(root, 'button', { id: 'sl-status' });
-  for (const id of [
-    'sl-provider-chips',
-    'sl-error',
-    'sl-error-text',
-    'sl-since',
-    'sl-since-label',
-    'sl-legend',
-    'sl-coverage-meta',
-  ])
-    add(root, id === 'sl-legend' ? 'ul' : 'div', { id });
-  const controls = add(root, 'fieldset', { id: 'sl-controls' });
-  for (const pano of ['all', 'pano', 'flat'])
-    add(controls, 'button', { dataset: { slPano: pano } });
+  const main = add(root, 'div', { classes: ['sl-main'] });
   // The viewer's own tool bar lives inside the wrap, as in the markup.
-  const wrap = add(controls, 'div', { id: 'sl-viewer-wrap' });
-  for (const id of ['sl-viewer-expand', 'sl-follow-btn', 'sl-viewer-close'])
+  const wrap = add(main, 'div', { id: 'sl-viewer-wrap' });
+  add(wrap, 'button', { id: 'sl-viewer-expand' });
+  for (const mode of ['letterbox', 'fill'])
+    add(wrap, 'button', { dataset: { slRender: mode } });
+  for (const id of ['sl-follow-btn', 'sl-viewer-close'])
     add(wrap, 'button', { id });
   for (const id of [
     'sl-viewer-placeholder',
@@ -239,10 +252,26 @@ function panelDom() {
     'sl-image-link',
   ])
     add(wrap, id === 'sl-image-link' ? 'a' : 'div', { id });
+  const settings = add(main, 'div', { classes: ['sl-settings'] });
+  for (const id of ['sl-provider-chips', 'sl-error', 'sl-error-text'])
+    add(settings, 'div', { id });
+  // A missing key gates the filters only; the chips stay outside the gate.
+  const controls = add(settings, 'fieldset', { id: 'sl-controls' });
+  for (const pano of ['all', 'pano', 'flat'])
+    add(controls, 'button', { dataset: { slPano: pano } });
+  add(controls, 'input', { id: 'sl-since' });
+  add(controls, 'output', { id: 'sl-since-label' });
+  add(settings, 'ul', { id: 'sl-legend' });
+  add(settings, 'div', { id: 'sl-coverage-meta' });
   // The globe's canvas is focusable too (tabindex=0).
-  const globe = add(document.body, 'canvas');
+  const globe = add(
+    add(document.body, 'div', { id: 'cesiumContainer' }),
+    'canvas',
+  );
   globe.setAttribute('tabindex', '0');
-  return { document, root, globe };
+  // A field in another panel (the location search).
+  const search = add(document.body, 'input', { id: 'location-search' });
+  return { document, root, globe, search };
 }
 
 /** Run `fn` with the fake document and an immediate animation frame. */
@@ -251,11 +280,11 @@ async function withDom(fn) {
     document: globalThis.document,
     requestAnimationFrame: globalThis.requestAnimationFrame,
   };
-  const dom = panelDom();
-  globalThis.document = dom.document;
+  const page = panelDom();
+  globalThis.document = page.document;
   globalThis.requestAnimationFrame = (task) => setTimeout(task, 0);
   try {
-    return await fn(dom);
+    return await fn(page);
   } finally {
     globalThis.document = saved.document;
     globalThis.requestAnimationFrame = saved.requestAnimationFrame;
@@ -277,9 +306,7 @@ function standInProvider() {
       requiresKeyId: null,
       pickPrefix: 'mly:',
       colors: { coverage: '#05cb63' },
-      credit: { key: 'mapillary', html: 'Mapillary' },
-      capabilities: { coverage: 'tiles', sequences: true, pano: true },
-      externalUrl: (id) => `https://example.test/${id}`,
+      credit: { html: 'Mapillary' },
       create: () => ({
         status: async () => ({ configured: true }),
         init() {},
@@ -446,11 +473,19 @@ function stubLayer() {
   };
 }
 
-function uiState({ enabled = true, on = true, open = false, legend } = {}) {
+function uiState({
+  enabled = true,
+  on = true,
+  open = false,
+  legend,
+  pano = 'all',
+  renderMode = 'letterbox',
+  keyRequired = false,
+} = {}) {
   return {
     enabled,
-    keyRequired: false,
-    filter: { pano: 'all', sinceDays: 0 },
+    keyRequired,
+    filter: { pano, sinceDays: 0 },
     providers: [
       {
         id: 'mapillary',
@@ -458,9 +493,9 @@ function uiState({ enabled = true, on = true, open = false, legend } = {}) {
         label: 'MAPILLARY',
         color: '#05cb63',
         on,
-        configured: true,
-        keyRequired: false,
-        requiresKeyId: null,
+        configured: !keyRequired,
+        keyRequired,
+        requiresKeyId: keyRequired ? 'mapillary' : null,
         loading: false,
         count: 3,
         hint: '',
@@ -478,7 +513,7 @@ function uiState({ enabled = true, on = true, open = false, legend } = {}) {
       loading: false,
       follow: false,
       followAvailable: false,
-      renderMode: 'letterbox',
+      renderMode,
       providerId: open ? 'mapillary' : null,
       imageId: open ? 'img-1' : null,
       error: null,
@@ -487,9 +522,9 @@ function uiState({ enabled = true, on = true, open = false, legend } = {}) {
   };
 }
 
-function stubPanel(dom, state) {
+function stubPanel(dom, state, extraActions = {}) {
   const layer = stubLayer();
-  const calls = { setParams: [], setEnabled: [] };
+  const calls = { setParams: [], setEnabled: [], collapsed: [], toasts: [] };
   let enabled = state.enabled;
   layer.publish(state);
   const controls = new StreetLevelControls({
@@ -502,9 +537,11 @@ function stubPanel(dom, state) {
         enabled = on;
       },
       setParams: (params, options) => calls.setParams.push([params, options]),
-      setPanelCollapsed() {},
+      setPanelCollapsed: (collapsed, options) =>
+        calls.collapsed.push([collapsed, options]),
       dockPanel() {},
-      showToast() {},
+      showToast: (message) => calls.toasts.push(message),
+      ...extraActions,
     },
   });
   controls.connect();
@@ -554,16 +591,21 @@ test('the legend rebuilds when a swatch changes, even at the same count (review 
     assert.equal(swatch(), '#a66bff');
   }));
 
-test('the viewer is resized when it opens, not on every render (review #8)', () =>
+test('the viewer is resized once when it opens, not on every render (review #8, gekh P3)', () =>
   withDom(async (dom) => {
     const { layer } = stubPanel(dom, uiState());
+    await settle();
     assert.equal(layer.calls.resize, 0);
     layer.publish(uiState({ open: true }));
+    await settle();
+    // Opening also opens the panel; the two share one coalesced resize.
     assert.equal(layer.calls.resize, 1, 'once on open');
     for (let i = 0; i < 5; i++) layer.publish(uiState({ open: true }));
+    await settle();
     assert.equal(layer.calls.resize, 1, 'not again while it stays open');
     layer.publish(uiState({ open: false }));
     layer.publish(uiState({ open: true }));
+    await settle();
     assert.equal(layer.calls.resize, 2, 'the next photo resizes again');
   }));
 
@@ -639,5 +681,202 @@ test('an image closed while expanded does not return focus into the hidden viewe
       dom.document.activeElement,
       dom.root.querySelector('#sl-status'),
     );
+    controls.destroy();
+  }));
+
+/* ── gekh review on #768 ───────────────────────────────────────────────── */
+
+test('a restored layer does not reopen a panel the user collapsed, and automatic opens are never stored (P2-1)', () =>
+  withDom(async (dom) => {
+    // The panel chrome restored the user's stored "collapsed" before connect.
+    dom.root.dataset.collapsedPreference = 'stored';
+    const { layer, calls, controls } = stubPanel(
+      dom,
+      uiState({ enabled: false }),
+    );
+    layer.publish(uiState({ enabled: true })); // saved layer state restored
+    assert.deepEqual(calls.collapsed, [], 'the collapsed panel stays shut');
+    // Later, a user switches the layer off and on: that opens the panel,
+    // without overwriting the stored preference.
+    dom.document.body.dispatchEvent({ type: 'pointerdown', bubbles: true });
+    layer.publish(uiState({ enabled: false }));
+    layer.publish(uiState({ enabled: true }));
+    assert.deepEqual(calls.collapsed, [[false, { persist: false }]]);
+    layer.publish(uiState({ enabled: true, open: true }));
+    assert.deepEqual(calls.collapsed.at(-1), [false, { persist: false }]);
+    controls.destroy();
+  }));
+
+test('without a stored choice, a restored layer still opens its panel, unstored (P2-1)', () =>
+  withDom(async (dom) => {
+    dom.root.dataset.collapsedPreference = 'default';
+    const { layer, calls, controls } = stubPanel(
+      dom,
+      uiState({ enabled: false }),
+    );
+    layer.publish(uiState({ enabled: true }));
+    assert.deepEqual(calls.collapsed, [[false, { persist: false }]]);
+    controls.destroy();
+  }));
+
+test('with request origins, only a user switch-on opens the panel; a restore never does (P2-1)', () =>
+  withDom(async (dom) => {
+    // No stored choice: the restore window alone would open the panel.
+    dom.root.dataset.collapsedPreference = 'default';
+    let announce = null;
+    const { layer, calls, controls } = stubPanel(
+      dom,
+      uiState({ enabled: false }),
+      {
+        subscribeEnableRequests: (listener) => {
+          announce = listener;
+          return () => {
+            announce = null;
+          };
+        },
+      },
+    );
+    announce('restore');
+    layer.publish(uiState({ enabled: true }));
+    assert.deepEqual(calls.collapsed, [], 'a restore leaves the panel be');
+    layer.publish(uiState({ enabled: false }));
+    announce('user');
+    layer.publish(uiState({ enabled: true }));
+    assert.deepEqual(calls.collapsed, [[false, { persist: false }]]);
+    controls.destroy();
+    assert.equal(announce, null, 'destroy unsubscribes');
+  }));
+
+test('Esc and Tab from a field outside the expanded viewer stay with that field (P3)', () =>
+  withDom(async (dom) => {
+    const { controls } = stubPanel(dom, uiState({ open: true }));
+    const reached = mapEscape(dom);
+    controls.setViewerExpanded(true);
+    dom.search.focus();
+    keydown(dom.search, 'Escape');
+    assert.equal(controls.isViewerExpanded(), true, 'the search keeps its Esc');
+    assert.equal(reached.length, 1, 'and the event was not swallowed');
+    keydown(dom.search, 'Tab');
+    assert.equal(dom.document.activeElement, dom.search, 'Tab stays put');
+    // From <body> (focus nowhere), Esc is still the viewer's.
+    keydown(dom.document.body, 'Escape');
+    assert.equal(controls.isViewerExpanded(), false);
+    controls.destroy();
+  }));
+
+test('a hidden expanded viewer (Clean View, recording, cockpit) holds neither Esc nor Tab (P2-5)', () =>
+  withDom(async (dom) => {
+    const { controls } = stubPanel(dom, uiState({ open: true }));
+    const reached = mapEscape(dom);
+    controls.setViewerExpanded(true);
+    const wrap = dom.document.body.querySelector('#sl-viewer-wrap');
+    wrap.checkVisibility = () => false; // the mode's CSS hides it
+    dom.globe.focus();
+    keydown(dom.globe, 'Tab');
+    assert.equal(dom.document.activeElement, dom.globe);
+    keydown(dom.globe, 'Escape');
+    assert.equal(controls.isViewerExpanded(), true);
+    assert.equal(reached.length, 1, 'Esc went on to the map');
+    controls.destroy();
+  }));
+
+test('FIT / FILL show the selection while the viewer is expanded (P3)', () =>
+  withDom(async (dom) => {
+    const { layer, controls } = stubPanel(dom, uiState({ open: true }));
+    controls.setViewerExpanded(true);
+    layer.publish(uiState({ open: true, renderMode: 'fill' }));
+    const wrap = dom.document.body.querySelector('#sl-viewer-wrap');
+    const [fit, fill] = wrap.querySelectorAll('[data-sl-render]');
+    assert.equal(fill.getAttribute('aria-checked'), 'true');
+    assert.equal(fit.getAttribute('aria-checked'), 'false');
+    assert.equal(fill.classList.contains('is-active'), true);
+    controls.destroy();
+  }));
+
+test('a hidden (0×0) viewer is not resized, so no z=NaN tile request (P3)', () =>
+  withDom(async (dom) => {
+    const saved = globalThis.ResizeObserver;
+    const observers = [];
+    globalThis.ResizeObserver = class {
+      constructor(callback) {
+        observers.push(callback);
+      }
+      observe() {}
+      disconnect() {}
+    };
+    try {
+      const { layer, controls } = stubPanel(dom, uiState({ open: true }));
+      await settle();
+      const resizes = layer.calls.resize;
+      const viewer = dom.root.querySelector('#sl-viewer');
+      Object.assign(viewer, { clientWidth: 0, clientHeight: 0 });
+      observers[0]();
+      await settle();
+      assert.equal(layer.calls.resize, resizes, 'skipped while 0×0');
+      Object.assign(viewer, { clientWidth: 640, clientHeight: 400 });
+      observers[0]();
+      await settle();
+      assert.equal(layer.calls.resize, resizes + 1, 'resized once it shows');
+      controls.destroy();
+    } finally {
+      globalThis.ResizeObserver = saved;
+    }
+  }));
+
+test('identical renders write nothing to the DOM (P3: rail MutationObserver)', () =>
+  withDom(async (dom) => {
+    const { layer, controls } = stubPanel(dom, uiState({ open: true }));
+    layer.publish(uiState({ open: true }));
+    const before = mutations.count;
+    for (let i = 0; i < 10; i++) layer.publish(uiState({ open: true }));
+    assert.equal(mutations.count - before, 0);
+    controls.destroy();
+  }));
+
+test('arrow keys move the selection within a radiogroup, which has one tab stop (P3)', () =>
+  withDom(async (dom) => {
+    const { layer, calls, controls } = stubPanel(dom, uiState());
+    const [all, pano, flat] = dom.root.querySelectorAll('[data-sl-pano]');
+    assert.deepEqual(
+      [all, pano, flat].map((button) => button.getAttribute('tabindex')),
+      ['0', '-1', '-1'],
+    );
+    all.focus();
+    keydown(all, 'ArrowRight');
+    assert.equal(dom.document.activeElement, pano);
+    assert.deepEqual(calls.setParams.at(-1), [
+      { pano: 'pano' },
+      { origin: 'user' },
+    ]);
+    keydown(all, 'ArrowLeft'); // wraps to the end
+    assert.equal(dom.document.activeElement, flat);
+    keydown(flat, 'Home');
+    assert.equal(dom.document.activeElement, all);
+    layer.publish(uiState({ pano: 'flat' }));
+    assert.deepEqual(
+      [all, pano, flat].map((button) => button.getAttribute('tabindex')),
+      ['-1', '-1', '0'],
+    );
+    controls.destroy();
+  }));
+
+test('under KEY REQUIRED the provider chip stays live and explains the key instead of toggling (P3)', () =>
+  withDom(async (dom) => {
+    const { calls, chip, controls } = stubPanel(
+      dom,
+      uiState({ keyRequired: true }),
+    );
+    assert.equal(dom.root.querySelector('#sl-controls').disabled, true);
+    assert.equal(
+      dom.root.querySelector('#sl-controls').contains(chip()),
+      false,
+      'the chip is outside the disabled fieldset',
+    );
+    chip().click();
+    await settle();
+    assert.deepEqual(calls.setEnabled, []);
+    assert.deepEqual(calls.setParams, []);
+    assert.equal(calls.toasts.length, 1);
+    assert.match(calls.toasts[0], /^Mapillary: Needs /);
     controls.destroy();
   }));

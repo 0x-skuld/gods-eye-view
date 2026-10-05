@@ -157,13 +157,19 @@ export function presentStreetLevelPanel(state, { now = Date.now() } = {}) {
   const enabled = state.enabled === true;
   const keyRequired = state.keyRequired === true;
   const filter = state.filter || { pano: 'all', sinceDays: 0 };
+  // KEY REQUIRED already says it, and the chip's tooltip says how to fix it;
+  // the error under it would only repeat a raw code (`no_key`). A rejected
+  // key keeps its line: that message names the fix.
+  const keyMissing = keyRequired && state.keyRejected !== true;
   return {
     enabled,
     keyRequired,
     status: presentStatus(state),
     controlsDisabled: keyRequired,
     providers: presentProviders(state),
-    error: state.street.error || state.coverage.error || null,
+    error: keyMissing
+      ? null
+      : state.street.error || state.coverage.error || null,
     filter: { pano: filter.pano, sinceDays: Number(filter.sinceDays) || 0 },
     since: presentSince(filter.sinceDays, now),
     legend: state.legend || [],
