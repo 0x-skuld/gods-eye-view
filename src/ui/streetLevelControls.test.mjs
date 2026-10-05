@@ -500,4 +500,7 @@ test('the viewer is resized when it opens, not on every render (review #8)', () 
     assert.equal(layer.calls.resize, 1, 'once on open');
     for (let i = 0; i < 5; i++) layer.publish(uiState({ open: true }));
     assert.equal(layer.calls.resize, 1, 'not again while it stays open');
+    layer.publish(uiState({ open: false }));
+    layer.publish(uiState({ open: true }));
+    assert.equal(layer.calls.resize, 2, 'the next photo resizes again');
   }));

@@ -181,6 +181,7 @@ export function createGroundCaster({
         lon: Number((i * step).toFixed(6)),
         lat: Number((j * step).toFixed(6)),
       })),
+      { signal },
     );
     let complete = true;
     missing.forEach(([key], n) => {

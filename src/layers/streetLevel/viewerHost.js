@@ -25,7 +25,7 @@ export function createViewerHost({ state, parts }) {
   }
 
   function applyPose(pose) {
-    if (!active || pose.providerId !== active.id) return;
+    if (!active || !state.street.open || pose.providerId !== active.id) return;
     const previousSequence = state.street.sequenceId;
     Object.assign(state.street, {
       providerId: pose.providerId,

@@ -238,3 +238,19 @@ test('a full cache is cleared before a request counts its corners, so the reques
   assert.equal(await caster.prepareLines([line]), true);
   assert.ok(caster.castLine(line), 'the whole line casts');
 });
+
+test('cancelling a prepare cancels its terrain request', async () => {
+  const seen = [];
+  const caster = createGroundCaster({
+    terrain: {
+      async resolveEllipsoidalGround(coords, options) {
+        seen.push(options?.signal);
+        return coords.map(() => ({ ellipsoid: 100, source: 'reearth' }));
+      },
+    },
+  });
+  const controller = new AbortController();
+  await caster.prepare([[10.0005, 50.0005]], { signal: controller.signal });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0], controller.signal, 'the tile signal reaches the proxy');
+});

@@ -241,3 +241,39 @@ test('a tile whose lines cannot be cast is not rebuilt for nothing', async () =>
   assert.equal(viewer.scene.primitives.items.size, 0);
   coverage.clear();
 });
+
+test('panning off a tile that is still loading settles the loading count', async () => {
+  const { viewer, source, state, coverage } = setup();
+  coverage.refresh();
+  assert.equal(state.coverage.loading, 1);
+  // Same zoom, two tiles east: the first request is dropped, a new one starts.
+  viewer.view.lon += 0.05;
+  coverage.refresh();
+  assert.equal(source.calls.length, 2);
+  assert.equal(source.calls[0].signal.aborted, true);
+  assert.equal(state.coverage.pending.size, 1);
+  assert.equal(
+    state.coverage.loading,
+    1,
+    'only the live request counts as loading',
+  );
+  source.calls[0].reject(new DOMException('aborted', 'AbortError'));
+  source.calls[1].resolve(new Uint8Array());
+  await settle();
+  assert.equal(state.coverage.pending.size, 0);
+  assert.equal(state.coverage.loading, 0, 'LOADING clears');
+  coverage.clear();
+});
+
+test('zoom 0 is a zoom: the whole-earth view still shows coverage', () => {
+  const { viewer, source, state, coverage } = setup();
+  viewer.view.height = 20_000_000;
+  coverage.refresh();
+  assert.equal(state.coverage.zoom, 0);
+  assert.equal(state.coverage.hint, '');
+  assert.deepEqual(
+    source.calls.map((call) => call.key),
+    ['0/0/0'],
+  );
+  coverage.clear();
+});

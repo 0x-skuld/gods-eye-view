@@ -77,6 +77,13 @@ const _inFlight = new Map();
 function memoryGet(key) {
   const hit = _memory.get(key);
   if (!hit) return null;
+  // Same 24 h life as the disk copy: a long-running server must not keep
+  // serving stale (or empty) coverage until eviction.
+  if (Date.now() - hit.at > TILE_DISK_TTL_MS) {
+    _memory.delete(key);
+    _memoryBytes -= hit.bytes.length;
+    return null;
+  }
   // Re-insert to mark as most recently used.
   _memory.delete(key);
   _memory.set(key, hit);

@@ -69,6 +69,9 @@ export function createMapillaryViewer({ source, render } = {}) {
         viewer.getPosition(),
         viewer.getPointOfView(),
       ]);
+      // Closed (or never opened) while the pose was in flight: a late
+      // `image` event must not bring the photo back.
+      if (pendingOpen === null) return;
       if (image) current = describe(image);
       if (!current || !viewer) return;
       emit({

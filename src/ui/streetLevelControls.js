@@ -404,6 +404,9 @@ export class StreetLevelControls {
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-checked', String(active));
     }
+    // Track open → closed here too, so the next photo gets its resize.
+    const wasOpen = this._viewerWasOpen;
+    this._viewerWasOpen = state.street.open === true;
     if (!viewer.open) return;
     if (el.imageBy) el.imageBy.textContent = viewer.captionLeft;
     if (el.imageWhen) el.imageWhen.textContent = viewer.captionRight;
@@ -415,8 +418,7 @@ export class StreetLevelControls {
     // Size changes reach the viewer through the ResizeObserver; resizing on
     // every render ran each frame while a panorama was dragged. Opening is the
     // one moment the element may not have reported a size yet.
-    if (state.street.open && !this._viewerWasOpen) this.layer.resizeViewer?.();
-    this._viewerWasOpen = state.street.open === true;
+    if (state.street.open && !wasOpen) this.layer.resizeViewer?.();
   }
 
   _renderMeta(view) {

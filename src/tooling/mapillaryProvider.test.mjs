@@ -202,6 +202,24 @@ test('fetchTile serves from memory after one upstream fetch and strips the image
   }
 });
 
+test('a tile held in memory past the 24 h TTL is fetched again', async (t) => {
+  const tile = { layer: 'coverage', z: 9, x: 3, y: 3 };
+  await withDeferredUpstream([tile], async ({ upstream, settle }) => {
+    const first = fetchTile(tile);
+    await settle();
+    upstream[0].release();
+    assert.equal((await first).source, 'upstream');
+    assert.equal((await fetchTile(tile)).source, 'memory');
+    const now = Date.now();
+    t.mock.method(Date, 'now', () => now + 25 * 60 * 60 * 1000);
+    const again = fetchTile(tile);
+    await settle();
+    assert.equal(upstream.length, 2, 'neither cache answers a stale tile');
+    upstream[1].release();
+    assert.equal((await again).source, 'upstream');
+  });
+});
+
 /**
  * A deferred upstream for in-flight tests: every fetch waits until released,
  * and records whether its signal was aborted. Coordinates use z9, which the

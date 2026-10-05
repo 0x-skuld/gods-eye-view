@@ -537,7 +537,7 @@ export function createCoverage({ state, source }) {
     let bbox = visibleBbox(viewer);
     if (kind === 'overview' && (!bbox || zoom <= 1))
       bbox = [-180, -85, 180, 85];
-    if (!zoom || !bbox) {
+    if (zoom == null || !bbox) {
       state.coverage.hint =
         'Point the camera at the globe for street-level coverage';
       clear();
@@ -559,10 +559,14 @@ export function createCoverage({ state, source }) {
       if (!wanted.has(key)) removeTile(key);
     for (const [key, controller] of [...state.coverage.pending])
       if (!wanted.has(key)) {
+        // The aborted request no longer owns its key, so its `finally` will
+        // not settle the count: settle it here.
         controller.abort();
         state.coverage.pending.delete(key);
+        state.coverage.loading = Math.max(0, state.coverage.loading - 1);
       }
     for (const tile of tiles) loadTile(tile, kind);
+    if (!state.coverage.pending.size) purgeStale();
     // The camera moved: cells that were out of the sampler's range may not be.
     if (terrainMode())
       for (const entry of state.coverage.tiles.values())

@@ -27,16 +27,21 @@ function fakeAdapter({ failMounts = 0 } = {}) {
       calls.mount++;
       if (calls.mount <= failMounts) throw new Error('library failed to load');
     },
-    async open(id) {
-      calls.open.push(id);
+    /** A pose event from the library, as MapillaryJS fires them. */
+    emitPose(id) {
       emit?.({
         providerId: 'mapillary',
         imageId: id,
+        sequenceId: `seq-${id}`,
         position: { lon: 1, lat: 2 },
         bearing: 90,
         isPano: false,
         externalUrl: `https://example.test/${id}`,
       });
+    },
+    async open(id) {
+      calls.open.push(id);
+      this.emitPose(id);
     },
     close() {},
     unmount() {
@@ -126,4 +131,18 @@ test('switching one provider off releases only its viewer', async () => {
   assert.equal(adapter.calls.unmount, 0, 'another provider leaves it alone');
   host.unmount('mapillary');
   assert.equal(adapter.calls.unmount, 1);
+});
+
+test('a pose that arrives after the photo was closed does not bring it back', async () => {
+  const adapter = fakeAdapter();
+  const { state, host } = harness(adapter);
+  await host.open('mapillary', 'a');
+  host.close();
+  const before = { ...state.street };
+  // The library's `image` event for a photo that was still loading.
+  adapter.emitPose('a');
+  assert.equal(state.street.open, false);
+  assert.equal(state.street.imageId, null);
+  assert.equal(state.street.sequenceId, null);
+  assert.deepEqual(state.street, before);
 });
