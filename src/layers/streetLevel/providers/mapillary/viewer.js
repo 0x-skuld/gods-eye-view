@@ -31,8 +31,15 @@ export function createMapillaryViewer({ source, render } = {}) {
 
   async function ensureLibrary() {
     if (Library) return Library;
-    // The viewer stylesheet is vendored into src/ui/styles/mapillary-js.css.
-    Library = await import('mapillary-js');
+    // The stylesheet comes with the lazy chunk: Vite applies a dynamically
+    // imported stylesheet before its import resolves, so the viewer's chrome
+    // is styled from the first frame without costing every page load ~90 KB
+    // of render-blocking CSS.
+    const [library] = await Promise.all([
+      import('mapillary-js'),
+      import('mapillary-js/dist/mapillary.css'),
+    ]);
+    Library = library;
     return Library;
   }
 
