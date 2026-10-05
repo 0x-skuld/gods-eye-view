@@ -14,6 +14,9 @@
 
 - Street Level coverage no longer floats over trees and bridges on the Google 3D map. At street zoom, sequence lines, image cones and the position marker are placed on the bare earth from the terrain service (with a 2 m lift) instead of being draped on the top of the photoreal mesh, so buildings and tree canopies hide what is behind them; other maps and higher views keep draped lines. Opening a photo no longer flies the camera underground when the Google tiles under it have not loaded yet. Near the camera the placement is refined against the rendered Google 3D surface, so lines also follow freeways in trenches and steep streets, and stay on the road under trees.
 
+- Street Level loads the coverage you are looking at in tilted views. Tiles are ranked along the line of sight, from the ground under the camera to the ground at the centre of the screen, and screen rays meet the ground at its real height (Denver is 1,600 m up), so the streets in front of the camera are no longer dropped for tiles near the horizon. On Google 3D, lines that are placed on the bare earth no longer fall back to draping over roofs when their finer points cross grid cells the coarse ones skipped.
+- Street Level names a Mapillary token that Mapillary refuses: the panel reads KEY REJECTED and says to replace `MAPILLARY_CLIENT_TOKEN` in Provider Settings, instead of a raw "HTTP 403". The proxy stops asking Mapillary on every camera move after a refusal (for that token) or a rate limit (until its `Retry-After`), and the panel clears the message when the layer is switched off.
+
 - Add Norway's road cameras from Statens vegvesen as a CCTV pack. The camera
   list is one keyless GeoJSON request to the agency's OGC API view of its
   DATEX 3.1 CCTV table, so no DATEX account is needed. Every working camera

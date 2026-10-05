@@ -10,9 +10,10 @@
  * `--fixtures` makes the run hermetic for Mapillary (the CI mode): the page's
  * Mapillary status and coverage-tile requests are answered with generated
  * fixtures (see fixtureTile) and nothing reaches mapillary.com, so no token
- * is needed. The steps that open a photo need MapillaryJS and real imagery
- * and are skipped; everything else runs, with stricter filter assertions
- * because the fixture data is known.
+ * is needed. The steps that open a photo need real imagery and are skipped.
+ * Fixture runs add what a live run cannot stage: a key Mapillary rejects, and
+ * a second page whose server has no key (the keyless gate most installs see).
+ * Filter assertions are stricter because the fixture data is known.
  */
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
@@ -104,8 +105,15 @@ export function fixtureTile(z, x, y, now = Date.now()) {
   return encodeCoverageTile(tile, { sequences });
 }
 
-/** Answer the page's Mapillary requests from fixtures; nothing reaches mapillary.com. */
-async function serveFixtures(page) {
+/**
+ * Answer the page's Mapillary requests from fixtures; nothing reaches
+ * mapillary.com. `fixture` is live: `configured` is what the status route
+ * says, `tiles: 'rejected'` answers tiles as the proxy does when Mapillary
+ * refuses the token, and `tileRequests` counts tile requests.
+ * @param {object} page
+ * @param {{configured: boolean, tiles: 'ok'|'rejected', tileRequests: number}} fixture
+ */
+async function serveFixtures(page, fixture) {
   await page.setRequestInterception(true);
   page.on('request', (request) => {
     const address = new URL(request.url());
@@ -113,12 +121,28 @@ async function serveFixtures(page) {
       return request.respond({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ configured: true }),
+        body: JSON.stringify({ configured: fixture.configured }),
       });
     const tile = address.pathname.match(
       /^\/api\/mapillary\/tiles\/coverage\/(\d+)\/(\d+)\/(\d+)$/,
     );
     if (tile) {
+      fixture.tileRequests++;
+      if (!fixture.configured)
+        return request.respond({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'no_key', keyRequired: true }),
+        });
+      if (fixture.tiles === 'rejected')
+        return request.respond({
+          status: 403,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: 'Mapillary rejected the access token',
+            keyRejected: true,
+          }),
+        });
       const bytes = fixtureTile(
         Number(tile[1]),
         Number(tile[2]),
@@ -136,6 +160,69 @@ async function serveFixtures(page) {
       return request.respond({ status: 503, body: '' });
     return request.continue();
   });
+}
+
+/** Load the app and clear the first-run dialog. */
+async function boot(page, url) {
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__godsEyeView?.dataManager), {
+    timeout: 150_000,
+  });
+  await page.evaluate(() =>
+    document.querySelector('.first-run-explore')?.click(),
+  );
+  await sleep(800);
+  await page.keyboard.press('Escape');
+  await sleep(400);
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll(
+      '#first-run-launcher, [class*=first-run]',
+    ))
+      el.remove();
+  });
+}
+
+/** Panel geometry and the bits of state the steps assert on. */
+function readPanel(page) {
+  return page.evaluate(() => {
+    const el = document.getElementById('street-level-panel');
+    const rail = document.getElementById('right-context-rail');
+    const box = el.getBoundingClientRect();
+    return {
+      order: rail ? [...rail.children].map((child) => child.id) : [],
+      classes: [...el.classList],
+      width: Math.round(box.width),
+      right: Math.round(box.right),
+      status: document.getElementById('sl-status').textContent,
+      controlsDisabled: document.getElementById('sl-controls').disabled,
+      bodyDisplay: getComputedStyle(document.getElementById('sl-body')).display,
+    };
+  });
+}
+
+/** Without a key on the server the panel gates its controls and says why. */
+async function assertKeylessGate(page) {
+  await page.evaluate(() =>
+    window.__godsEyeView.dataManager.setEnabled('street-level', true, {
+      origin: 'user',
+    }),
+  );
+  await page.waitForFunction(
+    () => document.getElementById('sl-status').textContent === 'KEY REQUIRED',
+    { timeout: 30_000 },
+  );
+  const info = await readPanel(page);
+  assert.equal(info.controlsDisabled, true);
+  assert.equal(info.status, 'KEY REQUIRED');
+  const chip = await page.$eval(
+    '#sl-provider-chips [data-chip-id="mapillary"]',
+    (node) => ({
+      error: node.classList.contains('chip-error'),
+      title: node.title,
+    }),
+  );
+  assert.equal(chip.error, true, 'the keyless provider chip reads as an error');
+  assert.match(chip.title, /MAPILLARY_CLIENT_TOKEN/);
 }
 
 async function main() {
@@ -164,52 +251,23 @@ async function main() {
   const photoStep = fixtures
     ? async (label) => console.log(`skip (fixtures) ${label}`)
     : step;
-  try {
-    const page = await browser.newPage();
-    if (fixtures) await serveFixtures(page);
-    const errors = [];
+  const errors = [];
+  /** Collect page errors, and the listener exceptions the layer only warns about. */
+  const watchErrors = (page) => {
     page.on('pageerror', (error) => errors.push(error.message));
-    // The layer swallows listener exceptions into a console warning; surface them.
     page.on('console', (message) => {
       if (/listener error/i.test(message.text())) errors.push(message.text());
     });
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(
-      () => Boolean(window.__godsEyeView?.dataManager),
-      {
-        timeout: 150_000,
-      },
-    );
-    await page.evaluate(() =>
-      document.querySelector('.first-run-explore')?.click(),
-    );
-    await sleep(800);
-    await page.keyboard.press('Escape');
-    await sleep(400);
-    await page.evaluate(() => {
-      for (const el of document.querySelectorAll(
-        '#first-run-launcher, [class*=first-run]',
-      ))
-        el.remove();
-    });
+  };
+  try {
+    const page = await browser.newPage();
+    const fixture = { configured: true, tiles: 'ok', tileRequests: 0 };
+    if (fixtures) await serveFixtures(page, fixture);
+    watchErrors(page);
+    await boot(page, url);
     const module = () =>
       window.__godsEyeView.dataManager.layers.get('street-level').module;
-    const panel = () =>
-      page.evaluate(() => {
-        const el = document.getElementById('street-level-panel');
-        const rail = document.getElementById('right-context-rail');
-        const box = el.getBoundingClientRect();
-        return {
-          order: rail ? [...rail.children].map((child) => child.id) : [],
-          classes: [...el.classList],
-          width: Math.round(box.width),
-          right: Math.round(box.right),
-          status: document.getElementById('sl-status').textContent,
-          controlsDisabled: document.getElementById('sl-controls').disabled,
-          bodyDisplay: getComputedStyle(document.getElementById('sl-body'))
-            .display,
-        };
-      });
+    const panel = () => readPanel(page);
     const status = await page.evaluate(() =>
       fetch('/api/mapillary/status').then((res) => res.json()),
     );
@@ -264,26 +322,7 @@ async function main() {
     if (!status.configured) {
       await step(
         'keyless install gates the controls and reports KEY REQUIRED',
-        async () => {
-          await page.evaluate(() =>
-            window.__godsEyeView.dataManager.setEnabled('street-level', true, {
-              origin: 'user',
-            }),
-          );
-          await sleep(800);
-          const info = await panel();
-          assert.equal(info.controlsDisabled, true);
-          assert.equal(info.status, 'KEY REQUIRED');
-          assert.equal(
-            await page.evaluate(() =>
-              document
-                .querySelector('#sl-provider-chips [data-chip-id="mapillary"]')
-                .classList.contains('chip-error'),
-            ),
-            true,
-            'the keyless provider chip reads as an error',
-          );
-        },
+        () => assertKeylessGate(page),
       );
       console.log(
         'keyless run complete (no MAPILLARY_CLIENT_TOKEN on the server)',
@@ -503,6 +542,92 @@ async function main() {
         );
       },
     );
+    await step(
+      'the MapillaryJS viewer loads ahead of the first photo',
+      async () => {
+        // Prewarm stands the lazily imported viewer up in the panel's host; a
+        // broken dynamic import would otherwise only show at the first click.
+        await page.waitForSelector(
+          '#sl-viewer.mapillary-viewer .mapillary-dom',
+          {
+            timeout: 60_000,
+          },
+        );
+      },
+    );
+    if (fixtures)
+      await step(
+        'a key Mapillary rejects reads KEY REJECTED, stops asking, and clears when switched off',
+        async () => {
+          const statusText = (text) =>
+            page.waitForFunction(
+              (expected) =>
+                document.getElementById('sl-status').textContent === expected,
+              { timeout: 30_000 },
+              text,
+            );
+          fixture.tiles = 'rejected';
+          await page.click('#sl-status');
+          await statusText('OFF');
+          await page.click('#sl-status');
+          await statusText('KEY REJECTED');
+          const shown = await page.evaluate(() => ({
+            error: document.getElementById('sl-error').textContent,
+            errorHidden: document.getElementById('sl-error').hidden,
+            controls: document.getElementById('sl-controls').disabled,
+            chip: document
+              .querySelector('#sl-provider-chips [data-chip-id="mapillary"]')
+              .classList.contains('chip-error'),
+          }));
+          assert.match(shown.error, /rejected MAPILLARY_CLIENT_TOKEN/);
+          assert.equal(shown.errorHidden, false);
+          assert.equal(shown.controls, true);
+          assert.equal(shown.chip, true);
+          // Panning asks for nothing more: the verdict holds for every tile.
+          const asked = fixture.tileRequests;
+          await page.evaluate(() => {
+            const v = window.__godsEyeView.viewer;
+            const C = v.camera.positionCartographic.constructor;
+            v.camera.setView({
+              destination: v.scene.globe.ellipsoid.cartographicToCartesian(
+                C.fromDegrees(-121.47, 38.6, 900),
+              ),
+              orientation: { heading: 0, pitch: -1.3, roll: 0 },
+            });
+          });
+          await sleep(1500);
+          assert.equal(
+            fixture.tileRequests,
+            asked,
+            'no tile requests while rejected',
+          );
+          // Off clears the message; with a good key it comes back as ON.
+          await page.click('#sl-status');
+          await statusText('OFF');
+          assert.equal(
+            await page.$eval(
+              '#sl-error',
+              (node) => node.hidden || !node.textContent,
+            ),
+            true,
+            'no stale error while the layer is off',
+          );
+          fixture.tiles = 'ok';
+          await page.click('#sl-status');
+          await page.waitForFunction(
+            () => {
+              const u = window.__godsEyeView.dataManager.layers
+                .get('street-level')
+                .module.getUIState();
+              return (
+                u.coverage.count > 0 && !u.coverage.loading && !u.keyRequired
+              );
+            },
+            { timeout: 90_000 },
+          );
+          await statusText('ON');
+        },
+      );
     await photoStep(
       'opening the nearest image shows the viewer with a caption',
       async () => {
@@ -601,7 +726,8 @@ async function main() {
         assert.match(view.href, /mapillary\.com\/app\/\?pKey=/);
       },
     );
-    await step('FOLLOW is offered only on the Google 3D map', async () => {
+    // FOLLOW needs an open photo as well as Google 3D: a photo step.
+    await photoStep('FOLLOW is offered only on the Google 3D map', async () => {
       const stacks = () => window.__godsEyeView.mapStackController;
       const follow = () =>
         page.$eval('#sl-follow-btn', (node) => ({
@@ -931,6 +1057,26 @@ async function main() {
         await sleep(600);
       },
     );
+    if (fixtures)
+      await step(
+        'keyless install (a second page, no key on the server) gates the controls and reports KEY REQUIRED',
+        async () => {
+          const keyless = await browser.newPage();
+          await keyless.setViewport(VIEWPORTS[0]);
+          await serveFixtures(keyless, {
+            configured: false,
+            tiles: 'ok',
+            tileRequests: 0,
+          });
+          watchErrors(keyless);
+          await boot(keyless, url);
+          await keyless.click(
+            '.panel-collapse-btn[data-collapse-target="street-level-panel"]',
+          );
+          await assertKeylessGate(keyless);
+          await keyless.close();
+        },
+      );
     await step('no page errors', () => {
       assert.deepEqual(errors, []);
     });
