@@ -132,21 +132,34 @@ async function main() {
         };
       }, PANEL_ID);
     /** Wait until the CCTV box has held still for ten animation frames. */
-    const settle = () =>
-      page.waitForFunction(
-        (id) => {
-          const r = document.getElementById(id).getBoundingClientRect();
-          const box = `${r.left},${r.top},${r.width},${r.height}`;
-          if (window.__qaLastBox === box) window.__qaStill += 1;
-          else {
-            window.__qaLastBox = box;
-            window.__qaStill = 0;
-          }
-          return window.__qaStill >= 10;
-        },
-        { polling: 'raf', timeout: 15_000 },
-        PANEL_ID,
-      );
+    /**
+     * Best effort: wait until the CCTV box (to the whole pixel) has held still
+     * for half a second. The lift is checked against the box at pointerdown,
+     * so a rail that keeps nudging the panel only costs the wait, not the run.
+     */
+    const settle = async () => {
+      try {
+        await page.waitForFunction(
+          (id) => {
+            const r = document.getElementById(id).getBoundingClientRect();
+            const box = [r.left, r.top, r.width, r.height]
+              .map(Math.round)
+              .join(',');
+            const now = performance.now();
+            if (window.__qaLastBox !== box) {
+              window.__qaLastBox = box;
+              window.__qaSince = now;
+            }
+            return now - window.__qaSince >= 500;
+          },
+          { polling: 100, timeout: 20_000 },
+          PANEL_ID,
+        );
+      } catch (error) {
+        if (error?.name !== 'TimeoutError') throw error;
+        console.log('note: the CCTV panel was still moving; lifting anyway');
+      }
+    };
     const headerPoint = async () => {
       const rect = await page.evaluate((id) => {
         const title = document.querySelector(
