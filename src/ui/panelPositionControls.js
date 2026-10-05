@@ -52,6 +52,21 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+/**
+ * Only a mouse or pen lifts and resizes a portable panel. On a phone the
+ * rail is a scroll container, so a finger on a header is a swipe.
+ */
+function isPrecisePointer(event) {
+  const pointerType = event.pointerType || 'mouse';
+  return pointerType === 'mouse' || pointerType === 'pen';
+}
+
+/** Inline geometry a cancelled gesture puts back. */
+function geometryOf(panelEl) {
+  const { left, top, width, height } = panelEl.style;
+  return { left, top, width, height };
+}
+
 export class PanelPositionControls {
   /**
    * @param {object} options
@@ -548,7 +563,7 @@ export class PanelPositionControls {
     });
     let lastPress = null;
     this.listen(handleEl, 'pointerdown', (event) => {
-      if (event.button !== 0) return;
+      if (event.button !== 0 || !isPrecisePointer(event)) return;
       const interactive = event.target.closest?.(INTERACTIVE_SELECTOR);
       if (interactive && !interactive.matches('.panel-collapse-btn')) return;
 
@@ -574,6 +589,8 @@ export class PanelPositionControls {
       const startX = event.clientX;
       const startY = event.clientY;
       let dragging = false;
+      let lifted = false;
+      let before = null;
       let offsetX = 0;
       let offsetY = 0;
       let width = 0;
@@ -594,7 +611,8 @@ export class PanelPositionControls {
           offsetY = startY - rect.top;
           width = rect.width;
           height = rect.height;
-          this._liftPanelOut(panelId, panelEl, rect);
+          before = geometryOf(panelEl);
+          lifted = this._liftPanelOut(panelId, panelEl, rect);
           panelEl.classList.add('panel-dragging');
           this._promotePanelZ(panelEl);
         }
@@ -615,7 +633,7 @@ export class PanelPositionControls {
         panelEl.classList.remove('panel-dragging');
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onUp);
+        window.removeEventListener('pointercancel', onCancel);
         this._cancelDrag = null;
       };
       const onUp = () => {
@@ -628,12 +646,31 @@ export class PanelPositionControls {
         this._savePanelPosition(panelId, panelEl);
         this._onPanelResized?.(panelId);
       };
+      const onCancel = () => {
+        cancel();
+        if (dragging)
+          this._revertPanelGesture(panelId, panelEl, lifted, before);
+      };
 
       this._cancelDrag = cancel;
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', onUp);
+      window.addEventListener('pointercancel', onCancel);
     });
+  }
+
+  /**
+   * The browser took a gesture back (pointercancel): leave no trace and save
+   * nothing. A panel the gesture lifted returns to its rail; a window that
+   * was already floating returns to where it was.
+   */
+  _revertPanelGesture(panelId, panelEl, lifted, before) {
+    if (lifted) {
+      this._resetPanelPosition(panelId);
+      return;
+    }
+    Object.assign(panelEl.style, before);
+    this._onPanelResized?.(panelId);
   }
 
   /**
@@ -661,63 +698,76 @@ export class PanelPositionControls {
   }
 
   _startPanelResize(event, panelId, panelEl, dir, limits) {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || !isPrecisePointer(event)) return;
     event.preventDefault();
     this._cancelDrag?.();
-    const rect = panelEl.getBoundingClientRect();
-    this._liftPanelOut(panelId, panelEl, rect);
-    const startBox = {
-      left: Math.round(rect.left),
-      top: Math.round(rect.top),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height),
-    };
     const startX = event.clientX;
     const startY = event.clientY;
+    // Set once the pointer has travelled: a plain click on an edge (or on
+    // the globe just beside a docked panel) must not lift it out.
+    let startBox = null;
+    let lifted = false;
+    let before = null;
     const apply = ({ left, top, width, height }) => {
       panelEl.style.left = `${left}px`;
       panelEl.style.top = `${top}px`;
       panelEl.style.width = `${width}px`;
       panelEl.style.height = `${height}px`;
     };
-    panelEl.classList.add('panel-resizing');
-    this._promotePanelZ(panelEl);
-    apply(startBox);
+    const begin = () => {
+      const rect = panelEl.getBoundingClientRect();
+      before = geometryOf(panelEl);
+      lifted = this._liftPanelOut(panelId, panelEl, rect);
+      startBox = {
+        left: Math.round(rect.left),
+        top: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      };
+      panelEl.classList.add('panel-resizing');
+      this._promotePanelZ(panelEl);
+      apply(startBox);
+    };
 
     const onMove = (moveEvent) => {
+      const dx = moveEvent.clientX - startX;
+      const dy = moveEvent.clientY - startY;
+      if (!startBox) {
+        if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+        begin();
+      }
       moveEvent.preventDefault();
       apply(
-        resizeBox(
-          startBox,
-          dir,
-          moveEvent.clientX - startX,
-          moveEvent.clientY - startY,
-          {
-            minWidth: limits.width,
-            minHeight: limits.height,
-            viewportWidth: window.innerWidth,
-            viewportHeight: window.innerHeight,
-          },
-        ),
+        resizeBox(startBox, dir, dx, dy, {
+          minWidth: limits.width,
+          minHeight: limits.height,
+          viewportWidth: window.innerWidth,
+          viewportHeight: window.innerHeight,
+        }),
       );
     };
     const cancel = () => {
       panelEl.classList.remove('panel-resizing');
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('pointercancel', onCancel);
       this._cancelDrag = null;
     };
     const onUp = () => {
       cancel();
+      if (!startBox) return;
       this._savePanelPosition(panelId, panelEl);
       this._onPanelResized?.(panelId);
+    };
+    const onCancel = () => {
+      cancel();
+      if (startBox) this._revertPanelGesture(panelId, panelEl, lifted, before);
     };
 
     this._cancelDrag = cancel;
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    window.addEventListener('pointercancel', onCancel);
   }
 
   destroy() {

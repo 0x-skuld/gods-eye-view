@@ -66,6 +66,9 @@ class FakeNode {
   getAttribute(key) {
     return this.attributes.get(key) ?? null;
   }
+  removeAttribute(key) {
+    this.attributes.delete(key);
+  }
   appendChild(child) {
     return this.insertBefore(child, null);
   }
@@ -95,6 +98,12 @@ class FakeNode {
       if (current === this) return true;
     return false;
   }
+  get isConnected() {
+    return this.ownerDocument?.contains(this) === true;
+  }
+  focus() {
+    this.ownerDocument.activeElement = this;
+  }
   closest(selector) {
     const name = selector.replace(/^\./, '');
     for (let node = this; node; node = node.parent)
@@ -110,18 +119,33 @@ class FakeNode {
   querySelector(selector) {
     return this.querySelectorAll(selector)[0] || null;
   }
-  querySelectorAll(selector) {
-    const byId = /^#(.+)$/.exec(selector);
-    const byData = /^\[data-([a-z-]+)\]$/.exec(selector);
-    const key = byData?.[1].replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-    return [...this.walk()].filter((node) =>
-      byId ? node.id === byId[1] : key ? key in node.dataset : false,
-    );
+  /** `#id`, `[data-x]`, and the tag / attribute forms of a focusable list. */
+  matches(selector) {
+    return selector.split(',').some((part) => {
+      const one = part.trim();
+      const byId = /^#(.+)$/.exec(one);
+      if (byId) return this.id === byId[1];
+      const byData = /^\[data-([a-z-]+)\]$/.exec(one);
+      if (byData)
+        return (
+          byData[1].replace(/-([a-z])/g, (_, c) => c.toUpperCase()) in
+          this.dataset
+        );
+      if (one === '[tabindex]:not([tabindex="-1"])')
+        return ![null, '-1'].includes(this.getAttribute('tabindex'));
+      const byTag = /^([a-z]+)(\[href\])?(:not\(\[disabled\]\))?$/.exec(one);
+      if (!byTag || this.tagName !== byTag[1].toUpperCase()) return false;
+      if (byTag[2] && this.getAttribute('href') === null) return false;
+      return !(byTag[3] && this.disabled);
+    });
   }
-  addEventListener(type, listener, { signal } = {}) {
+  querySelectorAll(selector) {
+    return [...this.walk()].filter((node) => node.matches(selector));
+  }
+  addEventListener(type, listener, { signal, capture = false } = {}) {
     if (signal?.aborted) return;
-    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
-    this.listeners.get(type).add(listener);
+    if (!this.listeners.has(type)) this.listeners.set(type, new Map());
+    this.listeners.get(type).set(listener, capture);
     signal?.addEventListener('abort', () =>
       this.listeners.get(type)?.delete(listener),
     );
@@ -129,16 +153,45 @@ class FakeNode {
   removeEventListener(type, listener) {
     this.listeners.get(type)?.delete(listener);
   }
-  /** Deliver to this node, then bubble to its ancestors with the same target. */
+  /**
+   * Capture down from the document, then deliver to this node and bubble
+   * back up with the same target; `stopPropagation` ends the trip.
+   */
   dispatchEvent(event) {
+    let stopped = false;
     const delivered = {
       type: event.type,
       target: this,
       bubbles: event.bubbles,
+      key: event.key,
+      shiftKey: event.shiftKey === true,
+      defaultPrevented: false,
+      preventDefault() {
+        this.defaultPrevented = true;
+      },
+      stopPropagation() {
+        stopped = true;
+      },
     };
-    for (let node = this; node; node = delivered.bubbles ? node.parent : null)
-      for (const listener of [...(node.listeners.get(event.type) || [])])
-        listener(delivered);
+    const path = [];
+    for (let node = this; node; node = node.parent) path.push(node);
+    const run = (node, phase) => {
+      for (const [listener, capture] of [
+        ...(node.listeners.get(event.type) || []),
+      ])
+        if (phase === 'target' || capture === (phase === 'capture'))
+          listener(delivered);
+    };
+    for (const node of path.slice(1).reverse()) {
+      run(node, 'capture');
+      if (stopped) return true;
+    }
+    run(this, 'target');
+    if (!delivered.bubbles) return true;
+    for (const node of path.slice(1)) {
+      if (stopped) return true;
+      run(node, 'bubble');
+    }
     return true;
   }
   click() {
@@ -148,39 +201,48 @@ class FakeNode {
 
 /** The Street Level panel's body, as layer-panels.html lays it out. */
 function panelDom() {
-  const document = {
+  const document = new FakeNode(null, '#document');
+  Object.assign(document, {
+    ownerDocument: document,
     activeElement: null,
-    body: null,
     createElement: (tag) => new FakeNode(document, tag),
-  };
-  document.body = new FakeNode(document, 'body');
-  const root = new FakeNode(document, 'section', { id: 'street-level-panel' });
+  });
+  document.body = document.appendChild(new FakeNode(document, 'body'));
+  const root = document.body.appendChild(
+    new FakeNode(document, 'section', { id: 'street-level-panel' }),
+  );
   const add = (parent, tag, options) =>
     parent.appendChild(new FakeNode(document, tag, options));
+  add(root, 'button', { id: 'sl-status' });
   for (const id of [
-    'sl-status',
     'sl-provider-chips',
     'sl-error',
     'sl-error-text',
     'sl-since',
     'sl-since-label',
     'sl-legend',
-    'sl-follow-btn',
-    'sl-viewer-expand',
-    'sl-viewer-close',
-    'sl-viewer-placeholder',
-    'sl-image-by',
-    'sl-image-when',
-    'sl-image-link',
     'sl-coverage-meta',
   ])
     add(root, id === 'sl-legend' ? 'ul' : 'div', { id });
   const controls = add(root, 'fieldset', { id: 'sl-controls' });
   for (const pano of ['all', 'pano', 'flat'])
     add(controls, 'button', { dataset: { slPano: pano } });
-  const wrap = add(root, 'div', { id: 'sl-viewer-wrap' });
-  add(wrap, 'div', { id: 'sl-viewer' });
-  return { document, root };
+  // The viewer's own tool bar lives inside the wrap, as in the markup.
+  const wrap = add(controls, 'div', { id: 'sl-viewer-wrap' });
+  for (const id of ['sl-viewer-expand', 'sl-follow-btn', 'sl-viewer-close'])
+    add(wrap, 'button', { id });
+  for (const id of [
+    'sl-viewer-placeholder',
+    'sl-viewer',
+    'sl-image-by',
+    'sl-image-when',
+    'sl-image-link',
+  ])
+    add(wrap, id === 'sl-image-link' ? 'a' : 'div', { id });
+  // The globe's canvas is focusable too (tabindex=0).
+  const globe = add(document.body, 'canvas');
+  globe.setAttribute('tabindex', '0');
+  return { document, root, globe };
 }
 
 /** Run `fn` with the fake document and an immediate animation frame. */
@@ -503,4 +565,79 @@ test('the viewer is resized when it opens, not on every render (review #8)', () 
     layer.publish(uiState({ open: false }));
     layer.publish(uiState({ open: true }));
     assert.equal(layer.calls.resize, 2, 'the next photo resizes again');
+  }));
+
+/* ── The expanded viewer as a dialog, and where focus goes ─────────────── */
+
+const keydown = (target, key, { shiftKey = false } = {}) =>
+  target.dispatchEvent({ type: 'keydown', bubbles: true, key, shiftKey });
+
+/** The map's own Esc handler (selection.js) listens on the document. */
+function mapEscape(dom) {
+  const reached = [];
+  dom.document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') reached.push(event);
+  });
+  return reached;
+}
+
+test('Esc shrinks the expanded viewer after focus left it, and the map keeps its selection', () =>
+  withDom(async (dom) => {
+    const { controls } = stubPanel(dom, uiState({ open: true }));
+    const reached = mapEscape(dom);
+    controls.setViewerExpanded(true);
+    dom.globe.focus(); // a click on the globe
+    keydown(dom.globe, 'Escape');
+    assert.equal(controls.isViewerExpanded(), false);
+    assert.equal(reached.length, 0, 'the selected sequence was not cleared');
+    keydown(dom.globe, 'Escape');
+    assert.equal(reached.length, 1, 'once shrunk, Esc is the map’s again');
+    controls.destroy();
+  }));
+
+test('Tab from outside the expanded viewer brings focus back into it', () =>
+  withDom(async (dom) => {
+    const { controls } = stubPanel(dom, uiState({ open: true }));
+    controls.setViewerExpanded(true);
+    dom.globe.focus();
+    keydown(dom.globe, 'Tab');
+    const wrap = dom.document.body.querySelector('#sl-viewer-wrap');
+    assert.equal(
+      dom.document.activeElement,
+      wrap.querySelector('#sl-viewer-expand'),
+    );
+    keydown(dom.document.activeElement, 'Tab', { shiftKey: true });
+    assert.equal(
+      dom.document.activeElement,
+      wrap.querySelector('#sl-viewer-close'),
+      'Shift+Tab wraps to the last control',
+    );
+    controls.destroy();
+  }));
+
+test('closing the image from its × button leaves focus on the panel, not <body>', () =>
+  withDom(async (dom) => {
+    const { layer, controls } = stubPanel(dom, uiState({ open: true }));
+    dom.root.querySelector('#sl-viewer-close').focus();
+    layer.publish(uiState({ open: false }));
+    assert.equal(dom.root.querySelector('#sl-viewer-wrap').hidden, true);
+    assert.equal(
+      dom.document.activeElement,
+      dom.root.querySelector('#sl-status'),
+    );
+    controls.destroy();
+  }));
+
+test('an image closed while expanded does not return focus into the hidden viewer', () =>
+  withDom(async (dom) => {
+    const { layer, controls } = stubPanel(dom, uiState({ open: true }));
+    dom.root.querySelector('#sl-viewer-expand').focus();
+    controls.setViewerExpanded(true); // remembers EXPAND to return to
+    layer.publish(uiState({ open: false }));
+    assert.equal(controls.isViewerExpanded(), false);
+    assert.equal(
+      dom.document.activeElement,
+      dom.root.querySelector('#sl-status'),
+    );
+    controls.destroy();
   }));

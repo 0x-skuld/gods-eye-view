@@ -34,8 +34,10 @@ function fixture() {
       querySelector: () => null,
       querySelectorAll: () => [],
       closest: () => null,
+      setAttribute() {},
       removeAttribute() {},
       appendChild() {},
+      remove() {},
       getBoundingClientRect: () => ({
         left: 100,
         top: 80,
@@ -49,6 +51,7 @@ function fixture() {
   globalThis.document = Object.assign(new EventTarget(), {
     getElementById: () => null,
     querySelectorAll: () => [],
+    createElement: () => element(),
   });
   globalThis.window = Object.assign(new EventTarget(), {
     innerWidth: 1440,
@@ -241,6 +244,117 @@ test('renumbering the z ladder never drops a window below the docked panels', ()
     for (const node of [...windows, top])
       assert.ok(Number(node.style.zIndex) > 110, `z ${node.style.zIndex}`);
     assert.ok(Number(top.style.zIndex) > Number(windows[2].style.zIndex));
+  } finally {
+    f.restore();
+  }
+});
+
+/** A portable panel still in its rail, with its header and resize handles. */
+function dockedPanel(f, id) {
+  const panel = f.element();
+  const handle = f.element();
+  panel.id = id;
+  const portable = { panel, min: { width: 320, height: 280 } };
+  f.owner._portablePanels.set(id, portable);
+  f.owner._makePanelDraggable(id, panel, handle);
+  f.owner._makePanelResizable(id, panel, portable.min);
+  const edges = Object.fromEntries(
+    f.owner._resizeHandles.map((node) => [node.dataset.dir, node]),
+  );
+  return { panel, handle, edges };
+}
+
+/** A pointer event; `pointerType` defaults to what a mouse reports. */
+function pointer(target, type, { x = 200, y = 90, pointerType = 'mouse' }) {
+  const event = new Event(type, { cancelable: true });
+  for (const [key, value] of Object.entries({
+    button: 0,
+    clientX: x,
+    clientY: y,
+    pointerType,
+  }))
+    Object.defineProperty(event, key, { value });
+  target.dispatchEvent(event);
+  return event;
+}
+
+const POSITION_KEY = 'godsEyeView.v8.panelPos.street-level-panel';
+
+test('a click on a docked panel’s resize edge leaves it docked and stores nothing', () => {
+  const f = fixture();
+  try {
+    const { panel, edges } = dockedPanel(f, 'street-level-panel');
+    pointer(edges.w, 'pointerdown', { x: 101, y: 200 });
+    pointer(window, 'pointermove', { x: 103, y: 201 }); // a jittery click
+    pointer(window, 'pointerup', { x: 103, y: 201 });
+    assert.equal(panel.classList.contains('panel-floating'), false);
+    assert.equal(panel.style.width, undefined, 'no size was pinned');
+    assert.equal(f.store.has(POSITION_KEY), false);
+    assert.deepEqual(f.calls.resized, []);
+
+    // A real resize still lifts it out and remembers the window.
+    pointer(edges.w, 'pointerdown', { x: 101, y: 200 });
+    pointer(window, 'pointermove', { x: 61, y: 200 });
+    pointer(window, 'pointerup', { x: 61, y: 200 });
+    assert.equal(panel.classList.contains('panel-floating'), true);
+    assert.equal(JSON.parse(f.store.get(POSITION_KEY)).floating, true);
+  } finally {
+    f.restore();
+  }
+});
+
+test('a touch on the header or an edge does not lift the panel, and the rail can still scroll', () => {
+  const f = fixture();
+  try {
+    const { panel, handle, edges } = dockedPanel(f, 'street-level-panel');
+    const press = pointer(handle, 'pointerdown', { pointerType: 'touch' });
+    assert.equal(press.defaultPrevented, false, 'the swipe can scroll');
+    pointer(window, 'pointermove', { y: 190, pointerType: 'touch' });
+    pointer(window, 'pointerup', { y: 190, pointerType: 'touch' });
+    pointer(edges.s, 'pointerdown', { y: 500, pointerType: 'touch' });
+    pointer(window, 'pointermove', { y: 600, pointerType: 'touch' });
+    pointer(window, 'pointerup', { y: 600, pointerType: 'touch' });
+    assert.equal(panel.classList.contains('panel-floating'), false);
+    assert.equal(f.store.has(POSITION_KEY), false);
+  } finally {
+    f.restore();
+  }
+});
+
+test('a pointercancel mid-drag saves nothing and puts the panel back', () => {
+  const f = fixture();
+  try {
+    const { panel, handle, edges } = dockedPanel(f, 'street-level-panel');
+    pointer(handle, 'pointerdown', {});
+    pointer(window, 'pointermove', { x: 260, y: 140 });
+    assert.equal(panel.classList.contains('panel-floating'), true, 'lifted');
+    pointer(window, 'pointercancel', { x: 260, y: 140 });
+    assert.equal(panel.classList.contains('panel-floating'), false, 'docked');
+    assert.equal(f.store.has(POSITION_KEY), false);
+
+    pointer(edges.e, 'pointerdown', { x: 459 });
+    pointer(window, 'pointermove', { x: 520 });
+    pointer(window, 'pointercancel', { x: 520 });
+    assert.equal(panel.classList.contains('panel-floating'), false);
+    assert.equal(f.store.has(POSITION_KEY), false);
+  } finally {
+    f.restore();
+  }
+});
+
+test('a pointercancel while dragging a floating window returns it to where it was', () => {
+  const f = fixture();
+  try {
+    const { panel, handle } = floatingPanel(f, 'cctv-panel');
+    const stored = f.store.get('godsEyeView.v8.panelPos.cctv-panel');
+    pointer(handle, 'pointerdown', {});
+    pointer(window, 'pointermove', { x: 400, y: 300 });
+    assert.notEqual(panel.style.left, '100px', 'it moved');
+    pointer(window, 'pointercancel', { x: 400, y: 300 });
+    assert.equal(panel.style.left, '100px');
+    assert.equal(panel.style.top, '80px');
+    assert.equal(panel.classList.contains('panel-floating'), true);
+    assert.equal(f.store.get('godsEyeView.v8.panelPos.cctv-panel'), stored);
   } finally {
     f.restore();
   }

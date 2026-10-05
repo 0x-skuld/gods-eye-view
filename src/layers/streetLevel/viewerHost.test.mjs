@@ -1,6 +1,34 @@
 import assert from 'node:assert/strict';
+import { registerHooks } from 'node:module';
 import test from 'node:test';
 import { createViewerHost } from './viewerHost.js';
+
+// MapillaryJS needs a browser; the adapter tests swap in a stand-in library.
+// Every import gets a fresh copy that waits for the current test's gate, so
+// each test controls when its "download" finishes.
+let libraryImports = 0;
+registerHooks({
+  resolve(specifier, context, next) {
+    if (!specifier.startsWith('mapillary-js')) return next(specifier, context);
+    const kind = specifier === 'mapillary-js' ? 'library' : 'asset';
+    return {
+      url: `gev-test-stub:mapillary-js/${kind}?${++libraryImports}`,
+      shortCircuit: true,
+    };
+  },
+  load(url, context, next) {
+    if (!url.startsWith('gev-test-stub:mapillary-js/'))
+      return next(url, context);
+    const source = url.includes('/library?')
+      ? 'const lib = await globalThis.__gevMapillaryLibrary();\n' +
+        'export const Viewer = lib.Viewer;\n' +
+        'export const RenderMode = lib.RenderMode;\n'
+      : 'export default {};\n';
+    return { format: 'module', shortCircuit: true, source };
+  },
+});
+const { createMapillaryViewer } =
+  await import('./providers/mapillary/viewer.js');
 
 function harness(adapter) {
   const state = {
@@ -18,14 +46,23 @@ function harness(adapter) {
   return { state, host: createViewerHost({ state, parts }) };
 }
 
-function fakeAdapter({ failMounts = 0 } = {}) {
+/**
+ * A stand-in adapter. Like the real one, concurrent mounts share one
+ * construction (`gate` holds it open) and `unmount` destroys the viewer that
+ * every later `open` needs.
+ */
+function fakeAdapter({ failMounts = 0, gate = null } = {}) {
   const calls = { mount: 0, open: [], unmount: 0, listeners: 0 };
   let emit = null;
+  let mounted = false;
   return {
     calls,
     async mount() {
       calls.mount++;
-      if (calls.mount <= failMounts) throw new Error('library failed to load');
+      const attempt = calls.mount;
+      await gate?.promise;
+      if (attempt <= failMounts) throw new Error('library failed to load');
+      mounted = true;
     },
     /** A pose event from the library, as MapillaryJS fires them. */
     emitPose(id) {
@@ -40,12 +77,14 @@ function fakeAdapter({ failMounts = 0 } = {}) {
       });
     },
     async open(id) {
+      if (!mounted) throw new Error('viewer is not mounted');
       calls.open.push(id);
       this.emitPose(id);
     },
     close() {},
     unmount() {
       calls.unmount++;
+      mounted = false;
     },
     resize() {},
     onPose(listener) {
@@ -145,4 +184,100 @@ test('a pose that arrives after the photo was closed does not bring it back', as
   assert.equal(state.street.imageId, null);
   assert.equal(state.street.sequenceId, null);
   assert.deepEqual(state.street, before);
+});
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+test('switching the layer off and on during a cold first open keeps the shared viewer', async () => {
+  const gate = deferred();
+  const adapter = fakeAdapter({ gate });
+  const { state, host } = harness(adapter);
+  const first = host.open('mapillary', 'a'); // the library is still loading
+  host.unmount(); // layer off …
+  const second = host.open('mapillary', 'b'); // … on again, and a new click
+  gate.resolve();
+  await Promise.all([first, second]);
+  assert.equal(adapter.calls.unmount, 0, 'the outdated mount left it alone');
+  assert.equal(adapter.calls.listeners, 1);
+  assert.equal(state.street.error, null);
+  assert.equal(state.street.imageId, 'b');
+  await host.open('mapillary', 'c');
+  assert.equal(state.street.error, null, 'later opens are not stuck');
+  assert.equal(state.street.imageId, 'c');
+});
+
+/** MapillaryJS, counting live viewers (each holds a WebGL context). */
+function fakeLibrary() {
+  const gate = deferred();
+  const viewers = { created: 0, live: 0 };
+  class Viewer {
+    constructor() {
+      viewers.created++;
+      viewers.live++;
+      this.removed = false;
+    }
+    on() {}
+    async getPosition() {
+      return { lng: 1, lat: 2 };
+    }
+    async getPointOfView() {
+      return { bearing: 10, tilt: 0 };
+    }
+    async moveTo(id) {
+      return { id, cameraType: 'perspective', sequenceId: 's' };
+    }
+    remove() {
+      if (this.removed) return;
+      this.removed = true;
+      viewers.live--;
+    }
+    setRenderMode() {}
+    resize() {}
+  }
+  globalThis.__gevMapillaryLibrary = async () => {
+    await gate.promise;
+    return { Viewer, RenderMode: {} };
+  };
+  return { gate, viewers };
+}
+
+test('the Mapillary viewer survives the layer going off and on during its first download', async () => {
+  const { gate, viewers } = fakeLibrary();
+  const adapter = createMapillaryViewer({ source: { token: 't' } });
+  const { state, host } = harness(adapter);
+  const first = host.open('mapillary', 'img1');
+  await Promise.resolve();
+  host.unmount();
+  const second = host.open('mapillary', 'img2');
+  await Promise.resolve();
+  gate.resolve();
+  await Promise.all([first, second]);
+  assert.equal(state.street.error, null);
+  assert.equal(state.street.imageId, 'img2');
+  await host.open('mapillary', 'img3');
+  assert.equal(state.street.error, null, 'later opens are not stuck');
+  assert.equal(state.street.imageId, 'img3');
+  assert.equal(viewers.live, 1);
+});
+
+test('a Mapillary viewer unmounted mid-download is never built; the next mount builds afresh', async () => {
+  const { gate, viewers } = fakeLibrary();
+  const adapter = createMapillaryViewer({ source: { token: 't' } });
+  const element = {};
+  const stale = adapter.mount(element);
+  adapter.unmount();
+  const fresh = adapter.mount(element);
+  gate.resolve();
+  await assert.rejects(stale, /unmounted/);
+  await fresh;
+  assert.equal(viewers.created, 1, 'only the fresh mount built one');
+  await adapter.open('x');
+  adapter.unmount();
+  assert.equal(viewers.live, 0, 'nothing left holding a WebGL context');
 });

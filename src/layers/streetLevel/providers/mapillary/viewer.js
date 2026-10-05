@@ -14,6 +14,8 @@ export function createMapillaryViewer({ source, render } = {}) {
   let prewarming = false;
   /** In-flight viewer construction, so pre-warm and open never build two. */
   let creating = null;
+  /** Bumped by `unmount`, so a construction it overtook builds nothing. */
+  let generation = 0;
   let renderMode = 'letterbox';
   /** Metadata of the image on screen; pov/position events reuse it. */
   let current = null;
@@ -106,8 +108,12 @@ export function createMapillaryViewer({ source, render } = {}) {
   }
 
   async function createViewer(host) {
+    const built = generation;
     destroyViewer();
     const { Viewer } = await ensureLibrary();
+    // Unmounted (layer off) while the library loaded: a viewer built now
+    // would hold a WebGL context nobody releases.
+    if (built !== generation) throw new Error('Mapillary viewer was unmounted');
     viewer = new Viewer({
       accessToken: source.token,
       container: host,
@@ -165,6 +171,9 @@ export function createMapillaryViewer({ source, render } = {}) {
 
     unmount() {
       pendingOpen = null;
+      // The next mount builds afresh rather than joining a stale build.
+      generation++;
+      creating = null;
       destroyViewer();
     },
 

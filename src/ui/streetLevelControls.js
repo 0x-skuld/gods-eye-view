@@ -121,8 +121,13 @@ export class StreetLevelControls {
     } catch {
       /* storage unavailable */
     }
-    // The expanded viewer is a dialog: Esc closes it, Tab stays inside.
-    this.listen(el.viewerWrap, 'keydown', (event) => this._onDialogKey(event));
+    // The expanded viewer is a dialog: Esc shrinks it, Tab stays inside.
+    // Listen on the document, ahead of everything else, so both still hold
+    // once focus has left it (a click on the globe) and Esc never reaches
+    // the map's own handler, which would clear the selected sequence.
+    this.listen(document, 'keydown', (event) => this._onDialogKey(event), {
+      capture: true,
+    });
     // MapillaryJS only tracks window resizes; the panel resizes on its own.
     if (typeof ResizeObserver === 'function' && el.viewer) {
       let queued = false;
@@ -258,9 +263,15 @@ export class StreetLevelControls {
       this._wrapHome = null;
       const target = this._expandReturnFocus;
       this._expandReturnFocus = null;
-      if (target?.isConnected && typeof target.focus === 'function')
-        target.focus({ preventScroll: true });
-      else this._elements.viewerExpand?.focus?.({ preventScroll: true });
+      // A closed image hides the wrap: focus inside it would drop to <body>.
+      const reachable = (node) =>
+        node?.isConnected &&
+        typeof node.focus === 'function' &&
+        !(wrap.hidden && wrap.contains(node));
+      if (reachable(target)) target.focus({ preventScroll: true });
+      else if (reachable(this._elements.viewerExpand))
+        this._elements.viewerExpand.focus({ preventScroll: true });
+      else this._focusPanelControl();
     }
     const button = this._elements.viewerExpand;
     if (button) {
@@ -273,6 +284,14 @@ export class StreetLevelControls {
     }
     if (!on && dock) this.actions.dockPanel?.();
     requestAnimationFrame(() => this.layer.resizeViewer?.());
+  }
+
+  /** Park focus on a control that stays on screen while the viewer is hidden. */
+  _focusPanelControl() {
+    const el = this._elements;
+    const target =
+      el.status || el.providerChips?.querySelector('.data-toggle-chip');
+    target?.focus?.({ preventScroll: true });
   }
 
   _onDialogKey(event) {
@@ -391,7 +410,19 @@ export class StreetLevelControls {
   _renderViewer(view, state) {
     const el = this._elements;
     const { viewer } = view;
-    if (el.viewerWrap) el.viewerWrap.hidden = !viewer.open;
+    const wrap = el.viewerWrap;
+    if (wrap) {
+      // Closing the image (its × button) hides the wrap: move focus out
+      // first, or it drops to <body>. A shrink below returns it itself.
+      if (
+        !viewer.open &&
+        !wrap.hidden &&
+        !this.isViewerExpanded() &&
+        wrap.contains(document.activeElement)
+      )
+        this._focusPanelControl();
+      wrap.hidden = !viewer.open;
+    }
     if (!viewer.open && this.isViewerExpanded()) this.setViewerExpanded(false);
     if (el.viewerPlaceholder) el.viewerPlaceholder.hidden = !viewer.loading;
     if (el.followBtn) {

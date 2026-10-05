@@ -76,19 +76,19 @@ export function createViewerHost({ state, parts }) {
     }
     const adapter = entry.instance.viewer;
     const promise = (async () => {
-      const unsubscribe = adapter.onPose(applyPose);
-      try {
-        await adapter.mount(state.street.host);
-      } catch (error) {
-        unsubscribe();
-        throw error;
-      }
+      await adapter.mount(state.street.host);
       if (mounting?.promise !== promise) {
-        // Unmounted (layer off, provider switched) while loading.
-        unsubscribe();
-        adapter.unmount();
+        // Unmounted (layer off, provider switched) while loading. A newer
+        // mount of this provider shares the adapter and its viewer: tearing
+        // it down here would leave that mount active with no viewer.
+        const reused =
+          active?.id === entry.def.id || mounting?.id === entry.def.id;
+        if (!reused) adapter.unmount();
         throw new Error('Street-level viewer was closed');
       }
+      // Listen only once current: an outdated mount releasing the same
+      // `applyPose` would otherwise unhook the mount that replaced it.
+      const unsubscribe = adapter.onPose(applyPose);
       active = { id: entry.def.id, adapter, unsubscribe };
       warmed.delete(entry.def.id);
       adapter.setRenderMode?.(state.street.renderMode);

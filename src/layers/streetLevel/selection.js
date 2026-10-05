@@ -1,6 +1,12 @@
 import * as Cesium from 'cesium';
 import { STREET_LEVEL_LAYER_ID } from './policy.js';
 
+/**
+ * Minimum time between hover picks: ~8 `scene.pick` calls a second while the
+ * pointer moves, as the CCTV layer's hover does, never one per frame.
+ */
+const HOVER_PICK_INTERVAL_MS = 120;
+
 /** One click/hover handler for every provider's coverage and image cones. */
 export function createSelection({ state, parts }) {
   const { picking, input } = state.services;
@@ -43,33 +49,100 @@ export function createSelection({ state, parts }) {
 
   let hoverQueued = false;
   let hoverCursor = false;
-  /** Pointer cursor over anything this layer owns, so lines read as clickable. */
+  let hoverPosition = null;
+  let hoverLastPickAt = -Infinity;
+  let hoverTimer = null;
+  let cameraMoving = false;
+  let pointerButtons = 0;
+  let removeHoverWatchers = null;
+
+  function setHoverCursor(canvas, hit) {
+    if (hit && !hoverCursor) {
+      canvas.style.cursor = 'pointer';
+      hoverCursor = true;
+    } else if (!hit && hoverCursor) {
+      canvas.style.cursor = '';
+      hoverCursor = false;
+    }
+  }
+
+  function pickHover() {
+    hoverQueued = false;
+    const viewer = state.viewer;
+    // Switched off (or torn down) since the frame was queued.
+    if (!viewer || !state.enabled || !state.clickHandler) return;
+    // Orbiting, or a drag in progress: the pointer is the camera's.
+    if (cameraMoving || pointerButtons !== 0) return;
+    const canvas = viewer.scene?.canvas;
+    if (!canvas || viewer.isDestroyed?.()) return;
+    hoverLastPickAt = Date.now();
+    let hit = false;
+    try {
+      const picked = viewer.scene.pick(hoverPosition);
+      const id = picking?.resolvePickId
+        ? picking.resolvePickId(picked)
+        : picked?.id;
+      hit = ownsPick(id);
+    } catch {
+      hit = false;
+    }
+    setHoverCursor(canvas, hit);
+  }
+
+  /**
+   * Pointer cursor over anything this layer owns, so lines read as clickable.
+   * Picks the latest position at most every HOVER_PICK_INTERVAL_MS; a move
+   * inside the interval is picked when it ends, so the cursor never sticks.
+   */
   function onMove(movement) {
     const viewer = state.viewer;
-    if (!viewer || !state.enabled || hoverQueued) return;
+    if (!viewer || !state.enabled) return;
+    hoverPosition = movement.endPosition;
+    if (hoverQueued) return;
     hoverQueued = true;
-    requestAnimationFrame(() => {
-      hoverQueued = false;
-      const canvas = viewer.scene?.canvas;
-      if (!canvas || viewer.isDestroyed?.()) return;
-      let hit = false;
-      try {
-        const picked = viewer.scene.pick(movement.endPosition);
-        const id = picking?.resolvePickId
-          ? picking.resolvePickId(picked)
-          : picked?.id;
-        hit = ownsPick(id);
-      } catch {
-        hit = false;
-      }
-      if (hit && !hoverCursor) {
-        canvas.style.cursor = 'pointer';
-        hoverCursor = true;
-      } else if (!hit && hoverCursor) {
-        canvas.style.cursor = '';
-        hoverCursor = false;
-      }
+    const wait = hoverLastPickAt + HOVER_PICK_INTERVAL_MS - Date.now();
+    if (wait <= 0) {
+      requestAnimationFrame(pickHover);
+      return;
+    }
+    hoverTimer = setTimeout(() => {
+      hoverTimer = null;
+      requestAnimationFrame(pickHover);
+    }, wait);
+  }
+
+  /** Track what makes a hover pick pointless: camera motion, held buttons. */
+  function watchHover(viewer) {
+    const canvas = viewer.scene.canvas;
+    const camera = viewer.camera;
+    const onButtons = (event) => {
+      pointerButtons = event.buttons ?? 0;
+    };
+    for (const type of ['pointerdown', 'pointermove', 'pointerup'])
+      canvas.addEventListener?.(type, onButtons);
+    const removeStart = camera?.moveStart?.addEventListener(() => {
+      cameraMoving = true;
     });
+    const removeEnd = camera?.moveEnd?.addEventListener(() => {
+      cameraMoving = false;
+    });
+    removeHoverWatchers = () => {
+      for (const type of ['pointerdown', 'pointermove', 'pointerup'])
+        canvas.removeEventListener?.(type, onButtons);
+      removeStart?.();
+      removeEnd?.();
+    };
+  }
+
+  function unwatchHover() {
+    removeHoverWatchers?.();
+    removeHoverWatchers = null;
+    clearTimeout(hoverTimer);
+    hoverTimer = null;
+    hoverQueued = false;
+    hoverLastPickAt = -Infinity;
+    cameraMoving = false;
+    pointerButtons = 0;
   }
 
   function install(viewer) {
@@ -85,6 +158,7 @@ export function createSelection({ state, parts }) {
       onMove,
       Cesium.ScreenSpaceEventType.MOUSE_MOVE,
     );
+    watchHover(viewer);
     document.addEventListener('keydown', onKeyDown);
     picking?.registerPickOwner?.(STREET_LEVEL_LAYER_ID, ownsPick);
   }
@@ -92,6 +166,7 @@ export function createSelection({ state, parts }) {
   function uninstall() {
     // Nothing to undo for a layer that was never enabled.
     if (!state.clickHandler) return;
+    unwatchHover();
     if (hoverCursor && state.viewer?.scene?.canvas) {
       state.viewer.scene.canvas.style.cursor = '';
       hoverCursor = false;
