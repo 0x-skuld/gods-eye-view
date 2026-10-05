@@ -383,8 +383,8 @@ the speaker (`mayVoiceClaimSpeaker()`). Progress lines stay outside the reply
 lifecycle and Radio handoff. `turn.span` debug records carry generation and
 playback latency, silence, preamble and word-count figures. Caption
 transcription (`OPENAI_REALTIME_TRANSCRIBE_MODEL`, default on) is metered into
-the session cost and cap. The debug log omits transcripts and text unless
-`GEV_VOICE_LOG_CONTENT=1`.
+the session cost and cap. The debug log omits transcripts, text and tool
+arguments unless `GEV_VOICE_LOG_CONTENT=1`.
 
 Point and ask: `pointerContext.js` reads what the cursor is on. A Space hold
 is the pointing gesture: its keydown snapshot (released with the key) is sent
@@ -2939,7 +2939,7 @@ test:track` 43 tracking invariants · headless QA harnesses under
 > ISS pass prediction, and per-layer data attribution. Gate at close: unit 98/98, build clean,
 > track 19/19, + five QA harnesses (heading 16/16, sprites 9/9, cctv 5/5, failstate 5/5,
 > attribution 18/18). New modules: `src/data/{motionModel,aircraftMeta,aircraftClass,aircraftIcons,issPass,routePlausible,dataCredits}.js`.
-> The live runtime now declares 29 voice tools; the 17→20 count above is retained only as milestone history.
+> The live runtime now declares 30 voice tools; the 17→20 count above is retained only as milestone history.
 
 ## Canonical Docs Order
 

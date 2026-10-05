@@ -25,30 +25,41 @@ const REALTIME_DEBUG_LOG_MAX_PER_MIN = 120;
 
 /**
  * Fields that carry what people said or heard: transcripts, typed and spoken
- * text, streamed deltas and the span's quoted replies. They are dropped from
- * the persisted log unless content logging is explicitly enabled
+ * text, streamed deltas, structured tool arguments and the span's quoted
+ * replies. They are dropped from the persisted log unless content logging is explicitly enabled
  * (GEV_VOICE_LOG_CONTENT=1), so timing and tool diagnostics never retain
  * speech by default.
  */
-const VOICE_CONTENT_FIELDS = new Set([
+const VOICE_TEXT_FIELDS = new Set([
   'transcript',
   'text',
   'delta',
   'answer_text',
   'preamble_text',
 ]);
+const VOICE_CONTENT_MAX_DEPTH = 12;
+const VOICE_CONTENT_MAX_DEPTH_MARKER = '[omitted: max depth]';
 
-/** Replace spoken or typed content with its length. */
+/** Replace spoken or typed content and structured tool arguments. */
 function omitVoiceContent(value, depth = 0) {
-  if (depth > 12 || value === null || typeof value !== 'object') return value;
+  if (depth > VOICE_CONTENT_MAX_DEPTH) return VOICE_CONTENT_MAX_DEPTH_MARKER;
+  if (value === null || typeof value !== 'object') return value;
   if (Array.isArray(value))
     return value.map((item) => omitVoiceContent(item, depth + 1));
   const output = {};
   for (const [key, item] of Object.entries(value)) {
-    output[key] =
-      VOICE_CONTENT_FIELDS.has(key) && typeof item === 'string'
-        ? `[omitted ${item.length} chars]`
-        : omitVoiceContent(item, depth + 1);
+    if (key === 'arguments') {
+      output[key] =
+        typeof item === 'string'
+          ? `[omitted ${item.length} chars]`
+          : '[omitted]';
+      continue;
+    }
+    if (VOICE_TEXT_FIELDS.has(key) && typeof item === 'string') {
+      output[key] = `[omitted ${item.length} chars]`;
+      continue;
+    }
+    output[key] = omitVoiceContent(item, depth + 1);
   }
   return output;
 }
