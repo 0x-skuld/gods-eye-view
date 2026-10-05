@@ -1779,8 +1779,14 @@ export function vegvesenCameraToSource(feature) {
     fovDeg: 44,
     rangeM: 145,
     mountHeightM: 8,
-    // Norwegian road cameras run from sea level to mountain passes; the
-    // client's one-shot ground snap corrects this prior where tiles load.
+    // KNOWN LIMITATION: the feed's coordinates are 2D, so this is one flat
+    // prior for the whole country, while cameras run from sea level to
+    // mountain passes near 1,000 m (Haukelifjell, Sjonfjellet, Rugeldalen).
+    // The point-height prior and the client's one-shot ground snap correct it
+    // where they resolve; on a stack where neither does (no 3D tiles), a pass
+    // camera stays hundreds of metres below the terrain, the same risk the
+    // Caltrans pack documents. A per-camera height (e.g. Kartverket's keyless
+    // point-height API) would remove it.
     groundElevationM: 150,
     feedType: videoUrl ? 'hls' : 'image',
     url: videoUrl || imageUrl,

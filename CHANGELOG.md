@@ -6,7 +6,7 @@
   list is one keyless GeoJSON request to the agency's OGC API view of its
   DATEX 3.1 CCTV table, so no DATEX account is needed. Every working camera
   loads (~850; faulty ones are dropped) under one "Norway" category, and the
-  ~135 that publish HLS play as live video through the existing in-memory
+  ~135 working cameras that publish HLS play as live video through the existing in-memory
   relay with the still as fallback. Frames and manifests are pinned to each
   camera's own path on the agency hosts. `CCTV_VEGVESEN_ENABLED=0` disables
   the pack, `CCTV_VEGVESEN_MAX_SOURCES` caps it (keeping cameras nearest the

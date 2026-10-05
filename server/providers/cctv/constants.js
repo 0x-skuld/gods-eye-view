@@ -249,7 +249,10 @@ export const VEGVESEN_IMAGE_ORIGIN =
  * per-camera manifest path is registered. */
 export const VEGVESEN_VIDEO_URL = (cameraId) =>
   `https://kamera.vegvesen.no/public/${cameraId}/manifest.m3u8`;
-export const DEFAULT_VEGVESEN_MAX_SOURCES = 1000;
+/** Above the ~850 working cameras so a default install keeps them all, while
+ * staying close to them: the per-pack defaults are meant to sum to no more
+ * than DEFAULT_CCTV_MAX_SOURCES. */
+export const DEFAULT_VEGVESEN_MAX_SOURCES = 900;
 /** Hard ceiling on the catalog body. The whole country is ~800 KB. */
 export const VEGVESEN_MAX_CATALOG_BYTES = 8 * 1024 * 1024;
 /** Prioritization anchors: the largest cities from south to north, so a cap
