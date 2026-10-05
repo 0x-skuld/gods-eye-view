@@ -5,10 +5,9 @@ import { PanelPositionControls } from './panelPositionControls.js';
 /** Just enough DOM for PanelPositionControls' portable-panel paths. */
 function fixture() {
   const saved = Object.fromEntries(
-    ['document', 'window', 'localStorage', 'performance'].map((key) => [
-      key,
-      globalThis[key],
-    ]),
+    ['document', 'window', 'localStorage', 'performance', 'ResizeObserver'].map(
+      (key) => [key, globalThis[key]],
+    ),
   );
   const store = new Map();
   const element = () => {
@@ -355,6 +354,189 @@ test('a pointercancel while dragging a floating window returns it to where it wa
     assert.equal(panel.style.top, '80px');
     assert.equal(panel.classList.contains('panel-floating'), true);
     assert.equal(f.store.get('godsEyeView.v8.panelPos.cctv-panel'), stored);
+  } finally {
+    f.restore();
+  }
+});
+
+test('a header press that travels under the drag threshold is a click, not a lift', () => {
+  const f = fixture();
+  try {
+    const { panel, handle } = dockedPanel(f, 'street-level-panel');
+    pointer(handle, 'pointerdown', { x: 200, y: 90 });
+    pointer(window, 'pointermove', { x: 202, y: 90 });
+    pointer(window, 'pointerup', { x: 202, y: 90 });
+    assert.equal(panel.classList.contains('panel-floating'), false);
+    assert.equal(panel.classList.contains('panel-dragging'), false);
+    assert.equal(f.store.has(POSITION_KEY), false);
+    assert.equal(f.calls.layout, 0, 'the rail was not re-laid out');
+    assert.deepEqual(f.calls.resized, []);
+  } finally {
+    f.restore();
+  }
+});
+
+/**
+ * Both portable panels wired through _initPanelDrag. Each box follows its
+ * inline left/top/width/height like a fixed window (`box` holds the natural
+ * size), its header is the top 36 px, and `obstacles` stand in for the
+ * command dock and voice pill. ResizeObserver callbacks run on `observe()`.
+ */
+function portableShell(f, { stored = {}, box = {}, obstacles = {} } = {}) {
+  const observers = [];
+  globalThis.ResizeObserver = class {
+    constructor(callback) {
+      this.callback = callback;
+      this.targets = [];
+      observers.push(this);
+    }
+    observe(target) {
+      this.targets.push(target);
+    }
+    disconnect() {}
+  };
+  const nodes = new Map();
+  const panels = {};
+  for (const id of ['cctv-panel', 'street-level-panel']) {
+    const panel = f.element();
+    const handle = f.element();
+    const natural = { width: 360, height: 420, ...box[id] };
+    panel.id = id;
+    panel.querySelector = (selector) =>
+      selector === '.panel-header' ? handle : null;
+    panel.getBoundingClientRect = () => {
+      const left = parseFloat(panel.style.left) || 0;
+      const top = parseFloat(panel.style.top) || 0;
+      const width = parseFloat(panel.style.width) || natural.width;
+      const height = parseFloat(panel.style.height) || natural.height;
+      return {
+        left,
+        top,
+        width,
+        height,
+        right: left + width,
+        bottom: top + height,
+      };
+    };
+    handle.getBoundingClientRect = () => {
+      const rect = panel.getBoundingClientRect();
+      return { ...rect, height: 36, bottom: rect.top + 36 };
+    };
+    if (stored[id])
+      f.store.set(
+        `godsEyeView.v8.panelPos.${id}`,
+        JSON.stringify({ floating: true, ...stored[id] }),
+      );
+    nodes.set(id, panel);
+    panels[id] = { panel, handle, natural };
+  }
+  const obstacle = (id, rect) =>
+    nodes.set(id, {
+      getBoundingClientRect: () => ({
+        ...rect,
+        width: rect.right - rect.left,
+        height: rect.bottom - rect.top,
+      }),
+    });
+  for (const [id, rect] of Object.entries(obstacles)) obstacle(id, rect);
+  globalThis.document.getElementById = (id) => nodes.get(id) ?? null;
+  f.owner._initPanelDrag();
+  return {
+    ...panels,
+    obstacle,
+    observed: (node) => observers.some(({ targets }) => targets.includes(node)),
+    contentResized: () => observers.forEach(({ callback }) => callback([])),
+  };
+}
+
+test('a floating window whose content grows is pulled back on-screen', () => {
+  const f = fixture();
+  try {
+    const shell = portableShell(f, {
+      stored: { 'cctv-panel': { left: 900, top: 380 } },
+    });
+    const { panel, natural } = shell['cctv-panel'];
+    assert.equal(panel.style.top, '380px');
+    assert.equal(shell.observed(panel), true, 'its size is watched');
+    assert.equal(shell.observed(shell['street-level-panel'].panel), true);
+    // Expanding the collapsed strip, or an image opening in Street Level.
+    natural.height = 800;
+    shell.contentResized();
+    assert.equal(panel.style.top, `${900 - 800 - 6}px`);
+    assert.equal(panel.style.left, '900px');
+  } finally {
+    f.restore();
+  }
+});
+
+test('a live window resize shrinks a floating window larger than the viewport', () => {
+  const f = fixture();
+  try {
+    const shell = portableShell(f, {
+      stored: {
+        'cctv-panel': { left: 100, top: 80, width: 1300, height: 700 },
+      },
+    });
+    const { panel } = shell['cctv-panel'];
+    assert.equal(panel.style.width, '1300px');
+    Object.assign(window, { innerWidth: 1000, innerHeight: 500 });
+    window.dispatchEvent(new Event('resize'));
+    assert.equal(panel.style.width, '988px');
+    assert.equal(panel.style.height, '488px');
+    assert.equal(panel.style.left, '6px');
+    assert.equal(panel.style.top, '6px');
+    // A window that already fits keeps the size the user gave it.
+    Object.assign(window, { innerWidth: 1440, innerHeight: 900 });
+    window.dispatchEvent(new Event('resize'));
+    assert.equal(panel.style.width, '988px');
+  } finally {
+    f.restore();
+  }
+});
+
+const DOCK = { left: 300, top: 820, right: 1140, bottom: 882 };
+
+test('a floating header never lands under the command dock or voice pill', () => {
+  const f = fixture();
+  try {
+    const shell = portableShell(f, {
+      stored: { 'cctv-panel': { left: 100, top: 80 } },
+      // A collapsed CCTV window is just its header strip.
+      box: { 'cctv-panel': { height: 36 } },
+      obstacles: { 'command-dock': DOCK },
+    });
+    const { panel, handle, natural } = shell['cctv-panel'];
+    const above = DOCK.top - 36 - 6;
+
+    // Drag: the strip dropped at the bottom centre stops above the dock.
+    pointer(handle, 'pointerdown', { x: 200, y: 90 });
+    pointer(window, 'pointermove', { x: 720, y: 880 });
+    assert.equal(panel.style.top, `${above}px`);
+    pointer(window, 'pointerup', { x: 720, y: 880 });
+    const key = 'godsEyeView.v8.panelPos.cctv-panel';
+    assert.equal(JSON.parse(f.store.get(key)).top, above);
+
+    // Restore: a place saved under the dock (older build) comes back clear.
+    f.store.set(key, JSON.stringify({ left: 620, top: 858, floating: true }));
+    f.owner._restorePanelPosition('cctv-panel', panel);
+    assert.equal(panel.style.top, `${above}px`);
+
+    // Re-clamp: the voice pill measured when the window resizes.
+    Object.assign(panel.style, { left: '1000px', top: '700px' });
+    shell.obstacle('gev-voice-control', {
+      left: 1190,
+      top: 690,
+      right: 1404,
+      bottom: 740,
+    });
+    window.dispatchEvent(new Event('resize'));
+    assert.equal(panel.style.top, `${690 - 36 - 6}px`);
+
+    // Only the header has to stay clear: a body over the dock is fine.
+    natural.height = 200;
+    Object.assign(panel.style, { left: '620px', top: '650px' });
+    window.dispatchEvent(new Event('resize'));
+    assert.equal(panel.style.top, '650px');
   } finally {
     f.restore();
   }

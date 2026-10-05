@@ -419,12 +419,15 @@ export class PanelChrome {
       panelEl.classList.contains('cyber-accordion-collapsed');
     // A user opening a Cyber rail panel owns the whole accordion, including
     // peers that were only presentation-collapsed during a saved-state restore.
+    // A floating window is outside the accordion both ways: opening one
+    // leaves the rail's panels as they are.
     if (
       explicit &&
       !restore &&
       !nextCollapsed &&
       document.documentElement?.dataset.uiTheme === 'cyber' &&
-      panelEl.parentElement === this._rightPanelStack
+      panelEl.parentElement === this._rightPanelStack &&
+      !panelEl.classList.contains('panel-floating')
     ) {
       for (const peer of this._rightPanelStack.children) {
         if (

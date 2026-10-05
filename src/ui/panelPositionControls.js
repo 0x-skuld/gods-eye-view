@@ -30,6 +30,13 @@ const DOUBLE_PRESS_MS = 400;
 const DOUBLE_PRESS_SLOP_PX = 6;
 /** Viewport margin every positioned panel keeps clear. */
 const VIEWPORT_MARGIN_PX = 6;
+/**
+ * Fixed chrome that paints over every panel: the rail is its own stacking
+ * context (z 110), below the command dock (145) and the voice pill (150). A
+ * floating window keeps its header clear of these so it can always be
+ * grabbed again.
+ */
+const PANEL_OBSTACLE_IDS = ['command-dock', 'gev-voice-control'];
 /** One-time hint shown the first time a portable panel leaves its rail. */
 const PANEL_FLOAT_HINT_STORAGE_KEY = `godsEyeView.${PANEL_POSITION_STORAGE_VERSION}.panelFloatHintShown`;
 const PANEL_FLOAT_HINT = 'Double-click the header to snap the panel back';
@@ -50,6 +57,15 @@ const FLOATING_STYLE_PROPERTIES = [
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+/** A window extent that fits the viewport margins but never drops under its minimum. */
+function fitWindowExtent(value, minimum, viewportExtent) {
+  return clamp(
+    Math.round(value),
+    minimum,
+    Math.max(minimum, viewportExtent - 2 * VIEWPORT_MARGIN_PX),
+  );
 }
 
 /**
@@ -93,7 +109,7 @@ export class PanelPositionControls {
     this._panelZCounter = PANEL_Z_BASE + 10;
     this._draggableResizeObserver = null;
     this._cancelDrag = null;
-    /** Portable panels by id: `{ panel, min: { width, height } }`. */
+    /** Portable panels by id: `{ panel, handle, min: { width, height }, dockOnCollapse }`. */
     this._portablePanels = new Map();
     this._resizeHandles = [];
     this._dragInitialized = false;
@@ -120,16 +136,106 @@ export class PanelPositionControls {
         this._pinPanelToRight(el);
       }
     }
-    // Floating panels only move back on-screen; their size is the user's.
-    for (const { panel } of this._portablePanels.values()) {
-      if (!panel.classList.contains('panel-floating')) continue;
-      const left = parseInt(panel.style.left, 10);
-      const top = parseInt(panel.style.top, 10);
-      if (!Number.isFinite(left) || !Number.isFinite(top)) continue;
-      const next = this._clampToViewport(left, top, panel);
-      panel.style.left = `${next.left}px`;
-      panel.style.top = `${next.top}px`;
+    for (const entry of this._portablePanels.values()) {
+      const { classList } = entry.panel;
+      if (!classList.contains('panel-floating')) continue;
+      // A live gesture owns the box; it re-clamps when it ends.
+      if (classList.contains('panel-dragging')) continue;
+      if (classList.contains('panel-resizing')) continue;
+      this._reclampPortablePanel(entry);
     }
+  }
+
+  /**
+   * Bring a floating window back on-screen. Its size is the user's, except
+   * that a window wider or taller than the viewport shrinks to fit it.
+   */
+  _reclampPortablePanel(entry) {
+    const { panel, min } = entry;
+    const left = parseInt(panel.style.left, 10);
+    const top = parseInt(panel.style.top, 10);
+    if (!Number.isFinite(left) || !Number.isFinite(top)) return;
+    for (const [property, viewportExtent] of [
+      ['width', window.innerWidth],
+      ['height', window.innerHeight],
+    ]) {
+      const extent = parseFloat(panel.style[property]);
+      if (!Number.isFinite(extent)) continue;
+      const fitted = fitWindowExtent(extent, min[property], viewportExtent);
+      if (fitted < extent) panel.style[property] = `${fitted}px`;
+    }
+    const next = this._clampPortableWindow(entry, left, top);
+    panel.style.left = `${next.left}px`;
+    panel.style.top = `${next.top}px`;
+  }
+
+  /**
+   * Where a floating window may sit: inside the viewport margin, with its
+   * header out of the command dock and the voice pill, measured now because
+   * the dock grows and shrinks. Both sit at the foot of the screen, so the
+   * header goes above whichever it would land under.
+   * @param {object} entry A `_portablePanels` value.
+   * @param {number} left
+   * @param {number} top
+   * @param {{width: number, height: number, header: number}} [geometry]
+   *   Window size and header depth; measured when omitted.
+   */
+  _clampPortableWindow(
+    entry,
+    left,
+    top,
+    geometry = this._windowGeometry(entry),
+  ) {
+    const { width, height, header } = geometry;
+    const maxLeft = Math.max(
+      VIEWPORT_MARGIN_PX,
+      window.innerWidth - width - VIEWPORT_MARGIN_PX,
+    );
+    const maxTop = Math.max(
+      VIEWPORT_MARGIN_PX,
+      window.innerHeight - height - VIEWPORT_MARGIN_PX,
+    );
+    const x = clamp(left, VIEWPORT_MARGIN_PX, maxLeft);
+    let y = clamp(top, VIEWPORT_MARGIN_PX, maxTop);
+    const obstacles = this._panelObstacles();
+    for (let pass = 0; pass < obstacles.length; pass++) {
+      const hit = obstacles.find(
+        (rect) =>
+          rect.left < x + width &&
+          rect.right > x &&
+          rect.top < y + header &&
+          rect.bottom > y,
+      );
+      if (!hit) break;
+      const above = hit.top - header - VIEWPORT_MARGIN_PX;
+      y =
+        above >= VIEWPORT_MARGIN_PX
+          ? above
+          : Math.min(maxTop, hit.bottom + VIEWPORT_MARGIN_PX);
+    }
+    return { left: x, top: y };
+  }
+
+  /** A window's size and how far down its header reaches. */
+  _windowGeometry({ panel, handle }, rect = panel.getBoundingClientRect()) {
+    const handleRect = handle?.getBoundingClientRect();
+    const header = handleRect ? handleRect.bottom - rect.top : 0;
+    return {
+      width: rect.width,
+      height: rect.height,
+      // Without a measurable header, keep the whole window clear.
+      header: header > 0 ? Math.min(header, rect.height) : rect.height,
+    };
+  }
+
+  _panelObstacles() {
+    const rects = [];
+    for (const id of PANEL_OBSTACLE_IDS) {
+      const rect = document.getElementById(id)?.getBoundingClientRect();
+      // A hidden dock, or a voice UI switched off, measures empty.
+      if (rect && rect.width > 0 && rect.height > 0) rects.push(rect);
+    }
+    return rects;
   }
 
   _maybeNotifyLayoutReset() {
@@ -188,6 +294,7 @@ export class PanelPositionControls {
       if (spec.portable) {
         this._portablePanels.set(spec.id, {
           panel: spec.panel,
+          handle: spec.handle,
           min: { width: 300, height: 160, ...spec.min },
           dockOnCollapse: spec.dockOnCollapse === true,
         });
@@ -201,12 +308,18 @@ export class PanelPositionControls {
     }
     // Keep a positioned panel on-screen when its HEIGHT changes after restore — it expands to its
     // full row set a frame or two later, so the restore-time clamp used a stale (shorter) height and
-    // the panel could still hang off the bottom (audit U2). Re-clamp on every size change.
-    if (this._ppToggles && typeof ResizeObserver !== 'undefined') {
+    // the panel could still hang off the bottom (audit U2). Re-clamp on every size change. A floating
+    // window grows the same way when its content does (an image opens, a collapsed strip expands).
+    const observed = [
+      this._ppToggles,
+      ...[...this._portablePanels.values()].map(({ panel }) => panel),
+    ].filter(Boolean);
+    if (observed.length && typeof ResizeObserver !== 'undefined') {
       this._draggableResizeObserver = new ResizeObserver(() =>
         this._reclampDraggablePanels(),
       );
-      this._draggableResizeObserver.observe(this._ppToggles);
+      for (const panel of observed)
+        this._draggableResizeObserver.observe(panel);
     }
     if (this._portablePanels.size) {
       this.listen(window, 'resize', () => this._reclampDraggablePanels());
@@ -292,27 +405,34 @@ export class PanelPositionControls {
         // only one that was lifted or clicked this session.
         this._promotePanelZ(panelEl);
         if (Number.isFinite(pos.width)) {
-          panelEl.style.width = `${clamp(
-            Math.round(pos.width),
+          panelEl.style.width = `${fitWindowExtent(
+            pos.width,
             portable.min.width,
-            Math.max(portable.min.width, window.innerWidth - 12),
+            window.innerWidth,
           )}px`;
         }
         if (Number.isFinite(pos.height)) {
-          panelEl.style.height = `${clamp(
-            Math.round(pos.height),
+          panelEl.style.height = `${fitWindowExtent(
+            pos.height,
             portable.min.height,
-            Math.max(portable.min.height, window.innerHeight - 12),
+            window.innerHeight,
           )}px`;
         }
       }
       // Clamp to the viewport: a position saved at one window size would otherwise land off-screen at
-      // another (audit U2 — observed a panel at x:-192). The drag handler clamps; restore must too.
-      const { left, top } = this._clampToViewport(
-        Math.round(pos.left),
-        Math.round(pos.top),
-        panelEl,
-      );
+      // another (audit U2 — observed a panel at x:-192). The drag handler clamps; restore must too,
+      // and a window saved under the command dock must not come back there.
+      const { left, top } = portable
+        ? this._clampPortableWindow(
+            portable,
+            Math.round(pos.left),
+            Math.round(pos.top),
+          )
+        : this._clampToViewport(
+            Math.round(pos.left),
+            Math.round(pos.top),
+            panelEl,
+          );
       panelEl.style.left = `${left}px`;
       panelEl.style.top = `${top}px`;
       panelEl.style.right = 'auto';
@@ -457,10 +577,8 @@ export class PanelPositionControls {
       this._cancelDrag?.();
       event.preventDefault();
       const rect = panelEl.getBoundingClientRect();
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const offsetX = startX - rect.left;
-      const offsetY = startY - rect.top;
+      const offsetX = event.clientX - rect.left;
+      const offsetY = event.clientY - rect.top;
 
       panelEl.style.left = `${rect.left}px`;
       panelEl.style.top = `${rect.top}px`;
@@ -469,46 +587,83 @@ export class PanelPositionControls {
       panelEl.classList.add('panel-dragging');
       this._promotePanelZ(panelEl);
 
-      const onMove = (moveEvent) => {
-        const nextLeftRaw = moveEvent.clientX - offsetX;
-        const nextTopRaw = moveEvent.clientY - offsetY;
-        const maxLeft = Math.max(6, window.innerWidth - rect.width - 6);
-        const maxTop = Math.max(6, window.innerHeight - rect.height - 6);
-        const nextLeft = Math.max(6, Math.min(maxLeft, nextLeftRaw));
-        const nextTop = Math.max(6, Math.min(maxTop, nextTopRaw));
-        panelEl.style.left = `${nextLeft}px`;
-        panelEl.style.top = `${nextTop}px`;
-        if (panelId === 'pp-toggles') {
-          this._layoutRightPanels();
-        }
-        if (panelId === 'cctv-panel') {
-          this._syncCctvPanelViewport();
-        }
-      };
-
-      const cancel = () => {
-        panelEl.classList.remove('panel-dragging');
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onUp);
-        this._cancelDrag = null;
-      };
-      const onUp = () => {
-        cancel();
-        if (panelId === 'pp-toggles') {
-          this._pinPanelToRight(panelEl);
-        }
-        this._savePanelPosition(panelId, panelEl);
-        if (panelId === 'cctv-panel') {
-          this._syncCctvPanelViewport();
-        }
-      };
-
-      this._cancelDrag = cancel;
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', onUp);
+      this._trackPointerGesture(event, {
+        onMove: (moveEvent) => {
+          const nextLeftRaw = moveEvent.clientX - offsetX;
+          const nextTopRaw = moveEvent.clientY - offsetY;
+          const maxLeft = Math.max(6, window.innerWidth - rect.width - 6);
+          const maxTop = Math.max(6, window.innerHeight - rect.height - 6);
+          const nextLeft = Math.max(6, Math.min(maxLeft, nextLeftRaw));
+          const nextTop = Math.max(6, Math.min(maxTop, nextTopRaw));
+          panelEl.style.left = `${nextLeft}px`;
+          panelEl.style.top = `${nextTop}px`;
+          if (panelId === 'pp-toggles') {
+            this._layoutRightPanels();
+          }
+          if (panelId === 'cctv-panel') {
+            this._syncCctvPanelViewport();
+          }
+        },
+        onStop: () => panelEl.classList.remove('panel-dragging'),
+        // A cancelled press keeps the place too: there is no rail to revert to.
+        onEnd: () => {
+          if (panelId === 'pp-toggles') {
+            this._pinPanelToRight(panelEl);
+          }
+          this._savePanelPosition(panelId, panelEl);
+          if (panelId === 'cctv-panel') {
+            this._syncCctvPanelViewport();
+          }
+        },
+      });
     });
+  }
+
+  /**
+   * Follow one pointer gesture on the window; every panel gesture runs on
+   * this. With a `threshold`, a press only becomes a gesture once the pointer
+   * has travelled that far: `onStart` runs then, and `onMove` (given the
+   * travel so far) only after it. `onEnd` (pointerup) and `onCancel`
+   * (pointercancel, `onEnd` unless given) learn whether it started. A new
+   * press, a snap-back or destroy() stops it through `_cancelDrag`, which
+   * calls neither.
+   */
+  _trackPointerGesture(
+    event,
+    { threshold = 0, onStart, onMove, onStop, onEnd, onCancel = onEnd },
+  ) {
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let started = threshold <= 0;
+    const move = (moveEvent) => {
+      const dx = moveEvent.clientX - startX;
+      const dy = moveEvent.clientY - startY;
+      if (!started) {
+        if (Math.hypot(dx, dy) < threshold) return;
+        started = true;
+        onStart?.();
+      }
+      onMove(moveEvent, dx, dy);
+    };
+    const stop = () => {
+      onStop?.();
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      if (this._cancelDrag === stop) this._cancelDrag = null;
+    };
+    const up = () => {
+      stop();
+      onEnd?.(started);
+    };
+    const cancel = () => {
+      stop();
+      onCancel?.(started);
+    };
+    this._cancelDrag = stop;
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
   }
 
   /**
@@ -586,76 +741,53 @@ export class PanelPositionControls {
       this._cancelDrag?.();
       // A header press must not start a text selection across the page.
       event.preventDefault();
-      const startX = event.clientX;
-      const startY = event.clientY;
-      let dragging = false;
+      const entry = this._portablePanels.get(panelId);
       let lifted = false;
       let before = null;
       let offsetX = 0;
       let offsetY = 0;
-      let width = 0;
-      let height = 0;
+      let geometry = null;
 
-      const onMove = (moveEvent) => {
-        if (!dragging) {
-          if (
-            Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) <
-            DRAG_THRESHOLD_PX
-          )
-            return;
-          dragging = true;
+      this._trackPointerGesture(event, {
+        threshold: DRAG_THRESHOLD_PX,
+        onStart: () => {
           // A drag between two presses is not a double-click.
           lastPress = null;
           const rect = panelEl.getBoundingClientRect();
-          offsetX = startX - rect.left;
-          offsetY = startY - rect.top;
-          width = rect.width;
-          height = rect.height;
+          offsetX = event.clientX - rect.left;
+          offsetY = event.clientY - rect.top;
+          geometry = this._windowGeometry(entry, rect);
           before = geometryOf(panelEl);
           lifted = this._liftPanelOut(panelId, panelEl, rect);
           panelEl.classList.add('panel-dragging');
           this._promotePanelZ(panelEl);
-        }
-        moveEvent.preventDefault();
-        const maxLeft = Math.max(
-          VIEWPORT_MARGIN_PX,
-          window.innerWidth - width - VIEWPORT_MARGIN_PX,
-        );
-        const maxTop = Math.max(
-          VIEWPORT_MARGIN_PX,
-          window.innerHeight - height - VIEWPORT_MARGIN_PX,
-        );
-        panelEl.style.left = `${clamp(moveEvent.clientX - offsetX, VIEWPORT_MARGIN_PX, maxLeft)}px`;
-        panelEl.style.top = `${clamp(moveEvent.clientY - offsetY, VIEWPORT_MARGIN_PX, maxTop)}px`;
-      };
-
-      const cancel = () => {
-        panelEl.classList.remove('panel-dragging');
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onCancel);
-        this._cancelDrag = null;
-      };
-      const onUp = () => {
-        cancel();
-        if (!dragging) return;
-        swallowNextClick = true;
-        setTimeout(() => {
-          swallowNextClick = false;
-        }, 0);
-        this._savePanelPosition(panelId, panelEl);
-        this._onPanelResized?.(panelId);
-      };
-      const onCancel = () => {
-        cancel();
-        if (dragging)
-          this._revertPanelGesture(panelId, panelEl, lifted, before);
-      };
-
-      this._cancelDrag = cancel;
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', onCancel);
+        },
+        onMove: (moveEvent) => {
+          moveEvent.preventDefault();
+          const next = this._clampPortableWindow(
+            entry,
+            moveEvent.clientX - offsetX,
+            moveEvent.clientY - offsetY,
+            geometry,
+          );
+          panelEl.style.left = `${next.left}px`;
+          panelEl.style.top = `${next.top}px`;
+        },
+        onStop: () => panelEl.classList.remove('panel-dragging'),
+        onEnd: (dragged) => {
+          if (!dragged) return;
+          swallowNextClick = true;
+          setTimeout(() => {
+            swallowNextClick = false;
+          }, 0);
+          this._savePanelPosition(panelId, panelEl);
+          this._onPanelResized?.(panelId);
+        },
+        onCancel: (dragged) => {
+          if (dragged)
+            this._revertPanelGesture(panelId, panelEl, lifted, before);
+        },
+      });
     });
   }
 
@@ -701,8 +833,6 @@ export class PanelPositionControls {
     if (event.button !== 0 || !isPrecisePointer(event)) return;
     event.preventDefault();
     this._cancelDrag?.();
-    const startX = event.clientX;
-    const startY = event.clientY;
     // Set once the pointer has travelled: a plain click on an edge (or on
     // the globe just beside a docked panel) must not lift it out.
     let startBox = null;
@@ -714,60 +844,48 @@ export class PanelPositionControls {
       panelEl.style.width = `${width}px`;
       panelEl.style.height = `${height}px`;
     };
-    const begin = () => {
-      const rect = panelEl.getBoundingClientRect();
-      before = geometryOf(panelEl);
-      lifted = this._liftPanelOut(panelId, panelEl, rect);
-      startBox = {
-        left: Math.round(rect.left),
-        top: Math.round(rect.top),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
-      };
-      panelEl.classList.add('panel-resizing');
-      this._promotePanelZ(panelEl);
-      apply(startBox);
-    };
 
-    const onMove = (moveEvent) => {
-      const dx = moveEvent.clientX - startX;
-      const dy = moveEvent.clientY - startY;
-      if (!startBox) {
-        if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
-        begin();
-      }
-      moveEvent.preventDefault();
-      apply(
-        resizeBox(startBox, dir, dx, dy, {
-          minWidth: limits.width,
-          minHeight: limits.height,
-          viewportWidth: window.innerWidth,
-          viewportHeight: window.innerHeight,
-        }),
-      );
-    };
-    const cancel = () => {
-      panelEl.classList.remove('panel-resizing');
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
-      this._cancelDrag = null;
-    };
-    const onUp = () => {
-      cancel();
-      if (!startBox) return;
-      this._savePanelPosition(panelId, panelEl);
-      this._onPanelResized?.(panelId);
-    };
-    const onCancel = () => {
-      cancel();
-      if (startBox) this._revertPanelGesture(panelId, panelEl, lifted, before);
-    };
-
-    this._cancelDrag = cancel;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    this._trackPointerGesture(event, {
+      threshold: DRAG_THRESHOLD_PX,
+      onStart: () => {
+        const rect = panelEl.getBoundingClientRect();
+        before = geometryOf(panelEl);
+        lifted = this._liftPanelOut(panelId, panelEl, rect);
+        startBox = {
+          left: Math.round(rect.left),
+          top: Math.round(rect.top),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        };
+        panelEl.classList.add('panel-resizing');
+        this._promotePanelZ(panelEl);
+        apply(startBox);
+      },
+      onMove: (moveEvent, dx, dy) => {
+        moveEvent.preventDefault();
+        apply(
+          resizeBox(startBox, dir, dx, dy, {
+            minWidth: limits.width,
+            minHeight: limits.height,
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+          }),
+        );
+      },
+      onStop: () => panelEl.classList.remove('panel-resizing'),
+      onEnd: (resized) => {
+        if (!resized) return;
+        // Re-clamping skipped the live gesture; a north edge may have carried
+        // the header under the command dock.
+        const entry = this._portablePanels.get(panelId);
+        if (entry) this._reclampPortablePanel(entry);
+        this._savePanelPosition(panelId, panelEl);
+        this._onPanelResized?.(panelId);
+      },
+      onCancel: (resized) => {
+        if (resized) this._revertPanelGesture(panelId, panelEl, lifted, before);
+      },
+    });
   }
 
   destroy() {
