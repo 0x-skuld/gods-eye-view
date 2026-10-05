@@ -83,7 +83,7 @@ test('graph calls without a token fail fast as keyRequired without a request', a
   const { calls, fetchImpl } = fakeFetch(() => jsonResponse({}));
   const source = createMapillarySource({ token: '', fetchImpl });
   await assert.rejects(
-    () => source.getImage('123'),
+    () => source.getSequenceImages('123'),
     (error) =>
       error instanceof MapillarySourceError && error.keyRequired === true,
   );
@@ -96,7 +96,7 @@ test('graph API errors carry the upstream message and status', async () => {
   );
   const source = createMapillarySource({ token: 'MLY|1|abc', fetchImpl });
   await assert.rejects(
-    () => source.getImage('999'),
+    () => source.getSequenceImages('999'),
     (error) =>
       error instanceof MapillarySourceError &&
       error.status === 400 &&

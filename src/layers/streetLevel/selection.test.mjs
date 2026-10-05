@@ -18,6 +18,8 @@ function harness() {
   globalThis.requestAnimationFrame = (task) => frames.push(task);
   globalThis.document = new EventTarget();
   const picks = [];
+  /** What the pointer is over: a line this layer owns, or nothing. */
+  const scene = { under: null };
   const canvas = Object.assign(new EventTarget(), {
     style: {},
     // Keep Cesium's handler on the canvas; there is no real document here.
@@ -30,7 +32,7 @@ function harness() {
       canvas,
       pick(position) {
         picks.push(position);
-        return null;
+        return scene.under && { id: scene.under };
       },
     },
     camera,
@@ -45,7 +47,7 @@ function harness() {
   const selection = createSelection({
     state,
     parts: {
-      router: { ownsPick: () => false, resolve: () => null },
+      router: { ownsPick: (id) => id === 'mly:seq:1', resolve: () => null },
       hasSelectedSequence: () => false,
       clearSequences() {},
     },
@@ -56,6 +58,7 @@ function harness() {
   );
   return {
     state,
+    scene,
     canvas,
     camera,
     picks,
@@ -102,26 +105,53 @@ test('hover picks at most every 120 ms through a burst of moves, ending on the l
   }
 });
 
-test('hover does not pick while the camera moves or a mouse button is held', () => {
+test('hover does not pick while a mouse button is held', () => {
   const h = harness();
   try {
-    h.camera.moveStart.raiseEvent();
+    h.buttons('pointerdown', 1);
     h.move(1);
     h.wait(200);
-    assert.equal(h.picks.length, 0, 'camera in motion');
-    h.camera.moveEnd.raiseEvent();
+    assert.equal(h.picks.length, 0, 'a drag in progress');
+    h.buttons('pointerup', 0);
     h.move(2);
     h.wait(200);
-    assert.equal(h.picks.length, 1, 'picks again once the camera rests');
+    assert.equal(h.picks.length, 1);
+  } finally {
+    h.restore();
+  }
+});
 
-    h.buttons('pointerdown', 1);
-    h.move(3);
+test('a camera that never stops (orbit, tracking) keeps hover throttled, not off (review P3)', () => {
+  const h = harness();
+  try {
+    // An orbiting or tracking camera raises moveStart and never moveEnd.
+    h.camera.moveStart.raiseEvent();
+    for (let i = 0; i < 60; i++) {
+      h.move(i);
+      h.wait(16);
+    }
+    assert.ok(h.picks.length >= 7, `${h.picks.length} picks in ~1 s`);
+    assert.ok(h.picks.length <= 9, `${h.picks.length} picks in ~1 s`);
+  } finally {
+    h.restore();
+  }
+});
+
+test('when the camera stops, the pointer is picked again so the cursor cannot stick (review P3)', () => {
+  const h = harness();
+  try {
+    h.scene.under = 'mly:seq:1';
+    h.move(5);
     h.wait(200);
-    assert.equal(h.picks.length, 1, 'a drag in progress');
-    h.buttons('pointerup', 0);
-    h.move(4);
+    assert.equal(h.canvas.style.cursor, 'pointer', 'over a line');
+    // The camera moves the line out from under a still pointer.
+    h.camera.moveStart.raiseEvent();
+    h.scene.under = null;
+    h.camera.moveEnd.raiseEvent();
     h.wait(200);
-    assert.equal(h.picks.length, 2);
+    assert.equal(h.picks.length, 2, 'one pick when the camera rests');
+    assert.deepEqual(h.picks.at(-1), { x: 5, y: 10 });
+    assert.equal(h.canvas.style.cursor, '', 'the pointer cursor is gone');
   } finally {
     h.restore();
   }

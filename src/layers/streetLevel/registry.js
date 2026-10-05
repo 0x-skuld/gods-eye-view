@@ -8,15 +8,12 @@
  * @property {string|null} requiresKeyId  Key-setup id the provider needs, or null when keyless.
  * @property {string} pickPrefix    Every primitive id the provider creates starts with it.
  * @property {{coverage: string}} colors   The source's one colour (policy.js PROVIDER_COLORS): chip, lines, points, cones and legend.
- * @property {{key: string, html: string}} credit   On-globe attribution while the provider is active.
- * @property {{coverage: 'tiles'|'bbox'|'none', sequences: boolean, pano: boolean, capturedAt: boolean, creator: boolean, follow: boolean}} capabilities
- * @property {(imageId: string) => string} externalUrl  Deep link to the image on the provider's site.
+ * @property {{html: string}} credit   On-globe attribution while the provider is active.
  * @property {(context: ProviderContext) => ProviderInstance} create
  *
  * @typedef {object} ProviderContext   Handed to `create()` once by the core.
  * @property {object} services         Scene services: picking, input, render, sprites, ground, terrain.
- * @property {() => object|null} getViewer   The Cesium viewer once the layer is initialised.
- * @property {() => {pano: string, sinceMs: number|null}} getFilter   The resolved imagery filter.
+ * @property {() => {pano: string, sinceMs: number|null}} getFilter   The imagery filter resolved against now: read it whenever filtering, so a "since N days" window keeps up with the clock.
  * @property {() => boolean} isActive  Layer enabled and this provider switched on.
  * @property {() => 'draped'|'terrain'} getSurface   'terrain' on Google 3D at street zoom: draw on the bare earth, not the mesh top.
  * @property {GroundCaster|null} groundCaster   Bare-earth heights for terrain mode (groundCast.js); null without a terrain service.
@@ -31,7 +28,7 @@
  * @property {() => void} deactivate                 Detach, clear coverage and selection, hide.
  * @property {(viewer: object) => void} destroy
  * @property {() => void} refreshCoverage
- * @property {(filter: {pano: string, sinceMs: number|null}) => void} setFilter
+ * @property {(filter: {pano: string, sinceMs: number|null}) => void} setFilter   The filter changed: redraw (reading `getFilter()`).
  * @property {(mode: 'draped'|'terrain') => void} [setSurface]   Redraw coverage and cones for the new surface mode.
  * @property {() => {count: number, zoom: number|null, kind: string|null, loading: boolean, hint: string, error: string|null, keyRequired: boolean}} coverageStats
  * @property {(pickId: string) => boolean} handlePick   The id carries the provider's own prefix.
@@ -45,7 +42,6 @@
  * @property {(points: Array<[number, number]>, options?: {signal?: AbortSignal}) => Promise<boolean>} prepare   Fetch the heights around [lon, lat] points; true when all are known.
  * @property {(lines: Array<Array<[number, number]>>, options?: {signal?: AbortSignal}) => Promise<boolean>} prepareLines
  * @property {(lon: number, lat: number) => number|null} groundAt    Cached bare-earth ellipsoidal height.
- * @property {(lon: number, lat: number) => number|null} heightAt    groundAt plus the overlay lift.
  * @property {(coords: Array<[number, number]>) => Array<number>|null} castLine   Densified [lon, lat, height, ...] or null.
  *
  * @typedef {object} ViewerAdapter
@@ -69,7 +65,7 @@
  * @property {number|null} capturedAt   Epoch milliseconds.
  * @property {string|null} creator
  * @property {string|null} sequenceId
- * @property {string} externalUrl
+ * @property {string} externalUrl      Deep link to the image on the provider's site.
  */
 
 const REQUIRED = Object.freeze([
@@ -79,8 +75,6 @@ const REQUIRED = Object.freeze([
   'pickPrefix',
   'colors',
   'credit',
-  'capabilities',
-  'externalUrl',
   'create',
 ]);
 
@@ -110,10 +104,6 @@ export function validateProviders(providers) {
       throw new TypeError(
         `Street Level provider ${label}: create is not a function`,
       );
-    if (typeof provider.externalUrl !== 'function')
-      throw new TypeError(
-        `Street Level provider ${label}: externalUrl is not a function`,
-      );
     if (typeof provider.pickPrefix !== 'string' || !provider.pickPrefix)
       throw new TypeError(`Street Level provider ${label} needs a pick prefix`);
     for (const other of prefixes)
@@ -124,7 +114,7 @@ export function validateProviders(providers) {
         throw new TypeError(
           `Street Level provider ${label}: pick prefix ${provider.pickPrefix} overlaps ${other}`,
         );
-    if (!provider.credit?.key || !provider.credit?.html)
+    if (!provider.credit?.html)
       throw new TypeError(`Street Level provider ${label} needs a credit`);
     if (
       typeof provider.colors?.coverage !== 'string' ||

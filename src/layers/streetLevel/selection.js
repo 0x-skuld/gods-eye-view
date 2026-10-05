@@ -52,7 +52,6 @@ export function createSelection({ state, parts }) {
   let hoverPosition = null;
   let hoverLastPickAt = -Infinity;
   let hoverTimer = null;
-  let cameraMoving = false;
   let pointerButtons = 0;
   let removeHoverWatchers = null;
 
@@ -71,8 +70,8 @@ export function createSelection({ state, parts }) {
     const viewer = state.viewer;
     // Switched off (or torn down) since the frame was queued.
     if (!viewer || !state.enabled || !state.clickHandler) return;
-    // Orbiting, or a drag in progress: the pointer is the camera's.
-    if (cameraMoving || pointerButtons !== 0) return;
+    // A drag in progress: the pointer is the camera's.
+    if (pointerButtons !== 0) return;
     const canvas = viewer.scene?.canvas;
     if (!canvas || viewer.isDestroyed?.()) return;
     hoverLastPickAt = Date.now();
@@ -98,6 +97,11 @@ export function createSelection({ state, parts }) {
     const viewer = state.viewer;
     if (!viewer || !state.enabled) return;
     hoverPosition = movement.endPosition;
+    queueHoverPick();
+  }
+
+  /** Pick `hoverPosition` on a coming frame, within the throttle. */
+  function queueHoverPick() {
     if (hoverQueued) return;
     hoverQueued = true;
     const wait = hoverLastPickAt + HOVER_PICK_INTERVAL_MS - Date.now();
@@ -111,7 +115,12 @@ export function createSelection({ state, parts }) {
     }, wait);
   }
 
-  /** Track what makes a hover pick pointless: camera motion, held buttons. */
+  /**
+   * Track held buttons (a drag picks nothing) and camera stops. A moving
+   * camera does not stop hover: an orbiting or tracking camera never stops,
+   * and the throttle already bounds the cost. When the camera comes to rest
+   * the pointer is picked once more, since what was under it has moved.
+   */
   function watchHover(viewer) {
     const canvas = viewer.scene.canvas;
     const camera = viewer.camera;
@@ -120,16 +129,12 @@ export function createSelection({ state, parts }) {
     };
     for (const type of ['pointerdown', 'pointermove', 'pointerup'])
       canvas.addEventListener?.(type, onButtons);
-    const removeStart = camera?.moveStart?.addEventListener(() => {
-      cameraMoving = true;
-    });
     const removeEnd = camera?.moveEnd?.addEventListener(() => {
-      cameraMoving = false;
+      if (hoverPosition) queueHoverPick();
     });
     removeHoverWatchers = () => {
       for (const type of ['pointerdown', 'pointermove', 'pointerup'])
         canvas.removeEventListener?.(type, onButtons);
-      removeStart?.();
       removeEnd?.();
     };
   }
@@ -140,8 +145,8 @@ export function createSelection({ state, parts }) {
     clearTimeout(hoverTimer);
     hoverTimer = null;
     hoverQueued = false;
+    hoverPosition = null;
     hoverLastPickAt = -Infinity;
-    cameraMoving = false;
     pointerButtons = 0;
   }
 

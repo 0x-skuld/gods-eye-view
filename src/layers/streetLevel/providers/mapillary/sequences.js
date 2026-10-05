@@ -2,6 +2,7 @@ import * as Cesium from 'cesium';
 import { imageConeGlyph } from '../../glyphs.js';
 import { passesImageryFilter } from '../../filter.js';
 import { refineHeights } from '../../groundCast.js';
+import { metresBetween } from '../../view.js';
 import {
   COLORS,
   IMAGE_CONE_MIN_SPACING_M,
@@ -13,14 +14,6 @@ const SPRITE_ID = 'street-level:mapillary-cones';
 
 /** How many recently viewed sequences keep their image list in memory. */
 const SEQUENCE_CACHE_SIZE = 40;
-
-/** Approximate metres between two lon/lat points (small distances). */
-function metresBetween(a, b) {
-  const lat = ((a.lat + b.lat) / 2) * (Math.PI / 180);
-  const dx = (b.lon - a.lon) * 111_320 * Math.cos(lat);
-  const dy = (b.lat - a.lat) * 110_540;
-  return Math.hypot(dx, dy);
-}
 
 /** Normalize a graph image record into the shape the cones use. */
 export function normalizeSequenceImage(record) {
@@ -119,8 +112,10 @@ export function createSequences({ state, source, parts }) {
       color: COLORS.coverage,
       pano: true,
     });
+    // Resolved now, so a "since N days" window keeps up with the clock.
+    const filter = state.context.getFilter();
     images.forEach((image, index) => {
-      if (!passesImageryFilter(image, state.filter)) return;
+      if (!passesImageryFilter(image, filter)) return;
       const height = heights?.[index] ?? null;
       collection.add({
         id: `${PICK_PREFIX.image}${image.id}`,
@@ -158,9 +153,10 @@ export function createSequences({ state, source, parts }) {
   /** Select a sequence: highlight its line and load its image cones. */
   async function select(sequenceId) {
     if (!sequenceId || !state.viewer) return;
+    // Already on screen, or already on its way.
     if (
       state.sequence.selectedId === sequenceId &&
-      state.sequence.images.length
+      (state.sequence.images.length || state.sequence.abort)
     )
       return;
     if (state.sequence.selectedId && state.sequence.selectedId !== sequenceId)
@@ -174,9 +170,14 @@ export function createSequences({ state, source, parts }) {
       state.sequence.loading = false;
       state.sequence.images = cached;
       renderCones(cached);
+      state.context.actions.reportError(null);
       notify();
       return;
     }
+    // The previous sequence's cones must not stay clickable under the new
+    // highlight while this one loads, nor after its load fails.
+    clearCones();
+    requestRender();
     const controller = new AbortController();
     state.sequence.abort = controller;
     state.sequence.loading = true;
@@ -195,11 +196,16 @@ export function createSequences({ state, source, parts }) {
       remember(sequenceId, images);
       state.sequence.images = images;
       renderCones(images);
+      state.context.actions.reportError(null);
     } catch (error) {
-      if (!controller.signal.aborted)
+      if (!controller.signal.aborted) {
+        // Nothing to show: drop the highlight, so a click asks again.
+        parts.coverage.recolorSequence(sequenceId, false);
+        state.sequence.selectedId = null;
         state.context.actions.reportError(
           error?.message || 'Sequence images unavailable',
         );
+      }
     } finally {
       if (state.sequence.abort === controller) {
         state.sequence.loading = false;
@@ -217,6 +223,8 @@ export function createSequences({ state, source, parts }) {
     state.sequence.selectedId = null;
     state.sequence.loading = false;
     clearCones();
+    // An error about the sequence goes with it.
+    state.context.actions.reportError(null);
     requestRender();
     notify();
   }

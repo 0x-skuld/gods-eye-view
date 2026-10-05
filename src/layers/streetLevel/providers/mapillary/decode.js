@@ -4,15 +4,15 @@ import { tileLocalToLonLat } from '../../tileMath.js';
 
 /**
  * Decode a Mapillary coverage tile (`mly1_public`) in the browser.
- * Sequences are LineStrings with capture metadata; the `image` layer is only
- * present at z14 and is skipped unless asked for (it can hold >150k points).
+ * Sequences are LineStrings with capture metadata; z0–5 tiles carry
+ * `overview` points instead. The z14 `image` layer (it can hold >150k
+ * points) is never read.
  * @param {Uint8Array} bytes
  * @param {{x:number,y:number,z:number}} address
- * @param {{images?: boolean}} [options]
- * @returns {{sequences: Array<object>, images: Array<object>}}
+ * @returns {{sequences: Array<object>, overview: Array<object>}}
  */
-export function decodeCoverageTile(bytes, address, { images = false } = {}) {
-  const result = { sequences: [], images: [], overview: [] };
+export function decodeCoverageTile(bytes, address) {
+  const result = { sequences: [], overview: [] };
   if (!bytes || !bytes.length) return result;
   const tile = new VectorTile(new PbfReader(bytes));
   const { x, y, z } = address;
@@ -64,32 +64,6 @@ export function decodeCoverageTile(bytes, address, { images = false } = {}) {
         id: String(props.id ?? feature.id ?? i),
         lon,
         lat,
-        capturedAt: Number(props.captured_at) || 0,
-        isPano: props.is_pano === true,
-        sequenceId: props.sequence_id ? String(props.sequence_id) : null,
-      });
-    }
-  }
-  const imageLayer = images ? tile.layers.image : null;
-  if (imageLayer) {
-    for (let i = 0; i < imageLayer.length; i++) {
-      const feature = imageLayer.feature(i);
-      const props = feature.properties || {};
-      const point = feature.loadGeometry()?.[0]?.[0];
-      if (!point) continue;
-      const [lon, lat] = tileLocalToLonLat(
-        point.x,
-        point.y,
-        imageLayer.extent,
-        x,
-        y,
-        z,
-      );
-      result.images.push({
-        id: String(props.id ?? feature.id),
-        lon,
-        lat,
-        compassAngle: Number(props.compass_angle) || 0,
         capturedAt: Number(props.captured_at) || 0,
         isPano: props.is_pano === true,
         sequenceId: props.sequence_id ? String(props.sequence_id) : null,

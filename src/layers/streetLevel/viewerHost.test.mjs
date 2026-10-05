@@ -126,10 +126,13 @@ test('unmounting while a mount is in flight does not leave it active', async () 
   const opening = host.open('mapillary', 'a');
   host.unmount();
   await opening;
-  assert.equal(host.activeProviderId(), null);
   assert.equal(adapter.calls.listeners, 0);
   assert.equal(adapter.calls.unmount, 1);
   assert.equal(state.street.open, false);
+  // Not left active: the next open mounts again.
+  await host.open('mapillary', 'b');
+  assert.equal(adapter.calls.mount, 2);
+  assert.equal(state.street.imageId, 'b');
 });
 
 test('a prewarmed viewer is released when the layer goes off, or at once if it went off mid-load', async () => {
@@ -215,12 +218,19 @@ test('switching the layer off and on during a cold first open keeps the shared v
 /** MapillaryJS, counting live viewers (each holds a WebGL context). */
 function fakeLibrary() {
   const gate = deferred();
-  const viewers = { created: 0, live: 0 };
+  const viewers = { created: 0, live: 0, instances: [] };
   class Viewer {
     constructor() {
       viewers.created++;
       viewers.live++;
+      viewers.instances.push(this);
       this.removed = false;
+      this.playback = { stops: 0 };
+    }
+    /** The sequence component's play/stop API, as MapillaryJS 4 exposes it. */
+    getComponent(name) {
+      if (name !== 'sequence') return undefined;
+      return { stop: () => this.playback.stops++ };
     }
     on() {}
     async getPosition() {
@@ -280,4 +290,31 @@ test('a Mapillary viewer unmounted mid-download is never built; the next mount b
   await adapter.open('x');
   adapter.unmount();
   assert.equal(viewers.live, 0, 'nothing left holding a WebGL context');
+});
+
+test('a prewarm that gave up when the layer went off and on mid-download is followed by one that builds', async () => {
+  const { gate, viewers } = fakeLibrary();
+  const adapter = createMapillaryViewer({ source: { token: 't' } });
+  const element = {};
+  const first = adapter.prewarm(element);
+  adapter.unmount(); // layer off while MapillaryJS downloads
+  const second = adapter.prewarm(element); // layer on again
+  gate.resolve();
+  await Promise.all([first, second]);
+  assert.equal(viewers.created, 1, 'the second prewarm built the viewer');
+  assert.equal(viewers.live, 1);
+  adapter.unmount();
+});
+
+test('closing the photo stops sequence playback in the hidden viewer (review P2-6)', async () => {
+  const { gate, viewers } = fakeLibrary();
+  gate.resolve();
+  const adapter = createMapillaryViewer({ source: { token: 't' } });
+  const { host } = harness(adapter);
+  await host.open('mapillary', 'img1');
+  const [viewer] = viewers.instances;
+  assert.equal(viewer.playback.stops, 0);
+  host.close();
+  assert.equal(viewer.playback.stops, 1, 'playback stopped with the photo');
+  assert.equal(viewers.live, 1, 'the viewer itself stays warm');
 });

@@ -4,13 +4,13 @@ import { createMapillaryProvider, mapillaryImageUrl } from './index.js';
 import { sequenceIdFromPick } from './coverage.js';
 import { validateProviders } from '../../registry.js';
 import { PROVIDER_COLORS } from '../../policy.js';
+import { resolveFilter } from '../../filter.js';
 
 function fakeSource({ nearest = [] } = {}) {
   return {
     hasToken: () => true,
     getStatus: async () => ({ configured: true }),
     getTile: async () => new Uint8Array(0),
-    getImage: async () => ({}),
     getSequenceImages: async () => [],
     nearestImages: async () => nearest,
   };
@@ -21,8 +21,7 @@ function fakeContext(filter = { pano: 'all', sinceMs: null }) {
   return {
     opened,
     services: {},
-    getViewer: () => null,
-    getFilter: () => filter,
+    getFilter: typeof filter === 'function' ? filter : () => filter,
     isActive: () => true,
     notify: () => {},
     actions: {
@@ -41,7 +40,6 @@ test('the definition satisfies the Street Level provider contract', () => {
   assert.equal(def.label, 'MAPILLARY');
   assert.equal(def.requiresKeyId, 'mapillary');
   assert.equal(def.pickPrefix, 'mly:');
-  assert.equal(def.capabilities.coverage, 'tiles');
   assert.match(def.credit.html, /CC BY-SA 4\.0/);
   // One colour per source: Mapillary is green everywhere it draws.
   assert.deepEqual(Object.keys(def.colors).sort(), ['coverage', 'selected']);
@@ -51,9 +49,8 @@ test('the definition satisfies the Street Level provider contract', () => {
 });
 
 test('image deep links match the mapillary.com share format', () => {
-  const def = createMapillaryProvider({ source: fakeSource() });
   assert.equal(
-    def.externalUrl(1814275685699406),
+    mapillaryImageUrl(1814275685699406),
     'https://www.mapillary.com/app/?pKey=1814275685699406&focus=photo',
   );
   assert.equal(mapillaryImageUrl('  '), 'https://www.mapillary.com/app/');
@@ -117,4 +114,24 @@ test('nearestImage picks the closest image, not the first the API returned', asy
   });
   const instance = createMapillaryProvider({ source }).create(fakeContext());
   assert.equal(await instance.nearestImage({ lat: 1, lon: 2 }), 'near');
+});
+
+test('a "since N days" window follows the clock in a long-open tab (review P3)', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 9, 1) });
+  const day = 86_400_000;
+  const capturedAt = Date.now() - day / 2;
+  const source = fakeSource({
+    nearest: [{ id: 'recent', is_pano: false, captured_at: capturedAt }],
+  });
+  // The core's context resolves the stored filter whenever it is asked.
+  const instance = createMapillaryProvider({ source }).create(
+    fakeContext(() => resolveFilter({ pano: 'all', sinceDays: 1 })),
+  );
+  assert.equal(await instance.nearestImage({ lat: 1, lon: 2 }), 'recent');
+  t.mock.timers.tick(2 * day);
+  assert.equal(
+    await instance.nearestImage({ lat: 1, lon: 2 }),
+    null,
+    'two days on, the image is older than the window',
+  );
 });

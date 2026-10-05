@@ -1,3 +1,5 @@
+import { freshStreet } from './state.js';
+
 /**
  * Own the one viewer element in the panel and whichever provider's viewer
  * adapter is mounted in it. Poses the adapter emits become `state.street`,
@@ -107,16 +109,20 @@ export function createViewerHost({ state, parts }) {
   }
 
   /**
-   * Open an image from one provider. Returns once the first pose is in;
-   * later poses stream through `state.street` as the user navigates.
+   * Open an image from one provider. Resolves once the first pose is in
+   * (true) or the open failed or was overtaken (false); later poses stream
+   * through `state.street` as the user navigates.
+   * @returns {Promise<boolean>}
    */
   async function open(providerId, imageId, { frame = true } = {}) {
     const entry = providerEntry(providerId);
-    if (!entry || !imageId) return;
+    if (!entry || !imageId) return false;
     if (!state.street.host) {
+      // A nearest-image lookup may have set it; nothing is loading now.
+      state.street.loading = false;
       state.street.error = 'Open the Street Level panel to view imagery';
       notify();
-      return;
+      return false;
     }
     const seq = ++openSeq;
     const current = () => seq === openSeq;
@@ -131,9 +137,9 @@ export function createViewerHost({ state, parts }) {
     notify();
     try {
       const adapter = await mount(entry);
-      if (!current()) return;
+      if (!current()) return false;
       await adapter.open(String(imageId));
-      if (!current()) return;
+      if (!current()) return false;
       if (frame && !state.street.follow) parts.follow.lookAtPosition();
     } catch (error) {
       if (current())
@@ -142,32 +148,16 @@ export function createViewerHost({ state, parts }) {
       if (current()) state.street.loading = false;
       notify();
     }
-    if (current() && !state.street.error) selectCurrentSequence();
+    if (!current() || state.street.error) return false;
+    selectCurrentSequence();
+    return true;
   }
 
   /** Close the image; the mounted adapter stays warm for the next open. */
   function close() {
     openSeq++;
     active?.adapter.close();
-    Object.assign(state.street, {
-      open: false,
-      follow: false,
-      providerId: null,
-      providerName: null,
-      providerLabel: null,
-      imageId: null,
-      position: null,
-      bearing: null,
-      tilt: null,
-      altitude: null,
-      isPano: false,
-      capturedAt: null,
-      sequenceId: null,
-      creator: null,
-      externalUrl: null,
-      loading: false,
-      error: null,
-    });
+    Object.assign(state.street, freshStreet());
     parts.marker.clear();
     notify();
   }
@@ -248,6 +238,5 @@ export function createViewerHost({ state, parts }) {
     setRenderMode,
     prewarm,
     unmount,
-    activeProviderId: () => active?.id || null,
   };
 }

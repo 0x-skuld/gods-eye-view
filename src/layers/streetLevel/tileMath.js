@@ -9,23 +9,32 @@ function clampLat(lat) {
   return Math.max(-MAX_LAT, Math.min(MAX_LAT, lat));
 }
 
+/** Fractional tile column of a longitude in [-180, 180] at zoom z. */
+function tileXAt(lon, z) {
+  return ((lon + 180) / 360) * 2 ** z;
+}
+
+/** Fractional tile row of a latitude at zoom z. */
+function tileYAt(lat, z) {
+  const rad = (clampLat(lat) * Math.PI) / 180;
+  return (
+    ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * 2 ** z
+  );
+}
+
 /** Tile column for a longitude at zoom z. */
 export function lonToTileX(lon, z) {
   const n = 2 ** z;
   // 180° is the east edge of the last column, not the west edge of the first.
   if (lon >= 180) return n - 1;
   const wrapped = ((((lon + 180) % 360) + 360) % 360) - 180;
-  return Math.min(n - 1, Math.max(0, Math.floor(((wrapped + 180) / 360) * n)));
+  return Math.min(n - 1, Math.max(0, Math.floor(tileXAt(wrapped, z))));
 }
 
 /** Tile row for a latitude at zoom z. */
 export function latToTileY(lat, z) {
   const n = 2 ** z;
-  const rad = (clampLat(lat) * Math.PI) / 180;
-  const y = Math.floor(
-    ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n,
-  );
-  return Math.min(n - 1, Math.max(0, y));
+  return Math.min(n - 1, Math.max(0, Math.floor(tileYAt(lat, z))));
 }
 
 /** West longitude of tile column x at zoom z. */
@@ -73,45 +82,18 @@ export function normalizeBbox(input) {
   return { west, south, east, north };
 }
 
-/** Area of a bbox in square degrees (Mapillary's bbox limit unit). */
-export function bboxAreaDeg2(bbox) {
-  const box = normalizeBbox(bbox);
-  return box ? (box.east - box.west) * (box.north - box.south) : 0;
-}
-
-/**
- * Number of tiles at zoom z covering a bbox, without allocating them.
- */
-export function countTilesForBbox(bbox, z) {
-  const box = normalizeBbox(bbox);
-  if (!box) return 0;
-  const x0 = lonToTileX(box.west, z);
-  const x1 = lonToTileX(box.east, z);
-  const y0 = latToTileY(box.north, z);
-  const y1 = latToTileY(box.south, z);
-  return (x1 - x0 + 1) * (y1 - y0 + 1);
-}
-
 /**
  * Squared distance (in tiles) from tile (x, y)'s centre to the segment
  * `from` → `to` at zoom z, measured the short way round the date line.
  */
 function segmentDistance2(tile, from, to, z) {
   const n = 2 ** z;
-  /** Unfloored tile coordinates of a point. */
-  const tileX = (lon) => ((lon + 180) / 360) * n;
-  const tileY = (lat) => {
-    const rad = (clampLat(lat) * Math.PI) / 180;
-    return (
-      ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n
-    );
-  };
   const px = tile.x + 0.5;
   const py = tile.y + 0.5;
-  const ax = tileX(from.lon);
-  const ay = tileY(from.lat);
-  let bx = to ? tileX(to.lon) : ax;
-  const by = to ? tileY(to.lat) : ay;
+  const ax = tileXAt(from.lon, z);
+  const ay = tileYAt(from.lat, z);
+  let bx = to ? tileXAt(to.lon, z) : ax;
+  const by = to ? tileYAt(to.lat, z) : ay;
   if (bx - ax > n / 2) bx -= n;
   else if (ax - bx > n / 2) bx += n;
   let best = Infinity;
@@ -145,62 +127,60 @@ function segmentDistance2(tile, from, to, z) {
  * @returns {{tiles: Array<{x:number,y:number,z:number}>, truncated: boolean, total: number}}
  */
 export function tilesForBbox(bbox, z, { limit = Infinity, focus = null } = {}) {
-  // A box across the date line comes as west > east: split it at ±180°.
+  const n = 2 ** z;
+  const tiles = [];
+  let centre;
   if (Array.isArray(bbox) && Number(bbox[0]) > Number(bbox[2])) {
+    // A box across the date line comes as west > east: split it at ±180°.
     const [west, south, east, north] = bbox.map(Number);
-    const n = 2 ** z;
-    const tiles = [
-      ...tilesForBbox([west, south, 180, north], z).tiles,
-      ...tilesForBbox([-180, south, east, north], z).tiles,
-    ];
-    const x0 = lonToTileX(west, z);
-    const x1 = lonToTileX(east, z) + n;
-    const cx = ((x0 + x1) / 2) % n;
-    const cy = (latToTileY(north, z) + latToTileY(south, z)) / 2;
-    const dx = (x) => Math.min(Math.abs(x - cx), n - Math.abs(x - cx));
-    if (focus?.from)
-      tiles.sort(
-        (a, b) =>
-          segmentDistance2(a, focus.from, focus.to, z) -
-          segmentDistance2(b, focus.from, focus.to, z),
-      );
-    else
-      tiles.sort(
-        (a, b) =>
-          dx(a.x) ** 2 + (a.y - cy) ** 2 - (dx(b.x) ** 2 + (b.y - cy) ** 2),
-      );
-    const truncated = tiles.length > limit;
-    return {
-      tiles: truncated ? tiles.slice(0, limit) : tiles,
-      truncated,
-      total: tiles.length,
+    for (const half of [
+      [west, south, 180, north],
+      [-180, south, east, north],
+    ]) {
+      const box = normalizeBbox(half);
+      if (box) tiles.push(...tileGrid(box, z).tiles);
+    }
+    centre = {
+      x: ((lonToTileX(west, z) + lonToTileX(east, z) + n) / 2) % n,
+      y: (latToTileY(north, z) + latToTileY(south, z)) / 2,
     };
+  } else {
+    const box = normalizeBbox(bbox);
+    if (!box) return { tiles: [], truncated: false, total: 0 };
+    const grid = tileGrid(box, z);
+    tiles.push(...grid.tiles);
+    centre = { x: (grid.x0 + grid.x1) / 2, y: (grid.y0 + grid.y1) / 2 };
   }
-  const box = normalizeBbox(bbox);
-  if (!box) return { tiles: [], truncated: false, total: 0 };
+  const distance2 = focus?.from
+    ? (tile) => segmentDistance2(tile, focus.from, focus.to, z)
+    : (tile) => {
+        // Measured the short way round the date line.
+        const dx = Math.abs(tile.x - centre.x);
+        return Math.min(dx, n - dx) ** 2 + (tile.y - centre.y) ** 2;
+      };
+  // Each tile's distance is computed once; ties keep their row order.
+  const ranked = tiles
+    .map((tile) => ({ tile, d: distance2(tile) }))
+    .sort((a, b) => a.d - b.d)
+    .map(({ tile }) => tile);
+  const truncated = ranked.length > limit;
+  return {
+    tiles: truncated ? ranked.slice(0, limit) : ranked,
+    truncated,
+    total: ranked.length,
+  };
+}
+
+/** The tiles at zoom z in a normalized box, row by row, and their range. */
+function tileGrid(box, z) {
   const x0 = lonToTileX(box.west, z);
   const x1 = lonToTileX(box.east, z);
   const y0 = latToTileY(box.north, z);
   const y1 = latToTileY(box.south, z);
-  const total = (x1 - x0 + 1) * (y1 - y0 + 1);
-  const cx = (x0 + x1) / 2;
-  const cy = (y0 + y1) / 2;
   const tiles = [];
   for (let y = y0; y <= y1; y++)
     for (let x = x0; x <= x1; x++) tiles.push({ x, y, z });
-  if (focus?.from)
-    tiles.sort(
-      (a, b) =>
-        segmentDistance2(a, focus.from, focus.to, z) -
-        segmentDistance2(b, focus.from, focus.to, z),
-    );
-  else
-    tiles.sort(
-      (a, b) =>
-        (a.x - cx) ** 2 + (a.y - cy) ** 2 - ((b.x - cx) ** 2 + (b.y - cy) ** 2),
-    );
-  const truncated = tiles.length > limit;
-  return { tiles: truncated ? tiles.slice(0, limit) : tiles, truncated, total };
+  return { tiles, x0, x1, y0, y1 };
 }
 
 /**

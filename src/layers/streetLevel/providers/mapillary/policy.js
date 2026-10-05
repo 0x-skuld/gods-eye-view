@@ -1,11 +1,21 @@
 import { COLORS as SHARED_COLORS, PROVIDER_COLORS } from '../../policy.js';
 
+export { NEAREST_RADIUS_M } from '../../policy.js';
+
 /** Identity and tuning for the Mapillary street-level provider. */
 export const MAPILLARY_PROVIDER_ID = 'mapillary';
 export const MAPILLARY_NAME = 'Mapillary';
 export const MAPILLARY_LABEL = 'MAPILLARY';
 export const MAPILLARY_KEY_ID = 'mapillary';
 export const MAPILLARY_GRAPH_HOST = 'https://graph.mapillary.com';
+
+/** Methods a source (./source.js or a stand-in) must have for the provider. */
+export const MAPILLARY_SOURCE_METHODS = Object.freeze([
+  'getStatus',
+  'getTile',
+  'getSequenceImages',
+  'nearestImages',
+]);
 
 /** Stable id prefixes for picked primitives; every one starts with `mly:`. */
 export const PICK_PREFIX = Object.freeze({
@@ -33,7 +43,7 @@ export const KEY_REJECTED_MESSAGE =
   'Mapillary rejected MAPILLARY_CLIENT_TOKEN — replace it in Provider Settings';
 /** Shown while Mapillary rate-limits tile requests (429). */
 export const RATE_LIMITED_MESSAGE =
-  'Mapillary is rate-limiting coverage requests — it resumes on its own';
+  'Coverage requests are being rate-limited — they resume on their own';
 /**
  * How far from the camera a street-zoom view may reach for coverage: a tilted
  * view sees to the horizon, but only the ground within this range is ranked
@@ -52,8 +62,7 @@ export const SEQUENCE_IMAGES_LIMIT = 2000;
 export const IMAGE_CONE_SIZE_PX = 26;
 export const IMAGE_CONE_MIN_SPACING_M = 3;
 
-/** Nearest-image search when the user asks to look at a place. */
-export const NEAREST_RADIUS_M = 50;
+/** Images asked for in a nearest-image search (radius: NEAREST_RADIUS_M). */
 export const NEAREST_LIMIT = 8;
 
 /**

@@ -90,9 +90,6 @@ export const SURFACE_TERRAIN_ENTER_M = 1400;
 /** Camera height above which terrain mode switches back to draped. */
 export const SURFACE_TERRAIN_EXIT_M = 1800;
 
-/** Surface modes: draped on whatever the globe shows, or cast to bare earth. */
-export const SURFACE_MODES = Object.freeze(['draped', 'terrain']);
-
 /**
  * The next surface mode for the camera. Terrain mode applies only on Google
  * 3D and only at street zoom; the gap between the enter and exit heights
@@ -245,12 +242,6 @@ export function createGroundCaster({
     return south + (north - south) * fy;
   }
 
-  /** Where an overlay goes: bare earth plus the lift; null when unknown. */
-  function heightAt(lon, lat) {
-    const ground = groundAt(lon, lat);
-    return ground === null ? null : ground + lift;
-  }
-
   /**
    * A line as flat [lon, lat, height, ...] degrees and metres, densified;
    * null when any corner it needs is not cached yet. With `meshAt` (sampled
@@ -275,5 +266,5 @@ export function createGroundCaster({
     return flat;
   }
 
-  return { prepare, prepareLines, groundAt, heightAt, castLine };
+  return { prepare, prepareLines, groundAt, castLine };
 }

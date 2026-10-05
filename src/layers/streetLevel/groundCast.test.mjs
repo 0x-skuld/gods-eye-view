@@ -86,14 +86,16 @@ test('densifyLine splits long segments and keeps the vertices', () => {
 test('the caster interpolates cached grid corners and adds the lift', async () => {
   const terrain = fakeTerrain();
   const caster = createGroundCaster({ terrain, step: 0.001 });
-  assert.equal(caster.heightAt(10.0005, 50.0005), null);
+  assert.equal(caster.groundAt(10.0005, 50.0005), null);
   assert.equal(await caster.prepare([[10.0005, 50.0005]]), true);
   assert.equal(terrain.calls.length, 1);
   assert.equal(terrain.calls[0].length, 4);
   // Centre of the cell: mean of 100, 101, 102, 103.
-  const height = caster.heightAt(10.0005, 50.0005);
-  assert.ok(Math.abs(height - (101.5 + GROUND_CAST_LIFT_M)) < 1e-6);
   assert.ok(Math.abs(caster.groundAt(10.0005, 50.0005) - 101.5) < 1e-6);
+  // A cast line sits the lift above it.
+  const point = [10.0005, 50.0005];
+  const [, , height] = caster.castLine([point, point]);
+  assert.ok(Math.abs(height - (101.5 + GROUND_CAST_LIFT_M)) < 1e-6);
   // Same cell again: nothing to fetch.
   assert.equal(await caster.prepare([[10.0002, 50.0008]]), true);
   assert.equal(terrain.calls.length, 1);
@@ -120,11 +122,11 @@ test('a geoid fallback or a failing proxy leaves the heights unknown', async () 
     terrain: fakeTerrain({ source: 'geoid-fallback' }),
   });
   assert.equal(await fallback.prepare([[10.0005, 50.0005]]), false);
-  assert.equal(fallback.heightAt(10.0005, 50.0005), null);
+  assert.equal(fallback.groundAt(10.0005, 50.0005), null);
 
   const down = createGroundCaster({ terrain: fakeTerrain({ fail: true }) });
   assert.equal(await down.prepare([[10.0005, 50.0005]]), false);
-  assert.equal(down.heightAt(10.0005, 50.0005), null);
+  assert.equal(down.groundAt(10.0005, 50.0005), null);
 });
 
 test('too many corners are not requested, and aborted prepares do nothing', async () => {
@@ -255,9 +257,9 @@ test('a full cache drops its oldest corners, not every corner', async () => {
     assert.equal(await caster.prepare([cell]), true);
   // A fourth makes room by dropping the first cell only.
   assert.equal(await caster.prepare([cells[3]]), true);
-  assert.equal(caster.heightAt(...cells[0]), null, 'oldest dropped');
+  assert.equal(caster.groundAt(...cells[0]), null, 'oldest dropped');
   for (const cell of cells.slice(1))
-    assert.notEqual(caster.heightAt(...cell), null, 'newer cells kept');
+    assert.notEqual(caster.groundAt(...cell), null, 'newer cells kept');
 });
 
 test('cancelling a prepare cancels its terrain request', async () => {

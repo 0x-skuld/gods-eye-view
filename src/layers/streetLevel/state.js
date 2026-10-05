@@ -1,5 +1,32 @@
 import { FILTER_DEFAULT } from './policy.js';
 
+/**
+ * The open image's fields of `state.street`, as they are with no image open.
+ * Closing the viewer resets exactly these; the panel host, the render mode
+ * and whether following is available outlive any one image.
+ */
+export function freshStreet() {
+  return {
+    open: false,
+    follow: false,
+    providerId: null,
+    providerName: null,
+    providerLabel: null,
+    imageId: null,
+    position: null,
+    bearing: null,
+    tilt: null,
+    altitude: null,
+    isPano: false,
+    capturedAt: null,
+    sequenceId: null,
+    creator: null,
+    externalUrl: null,
+    loading: false,
+    error: null,
+  };
+}
+
 /** Mutable core state, created once per layer instance. */
 export function createState({ services }) {
   return {
@@ -17,27 +44,11 @@ export function createState({ services }) {
 
     street: {
       host: null,
-      open: false,
-      follow: false,
       /** Whether the active map stack allows following (Google 3D only). */
       followAvailable: false,
-      providerId: null,
-      providerName: null,
-      providerLabel: null,
-      imageId: null,
-      position: null,
-      bearing: null,
-      tilt: null,
-      altitude: null,
-      isPano: false,
-      capturedAt: null,
-      sequenceId: null,
-      creator: null,
-      externalUrl: null,
-      loading: false,
-      error: null,
       /** 'letterbox' shows the whole image; 'fill' crops it to the frame. */
       renderMode: 'letterbox',
+      ...freshStreet(),
     },
 
     /** 'terrain' on Google 3D at street zoom (overlays on the bare earth), else 'draped'. */

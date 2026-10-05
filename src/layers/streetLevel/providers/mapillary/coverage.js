@@ -1,7 +1,13 @@
 import * as Cesium from 'cesium';
 import { decodeCoverageTile } from './decode.js';
 import { passesImageryFilter } from '../../filter.js';
-import { groundUnderCamera, viewFocus, visibleBbox } from '../../view.js';
+import {
+  groundUnderCamera,
+  metresBetween,
+  viewFocus,
+  visibleBbox,
+  whenIdle,
+} from '../../view.js';
 import { densifyLine, MESH_DENSIFY_DEG } from '../../groundCast.js';
 import { MESH_CELL_DEG } from '../../meshSampler.js';
 import {
@@ -27,7 +33,7 @@ import {
 } from './policy.js';
 
 /** Draped lines stay at most this long while a tile's cast lines build. */
-const SWAP_MAX_WAIT_MS = 4000;
+export const SWAP_MAX_WAIT_MS = 4000;
 /** Tiles touched by new mesh samples are redrawn at most this often. */
 const REMESH_INTERVAL_MS = 1500;
 /** Gap between redrawing one dirty tile and the next. */
@@ -104,8 +110,9 @@ export function createCoverage({ state, source }) {
     return `${z}/${x}/${y}`;
   }
 
+  /** The imagery filter, resolved now: "since N days" moves with the clock. */
   function filter() {
-    return state.filter;
+    return state.context.getFilter();
   }
 
   function terrainMode() {
@@ -122,9 +129,10 @@ export function createCoverage({ state, source }) {
    */
   function drawnSequences(entry) {
     const drawn = [];
+    const current = filter();
     for (const sequence of entry.sequenceList) {
       if (drawn.length >= PER_TILE_SEQUENCE_CAP) break;
-      if (passesImageryFilter(sequence, filter())) drawn.push(sequence);
+      if (passesImageryFilter(sequence, current)) drawn.push(sequence);
     }
     return drawn;
   }
@@ -232,13 +240,20 @@ export function createCoverage({ state, source }) {
       }
       // A remesh may have cleared the flag while this was in flight.
       entry.castRequested = true;
-      // Keep the draped lines until the cast ones are built, so nothing blinks.
-      const previous = entry.primitives;
-      entry.primitives = [];
-      attachPrimitive(entry);
-      removeWhenReady(entry, previous);
+      redrawTile(entry);
       requestMesh(entry);
     });
+  }
+
+  /**
+   * Rebuild a tile's lines (cast, or with new mesh heights), keeping the old
+   * ones on screen until the new ones are built, so nothing blinks.
+   */
+  function redrawTile(entry) {
+    const previous = entry.primitives;
+    entry.primitives = [];
+    attachPrimitive(entry);
+    removeWhenReady(entry, previous);
   }
 
   /** The mesh cells under a tile's drawn lines, built once per filter. */
@@ -302,23 +317,14 @@ export function createCoverage({ state, source }) {
     if (!entry) return;
     state.coverage.remeshDirty.delete(entry);
     if (attached.has(entry)) {
-      const previous = entry.primitives;
-      entry.primitives = [];
-      attachPrimitive(entry);
-      removeWhenReady(entry, previous);
+      redrawTile(entry);
       requestRender();
     }
     if (state.coverage.remeshDirty.size)
       state.coverage.remeshTimer = setTimeout(
-        () => idleTask(remesh),
+        () => whenIdle(remesh, 500),
         REMESH_STAGGER_MS,
       );
-  }
-
-  function idleTask(task) {
-    if (typeof globalThis.requestIdleCallback === 'function')
-      globalThis.requestIdleCallback(() => task(), { timeout: 500 });
-    else task();
   }
 
   state.coverage.remeshDirty = new Set();
@@ -367,8 +373,9 @@ export function createCoverage({ state, source }) {
       0.85,
     );
     const drawn = [];
+    const current = filter();
     for (const point of points) {
-      if (!passesImageryFilter(point, filter())) continue;
+      if (!passesImageryFilter(point, current)) continue;
       drawn.push(
         collection.add({
           position: Cesium.Cartesian3.fromDegrees(point.lon, point.lat),
@@ -513,7 +520,6 @@ export function createCoverage({ state, source }) {
       return;
     const controller = new AbortController();
     state.coverage.pending.set(key, controller);
-    state.coverage.loading++;
     notify();
     try {
       // Fetch and the one-time terrain-height table load run side by side.
@@ -578,10 +584,9 @@ export function createCoverage({ state, source }) {
       if (error?.retryAfterSec) holdFor(error.retryAfterSec);
     } finally {
       // Only the request that still owns the key settles it: a superseded one
-      // must not drop a newer request's entry or its loading count.
+      // must not drop a newer request's entry (which is what counts as loading).
       if (state.coverage.pending.get(key) === controller) {
         state.coverage.pending.delete(key);
-        state.coverage.loading = Math.max(0, state.coverage.loading - 1);
         if (!state.coverage.pending.size) purgeStale();
       }
       notify();
@@ -632,7 +637,6 @@ export function createCoverage({ state, source }) {
     for (const controller of state.coverage.pending.values())
       controller.abort();
     state.coverage.pending.clear();
-    state.coverage.loading = 0;
     for (const [key, entry] of state.coverage.tiles) {
       cancelCast(entry);
       const previous = state.coverage.stale.get(key);
@@ -654,10 +658,7 @@ export function createCoverage({ state, source }) {
    */
   function isTilted({ nadir, ahead }, height) {
     if (!ahead) return true;
-    const dLat = (ahead.lat - nadir.lat) * 111_320;
-    const dLon =
-      (ahead.lon - nadir.lon) * 111_320 * Math.cos((nadir.lat * Math.PI) / 180);
-    return Math.hypot(dLat, dLon) > Math.max(1, height);
+    return metresBetween(nadir, ahead) > Math.max(1, height);
   }
 
   /** Recompute the tile set for the current camera and reconcile primitives. */
@@ -723,10 +724,9 @@ export function createCoverage({ state, source }) {
     for (const [key, controller] of [...state.coverage.pending])
       if (!wanted.has(key)) {
         // The aborted request no longer owns its key, so its `finally` will
-        // not settle the count: settle it here.
+        // not settle it: settle it here.
         controller.abort();
         state.coverage.pending.delete(key);
-        state.coverage.loading = Math.max(0, state.coverage.loading - 1);
       }
     for (const tile of tiles) loadTile(tile, kind);
     if (!state.coverage.pending.size) purgeStale();
@@ -769,7 +769,6 @@ export function createCoverage({ state, source }) {
     for (const controller of state.coverage.pending.values())
       controller.abort();
     state.coverage.pending.clear();
-    state.coverage.loading = 0;
     for (const key of [...state.coverage.tiles.keys()]) removeTile(key);
     purgeStale();
     state.coverage.zoom = null;
@@ -805,15 +804,6 @@ export function createCoverage({ state, source }) {
     if (!state.context.isActive()) return;
     rebuild();
     refresh();
-  }
-
-  /** Look a sequence up across loaded tiles. */
-  function findSequence(id) {
-    for (const entry of state.coverage.tiles.values()) {
-      const hit = entry.sequences.get(id);
-      if (hit) return hit;
-    }
-    return null;
   }
 
   /** Recolour every part of a sequence in one ready primitive. */
@@ -893,10 +883,18 @@ export function createCoverage({ state, source }) {
     state.coverage.stopSelectionWatch = null;
   }
 
+  /**
+   * Sequences (or overview points) drawn. A sequence that crosses a tile
+   * edge is in both tiles' lists, so sequences count once by id.
+   */
   function sequenceCount() {
-    let count = 0;
-    for (const entry of state.coverage.tiles.values()) count += entry.count;
-    return count;
+    const ids = new Set();
+    let points = 0;
+    for (const entry of state.coverage.tiles.values())
+      if (entry.kind === 'sequence')
+        for (const id of entry.sequences.keys()) ids.add(id);
+      else points += entry.count;
+    return ids.size + points;
   }
 
   return {
@@ -907,7 +905,6 @@ export function createCoverage({ state, source }) {
     resetErrors,
     rebuild,
     setSurface,
-    findSequence,
     recolorSequence,
     sequenceCount,
   };

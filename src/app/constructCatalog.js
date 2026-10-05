@@ -56,13 +56,7 @@ const SOURCE_METHODS = Object.freeze({
   earthquakes: ['getSnapshot'],
   'fire-perimeters': ['getSnapshot'],
   cables: ['fetch'],
-  mapillary: [
-    'getStatus',
-    'getTile',
-    'getImage',
-    'getSequenceImages',
-    'nearestImages',
-  ],
+  mapillary: ['getStatus', 'getTile', 'getSequenceImages', 'nearestImages'],
 });
 
 /**

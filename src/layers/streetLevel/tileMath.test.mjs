@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  bboxAreaDeg2,
-  countTilesForBbox,
   coverageZoomForHeight,
   overviewZoomForHeight,
   latToTileY,
@@ -43,12 +41,11 @@ test('normalizeBbox orders and clamps coordinates', () => {
   assert.equal(normalizeBbox([1, 2, Number.NaN, 3]), null);
 });
 
-test('city-scale boxes exceed the Mapillary bbox limit and need tiles', () => {
+test('city-scale boxes span many z14 tiles', () => {
   const sacramento = [-121.56, 38.44, -121.36, 38.69];
-  assert.ok(bboxAreaDeg2(sacramento) > 0.01);
-  assert.equal(countTilesForBbox(sacramento, 14), 160);
+  assert.equal(tilesForBbox(sacramento, 14).total, 160);
   const detroit = [-83.29, 42.25, -82.91, 42.45];
-  assert.equal(countTilesForBbox(detroit, 14), 234);
+  assert.equal(tilesForBbox(detroit, 14).total, 234);
 });
 
 test('tilesForBbox orders from the centre outwards and honours the cap', () => {

@@ -9,7 +9,7 @@ import { requiresKeyIdFor, validateProviders } from './registry.js';
 import { normalizeFilter, resolveFilter, sameFilter } from './filter.js';
 import { decodeParams, encodeParams } from './params.js';
 import { composeUIState, summarizeCoverage } from './uiState.js';
-import { cameraHeightAboveGround, viewCentre } from './view.js';
+import { cameraHeightAboveGround, viewCentre, whenIdle } from './view.js';
 import { createGroundCaster, nextSurfaceMode } from './groundCast.js';
 import { createMeshSampler } from './meshSampler.js';
 
@@ -63,13 +63,6 @@ export function createStreetLevelLayer({
   };
   parts.selection = createSelection(context);
 
-  /** Run low-priority work when the browser is idle (or soon, headless). */
-  function scheduleIdle(task) {
-    if (typeof globalThis.requestIdleCallback === 'function')
-      globalThis.requestIdleCallback(() => task(), { timeout: 1500 });
-    else setTimeout(task, 200);
-  }
-
   let notifyQueued = false;
   function notify() {
     if (notifyQueued) return;
@@ -91,7 +84,7 @@ export function createStreetLevelLayer({
   function providerContext(entry) {
     return Object.freeze({
       services: state.services,
-      getViewer: () => state.viewer,
+      /** The imagery filter resolved against now; read it when filtering. */
       getFilter: () => resolveFilter(state.filter),
       isActive: () => state.enabled && entry.on,
       /** Bare-earth heights (see groundCast.js), or null without a terrain service. */
@@ -103,8 +96,21 @@ export function createStreetLevelLayer({
       notify,
       actions: {
         openImage: (imageId) => openImage(entry.def.id, imageId),
+        /**
+         * Show a provider error, or (null) withdraw the one it showed. A
+         * withdrawal never clears an error the viewer or another provider
+         * has shown since, and a stale one cannot mask a later coverage
+         * error such as KEY REJECTED.
+         */
         reportError: (message) => {
-          state.street.error = message || null;
+          if (message) {
+            state.street.error = entry.reportedError = message;
+          } else {
+            if (!entry.reportedError) return;
+            if (state.street.error === entry.reportedError)
+              state.street.error = null;
+            entry.reportedError = null;
+          }
           notify();
         },
       },
@@ -112,7 +118,14 @@ export function createStreetLevelLayer({
   }
 
   for (const def of definitionsFrozen) {
-    const entry = { def, instance: null, on: true, status: null };
+    const entry = {
+      def,
+      instance: null,
+      on: true,
+      status: null,
+      /** The error this provider last reported, until it withdraws it. */
+      reportedError: null,
+    };
     entry.instance = def.create(providerContext(entry));
     state.providers.set(def.id, entry);
   }
@@ -217,7 +230,7 @@ export function createStreetLevelLayer({
     entry.instance.activate(state.viewer);
     parts.credits.show(state.viewer, entry.def);
     if (!entry.status) refreshStatus(entry);
-    scheduleIdle(() => parts.viewerHost.prewarm([entry]));
+    whenIdle(() => parts.viewerHost.prewarm([entry]), 1500);
   }
 
   function deactivate(entry) {
@@ -384,7 +397,6 @@ export function createStreetLevelLayer({
       else if (coverage.hint && state.enabled) loadingLabel = coverage.hint;
       return {
         count: coverage.count,
-        sequences: coverage.count,
         loading: coverage.loading,
         keyRequired: coverage.keyRequired,
         error: coverage.keyRequired
@@ -438,13 +450,11 @@ export function createStreetLevelLayer({
     attachViewerHost(element) {
       parts.viewerHost.attach(element);
       if (element && state.enabled)
-        scheduleIdle(() => parts.viewerHost.prewarm(activeEntries()));
+        whenIdle(() => parts.viewerHost.prewarm(activeEntries()), 1500);
     },
     setProviderEnabled,
-    isProviderEnabled: (id) => state.providers.get(id)?.on === true,
     /** Imagery filter for coverage, cones and nearest-image lookups. */
     setCoverageFilter,
-    getCoverageFilter: () => ({ ...state.filter }),
     openImage,
     /** Open the nearest image any active provider has around a point. */
     async openNearest(point) {
@@ -467,13 +477,16 @@ export function createStreetLevelLayer({
           lastError = error;
           continue;
         }
-        if (!imageId) continue;
-        await openImage(entry.def.id, imageId);
-        return true;
+        if (!state.enabled) break;
+        // This provider was switched off while it looked: try the next.
+        if (!imageId || !entry.on) continue;
+        return openImage(entry.def.id, imageId);
       }
-      state.street.error =
-        lastError?.message ||
-        `No street-level imagery within ${NEAREST_RADIUS_M} m of the view centre`;
+      // Switched off while it looked: nothing to open, nothing to report.
+      if (state.enabled && activeEntries().length)
+        state.street.error =
+          lastError?.message ||
+          `No street-level imagery within ${NEAREST_RADIUS_M} m of the view centre`;
       state.street.loading = false;
       notify();
       return false;
@@ -485,7 +498,6 @@ export function createStreetLevelLayer({
     },
     setViewerRenderMode: (mode) => parts.viewerHost.setRenderMode(mode),
     setFollow: (enabled) => parts.follow.setFollow(enabled),
-    lookAtImage: () => parts.follow.lookAtPosition(),
     resizeViewer: () => parts.viewerHost.resize(),
     selectSequence(
       sequenceId,

@@ -2,6 +2,7 @@ import { createCoverage, sequenceIdFromPick } from './coverage.js';
 import { createSequences } from './sequences.js';
 import { createMapillaryViewer } from './viewer.js';
 import { passesImageryFilter } from '../../filter.js';
+import { metresBetween } from '../../view.js';
 import {
   COLORS,
   MAPILLARY_CREDIT_HTML,
@@ -9,21 +10,13 @@ import {
   MAPILLARY_LABEL,
   MAPILLARY_NAME,
   MAPILLARY_PROVIDER_ID,
+  MAPILLARY_SOURCE_METHODS,
   NEAREST_LIMIT,
   NEAREST_RADIUS_M,
   PICK_PREFIX,
-  mapillaryImageUrl,
 } from './policy.js';
 
 export { MAPILLARY_PROVIDER_ID, mapillaryImageUrl } from './policy.js';
-
-const SOURCE_METHODS = [
-  'getStatus',
-  'getTile',
-  'getImage',
-  'getSequenceImages',
-  'nearestImages',
-];
 
 /** Per-provider mutable state, created once per `create()`. */
 function createProviderState(context) {
@@ -35,7 +28,6 @@ function createProviderState(context) {
     /** Mapillary refused the configured token: nothing is requested until re-enabled. */
     keyRejected: false,
     status: null,
-    filter: context.getFilter(),
     coverage: {
       zoom: null,
       /** @type {Map<string, {primitive: object|null, sequences: Map<string, object>, count: number}>} */
@@ -43,8 +35,8 @@ function createProviderState(context) {
       /** Tiles from the previous zoom, kept on screen until replacements land. */
       stale: new Map(),
       staleTimer: null,
+      /** Tile key → its request's controller; any entry means LOADING. */
       pending: new Map(),
-      loading: 0,
       lastError: null,
       /** While Mapillary rate-limits: no requests before this time (ms). */
       holdUntil: 0,
@@ -74,7 +66,11 @@ function createProviderState(context) {
  * @returns {import('../../registry.js').StreetLevelProvider}
  */
 export function createMapillaryProvider({ source }) {
-  if (!SOURCE_METHODS.every((method) => typeof source?.[method] === 'function'))
+  if (
+    !MAPILLARY_SOURCE_METHODS.every(
+      (method) => typeof source?.[method] === 'function',
+    )
+  )
     throw new TypeError('A Mapillary source is required');
 
   return Object.freeze({
@@ -84,19 +80,7 @@ export function createMapillaryProvider({ source }) {
     requiresKeyId: MAPILLARY_KEY_ID,
     pickPrefix: PICK_PREFIX.root,
     colors: COLORS,
-    credit: Object.freeze({
-      key: MAPILLARY_PROVIDER_ID,
-      html: MAPILLARY_CREDIT_HTML,
-    }),
-    capabilities: Object.freeze({
-      coverage: 'tiles',
-      sequences: true,
-      pano: true,
-      capturedAt: true,
-      creator: true,
-      follow: true,
-    }),
-    externalUrl: mapillaryImageUrl,
+    credit: Object.freeze({ html: MAPILLARY_CREDIT_HTML }),
 
     create(context) {
       const state = createProviderState(context);
@@ -150,8 +134,8 @@ export function createMapillaryProvider({ source }) {
 
         refreshCoverage: () => parts.coverage.refresh(),
 
-        setFilter(filter) {
-          state.filter = filter;
+        /** The filter changed: redraw. Each draw reads it from the context. */
+        setFilter() {
           parts.coverage.rebuild();
           parts.sequences.rerender();
         },
@@ -167,7 +151,7 @@ export function createMapillaryProvider({ source }) {
             count: parts.coverage.sequenceCount(),
             zoom: state.coverage.zoom,
             kind: state.coverage.kind,
-            loading: state.coverage.loading > 0,
+            loading: state.coverage.pending.size > 0,
             hint: state.coverage.hint,
             error: state.coverage.lastError,
             keyRequired: state.keyRequired,
@@ -208,19 +192,18 @@ export function createMapillaryProvider({ source }) {
           const metres = (record) => {
             const [lon2, lat2] = (record.computed_geometry || record.geometry)
               ?.coordinates || [NaN, NaN];
-            const dx = (lon2 - lon) * 111_320 * Math.cos((lat * Math.PI) / 180);
-            const dy = (lat2 - lat) * 110_540;
-            const d = Math.hypot(dx, dy);
+            const d = metresBetween({ lon, lat }, { lon: lon2, lat: lat2 });
             return Number.isFinite(d) ? d : Infinity;
           };
           const byDistance = [...images].sort((a, b) => metres(a) - metres(b));
+          const filter = context.getFilter();
           const hit = byDistance.find((record) =>
             passesImageryFilter(
               {
                 isPano: record.is_pano === true,
                 capturedAt: Number(record.captured_at) || 0,
               },
-              state.filter,
+              filter,
             ),
           );
           return hit ? String(hit.id) : null;

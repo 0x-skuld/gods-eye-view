@@ -7,12 +7,11 @@ export const POSITION_PICK_ID = 'sl:pos';
 /**
  * One colour per imagery source, used everywhere that source appears: its
  * chip, coverage lines, overview points, image cones and legend swatch.
- * Registered providers take their entry from here; a new source adds one.
+ * Registered providers take their entry from here; a new source adds its
+ * colour together with its provider.
  */
 export const PROVIDER_COLORS = Object.freeze({
   mapillary: '#05cb63',
-  panoramax: '#a66bff',
-  'google-street-view': '#4285f4',
 });
 
 /** Colours every provider shares: the selection highlight and the marker. */
@@ -30,7 +29,10 @@ export const MAX_SINCE_DAYS = 36_500;
 /** Filter every provider starts with: all imagery, any date. */
 export const FILTER_DEFAULT = Object.freeze({ pano: 'all', sinceDays: 0 });
 
-/** Nearest-image search when the user asks to look at a place. */
+/**
+ * Nearest-image search when the user asks to look at a place, in metres
+ * (Mapillary's graph API answers within at most 50 m).
+ */
 export const NEAREST_RADIUS_M = 50;
 
 /**

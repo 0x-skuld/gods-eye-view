@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { metresBetween, whenIdle } from './view.js';
 
 /**
  * Rendered-surface heights for ground casting on Google 3D (see groundCast.js
@@ -21,21 +22,13 @@ export const MESH_SAMPLE_RADIUS_M = 900;
 export const MESH_SAMPLE_BUDGET_MS = 6;
 /** A cell whose probe missed is tried again after this long. */
 export const MESH_MISS_RETRY_MS = 8000;
-/** Cached cells before the cache is dropped and refilled. */
+/** Cached cells (and remembered misses) before they are dropped and refilled. */
 const MESH_CACHE_MAX = 80_000;
 /** Listeners hear about new samples at most this often. */
 const MESH_NOTIFY_MS = 700;
 
 const cellOf = (value) => Math.round(value / MESH_CELL_DEG);
 const keyOf = (lon, lat) => `${cellOf(lon)},${cellOf(lat)}`;
-
-function metres([lon1, lat1], [lon2, lat2]) {
-  const lat = (((lat1 + lat2) / 2) * Math.PI) / 180;
-  return Math.hypot(
-    (lon2 - lon1) * 111_320 * Math.cos(lat),
-    (lat2 - lat1) * 110_540,
-  );
-}
 
 /** Every top-level primitive that is not a 3D tileset: what a probe skips. */
 function overlays(scene) {
@@ -48,25 +41,24 @@ function overlays(scene) {
   return out;
 }
 
-function idle(task) {
-  if (typeof globalThis.requestIdleCallback === 'function')
-    globalThis.requestIdleCallback(task, { timeout: 300 });
-  else setTimeout(() => task(null), 16);
-}
-
 /**
- * @param {{getViewer: () => object|null, budgetMs?: number, radiusM?: number}} options
+ * @param {{getViewer: () => object|null, budgetMs?: number, radiusM?: number, cacheMax?: number}} options
  */
 export function createMeshSampler({
   getViewer,
   budgetMs = MESH_SAMPLE_BUDGET_MS,
   radiusM = MESH_SAMPLE_RADIUS_M,
+  cacheMax = MESH_CACHE_MAX,
 }) {
   /** cell key → sampled mesh height (ellipsoidal metres). */
   const heights = new Map();
-  /** cell key → retry time for probes that hit nothing. */
+  /**
+   * cell key → retry time for probes that hit nothing. An entry goes once
+   * its cell is sampled or asked for after the retry time, and with the
+   * height cache, so the map stays bounded.
+   */
   const misses = new Map();
-  /** cell key → [lon, lat] waiting to be probed. */
+  /** cell key → {lon, lat} cell centre waiting to be probed. */
   const wanted = new Map();
   const listeners = new Set();
   let enabled = false;
@@ -87,11 +79,15 @@ export function createMeshSampler({
       if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
       const key = keyOf(lon, lat);
       if (heights.has(key) || wanted.has(key)) continue;
-      if ((misses.get(key) || 0) > now) continue;
-      wanted.set(key, [
-        cellOf(lon) * MESH_CELL_DEG,
-        cellOf(lat) * MESH_CELL_DEG,
-      ]);
+      const retryAt = misses.get(key);
+      if (retryAt !== undefined) {
+        if (retryAt > now) continue;
+        misses.delete(key);
+      }
+      wanted.set(key, {
+        lon: cellOf(lon) * MESH_CELL_DEG,
+        lat: cellOf(lat) * MESH_CELL_DEG,
+      });
     }
     schedule();
   }
@@ -99,7 +95,7 @@ export function createMeshSampler({
   function schedule() {
     if (running || !enabled || !wanted.size) return;
     running = true;
-    idle(step);
+    whenIdle(step, 300);
   }
 
   function emit() {
@@ -120,14 +116,14 @@ export function createMeshSampler({
     const scene = getViewer()?.scene;
     const carto = getViewer()?.camera?.positionCartographic;
     if (!enabled || !scene?.sampleHeightSupported || !carto) return;
-    const centre = [
-      Cesium.Math.toDegrees(carto.longitude),
-      Cesium.Math.toDegrees(carto.latitude),
-    ];
+    const centre = {
+      lon: Cesium.Math.toDegrees(carto.longitude),
+      lat: Cesium.Math.toDegrees(carto.latitude),
+    };
     // Nearest first; cells out of range are dropped (they stay bare earth).
     const order = [];
     for (const [key, point] of wanted) {
-      const distance = metres(point, centre);
+      const distance = metresBetween(point, centre);
       if (distance > radiusM) wanted.delete(key);
       else order.push([distance, key, point]);
     }
@@ -139,7 +135,7 @@ export function createMeshSampler({
     const until = performance.now() + Math.min(budgetMs, slice);
     const exclude = overlays(scene);
     let probed = 0;
-    for (const [, key, [lon, lat]] of order) {
+    for (const [, key, { lon, lat }] of order) {
       if (probed && performance.now() > until) break;
       wanted.delete(key);
       probed++;
@@ -153,16 +149,24 @@ export function createMeshSampler({
         height = undefined;
       }
       if (!Number.isFinite(height)) {
+        if (misses.size >= cacheMax) misses.clear();
         misses.set(key, Date.now() + MESH_MISS_RETRY_MS);
         continue;
       }
-      if (heights.size >= MESH_CACHE_MAX) heights.clear();
+      if (heights.size >= cacheMax) forget();
+      misses.delete(key);
       heights.set(key, height);
       fresh.push([lon, lat]);
     }
     if (fresh.length && !notifyTimer)
       notifyTimer = setTimeout(emit, MESH_NOTIFY_MS);
     schedule();
+  }
+
+  /** Drop every sample and remembered miss. */
+  function forget() {
+    heights.clear();
+    misses.clear();
   }
 
   /** Probe only while overlays are cast (Google 3D at street zoom). */
@@ -180,6 +184,7 @@ export function createMeshSampler({
 
   function destroy() {
     enabled = false;
+    forget();
     wanted.clear();
     listeners.clear();
     clearTimeout(notifyTimer);

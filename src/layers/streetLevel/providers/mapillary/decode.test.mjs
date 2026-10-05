@@ -113,7 +113,6 @@ test('sequences and overview points decode into lon/lat records', () => {
   assert.equal(decoded.overview[0].id, '3');
   assert.equal(decoded.overview[0].isPano, false);
   assert.ok(Math.abs(decoded.overview[0].lon - -90) < 1e-6, 'tile centre');
-  assert.equal(decoded.images.length, 0, 'image layer skipped by default');
 });
 
 test('an empty tile decodes to empty lists', () => {
@@ -121,7 +120,6 @@ test('an empty tile decodes to empty lists', () => {
     decodeCoverageTile(new Uint8Array(0), { x: 0, y: 0, z: 0 }),
     {
       sequences: [],
-      images: [],
       overview: [],
     },
   );

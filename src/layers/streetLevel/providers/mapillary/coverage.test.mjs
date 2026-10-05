@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as Cesium from 'cesium';
-import { createCoverage } from './coverage.js';
+import { SWAP_MAX_WAIT_MS, createCoverage } from './coverage.js';
 import { encodeCoverageTile } from './coverageFixture.mjs';
 import {
   COLORS,
@@ -114,9 +114,10 @@ function setup({
   const state = {
     viewer,
     services: {},
-    filter: { pano: 'all', sinceMs: null },
     keyRequired: false,
     context: {
+      filter: { pano: 'all', sinceMs: null },
+      getFilter: () => state.context.filter,
       isActive: () => true,
       notify() {},
       getSurface: () => surface,
@@ -130,7 +131,6 @@ function setup({
       stale: new Map(),
       staleTimer: null,
       pending: new Map(),
-      loading: 0,
       lastError: null,
       debounceTimer: null,
       removeCameraListener: null,
@@ -188,7 +188,7 @@ test('a superseded tile request cannot strand lines on the globe (review P0 #2)'
     true,
     '#2 still owns the key',
   );
-  assert.equal(state.coverage.loading, 1);
+  assert.equal(state.coverage.pending.size, 1, 'still loading');
   coverage.refresh();
   assert.equal(forTile().length, 2, 'no duplicate request');
 
@@ -265,26 +265,24 @@ test('a tile whose lines cannot be cast is not rebuilt for nothing', async () =>
   coverage.clear();
 });
 
-test('panning off a tile that is still loading settles the loading count', async () => {
+test('panning off a tile that is still loading stops counting it as loading', async () => {
   const { viewer, source, state, coverage } = setup();
   coverage.refresh();
-  assert.equal(state.coverage.loading, 1);
+  assert.equal(state.coverage.pending.size, 1);
   // Same zoom, two tiles east: the first request is dropped, a new one starts.
   viewer.view.lon += 0.05;
   coverage.refresh();
   assert.equal(source.calls.length, 2);
   assert.equal(source.calls[0].signal.aborted, true);
-  assert.equal(state.coverage.pending.size, 1);
   assert.equal(
-    state.coverage.loading,
+    state.coverage.pending.size,
     1,
     'only the live request counts as loading',
   );
   source.calls[0].reject(new DOMException('aborted', 'AbortError'));
   source.calls[1].resolve(new Uint8Array());
   await settle();
-  assert.equal(state.coverage.pending.size, 0);
-  assert.equal(state.coverage.loading, 0, 'LOADING clears');
+  assert.equal(state.coverage.pending.size, 0, 'LOADING clears');
   coverage.clear();
 });
 
@@ -337,7 +335,7 @@ test('a rate limit keeps the drawn tiles and asks again once the wait is over (r
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
-  assert.match(state.coverage.lastError, /rate-limiting/);
+  assert.match(state.coverage.lastError, /rate-limited/);
   viewer.view.lon += 0.05;
   coverage.refresh();
   assert.equal(source.calls.length, 1, 'held: nothing is requested');
@@ -494,7 +492,7 @@ test('the per-tile cap applies after the imagery filter, so a dense tile keeps i
       capturedAt: 1_000_000_000_000 + i,
       isPano: true,
     });
-  state.filter = { pano: 'pano', sinceMs: null };
+  state.context.filter = { pano: 'pano', sinceMs: null };
   coverage.refresh();
   source.calls[0].resolve(encodeCoverageTile(centre.tile, { sequences }));
   await settle();
@@ -502,13 +500,14 @@ test('the per-tile cap applies after the imagery filter, so a dense tile keeps i
   const cap = Math.floor(COVERAGE_MAX_SEQUENCES / COVERAGE_MAX_TILES);
   assert.equal(entry.count, Math.min(300, cap), 'every 360° line is drawn');
   assert.equal(coverage.sequenceCount(), Math.min(300, cap));
-  assert.ok(coverage.findSequence('pano-0'), 'drawn lines can be looked up');
-  assert.equal(coverage.findSequence('flat-699'), null);
-  state.filter = { pano: 'all', sinceMs: null };
+  // Picking and recolouring look sequences up among the drawn lines.
+  assert.ok(entry.sequences.has('pano-0'), 'drawn lines can be looked up');
+  assert.equal(entry.sequences.has('flat-699'), false);
+  state.context.filter = { pano: 'all', sinceMs: null };
   coverage.rebuild();
   assert.equal(entry.count, cap, 'all imagery is capped as before');
-  assert.ok(coverage.findSequence('flat-699'), 'the newest flat line is drawn');
-  assert.equal(coverage.findSequence('pano-299'), null, 'over the cap');
+  assert.ok(entry.sequences.has('flat-699'), 'the newest flat line is drawn');
+  assert.equal(entry.sequences.has('pano-299'), false, 'over the cap');
   coverage.clear();
 });
 
@@ -557,4 +556,200 @@ test('a selection made or cleared while a tile builds is applied once it is read
   assert.deepEqual(Array.from(second.attributes.color), value(false));
   coverage.clear();
   assert.equal(viewer.postRender.size, 0, 'the selection watch is gone');
+});
+
+test('a sequence that crosses a tile edge is counted once (review P3)', async () => {
+  const { viewer, source, coverage, centre } = setup();
+  // Look straight down on the edge between this tile and its east neighbour.
+  const { east } = tileBounds(centre.tile.x, centre.tile.y, 14);
+  viewer.view.lon = east;
+  coverage.refresh();
+  assert.equal(source.calls.length, 2, 'two tiles in view');
+  const across = [
+    [
+      [east - 0.001, centre.lat],
+      [east + 0.001, centre.lat],
+    ],
+  ];
+  for (const call of source.calls) {
+    const [, x, y] = call.key.split('/').map(Number);
+    call.resolve(
+      encodeCoverageTile(
+        { x, y, z: 14 },
+        {
+          sequences: [
+            { id: 'across', parts: across },
+            { id: `only-${x}`, parts: across },
+          ],
+        },
+      ),
+    );
+  }
+  await settle();
+  assert.equal(coverage.sequenceCount(), 3, 'across, plus one per tile');
+  coverage.clear();
+});
+
+/**
+ * In terrain mode with a cast tile mid-swap: the draped lines and the cast
+ * primitive whose readiness the test controls.
+ */
+async function midSwap() {
+  // Drawn draped first; castLine only answers once the heights are in.
+  let heightsReady = false;
+  const groundCaster = {
+    prepareLines: async () => (heightsReady = true),
+    castLine: (coords) =>
+      heightsReady ? coords.flatMap(([lon, lat]) => [lon, lat, 30]) : null,
+  };
+  const context = setup({ surface: 'terrain', groundCaster });
+  context.coverage.refresh();
+  context.source.calls[0].resolve(context.bytes);
+  await settle();
+  await settle();
+  const { groundPrimitives, primitives } = context.viewer.scene;
+  assert.equal(groundPrimitives.items.size, 1, 'draped lines kept');
+  assert.equal(primitives.items.size, 1, 'cast lines building');
+  const [cast] = primitives.items;
+  const control = { ready: false };
+  Object.defineProperty(cast, 'ready', { get: () => control.ready });
+  return { ...context, control };
+}
+
+test('the draped lines go once the cast lines are ready', async () => {
+  const { viewer, coverage, control } = await midSwap();
+  frame(viewer.postRender);
+  assert.equal(viewer.scene.groundPrimitives.items.size, 1, 'still building');
+  control.ready = true;
+  frame(viewer.postRender);
+  assert.equal(viewer.scene.groundPrimitives.items.size, 0, 'draped removed');
+  assert.equal(viewer.scene.primitives.items.size, 1, 'cast lines stay');
+  assert.equal(viewer.postRender.size, 0, 'nothing left watching');
+  coverage.clear();
+});
+
+test('the draped lines go after the wait even if the cast lines never get ready', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'] });
+  const { viewer, coverage } = await midSwap();
+  t.mock.timers.tick(SWAP_MAX_WAIT_MS - 1);
+  frame(viewer.postRender);
+  assert.equal(viewer.scene.groundPrimitives.items.size, 1, 'still waiting');
+  t.mock.timers.tick(2);
+  frame(viewer.postRender);
+  assert.equal(viewer.scene.groundPrimitives.items.size, 0, 'draped removed');
+  assert.equal(viewer.scene.primitives.items.size, 1);
+  coverage.clear();
+});
+
+/**
+ * A camera `height` m above WGS84 looking along `heading` with `pitch` (deg),
+ * a 60°×40° view on a 100×100 canvas, whose screen rays really meet the
+ * ellipsoid they are given (as Cesium's `pickEllipsoid` does).
+ */
+function tiltedCamera({ lon, lat, height, heading, pitch }) {
+  const position = Cesium.Cartesian3.fromDegrees(lon, lat, height);
+  const frameAt = Cesium.Transforms.eastNorthUpToFixedFrame(position);
+  function ray(point) {
+    const h = (heading + (point.x / 100 - 0.5) * 60) * RAD;
+    const p = (pitch + (0.5 - point.y / 100) * 40) * RAD;
+    const local = new Cesium.Cartesian3(
+      Math.sin(h) * Math.cos(p),
+      Math.cos(h) * Math.cos(p),
+      Math.sin(p),
+    );
+    const direction = Cesium.Matrix4.multiplyByPointAsVector(
+      frameAt,
+      local,
+      new Cesium.Cartesian3(),
+    );
+    return new Cesium.Ray(
+      position,
+      Cesium.Cartesian3.normalize(direction, direction),
+    );
+  }
+  return {
+    positionWC: position,
+    positionCartographic: {
+      longitude: lon * RAD,
+      latitude: lat * RAD,
+      height,
+    },
+    pickEllipsoid(point, ellipsoid) {
+      const r = ray(point);
+      const hit = Cesium.IntersectionTests.rayEllipsoid(r, ellipsoid);
+      return hit ? Cesium.Ray.getPoint(r, hit.start) : undefined;
+    },
+    computeViewRectangle: () => undefined,
+  };
+}
+
+/**
+ * Denver, 300 m above a street 1,600 m above the ellipsoid, at the centre of
+ * a z14 tile and looking east with the screen centre `aheadM` metres out.
+ * Google 3D hides the globe, so only the bare-earth caster knows the ground.
+ */
+function denverStreetView(aheadM) {
+  const z = 14;
+  const x = lonToTileX(-104.99, z);
+  const y = latToTileY(39.74, z);
+  const tile = tileBounds(x, y, z);
+  const lon = (tile.west + tile.east) / 2;
+  const lat = (tile.south + tile.north) / 2;
+  const ground = 1600;
+  const above = 300;
+  const context = setup({ groundCaster: { groundAt: () => ground } });
+  const tileWidthM = (tile.east - tile.west) * 111_320 * Math.cos(lat * RAD);
+  context.viewer.camera = tiltedCamera({
+    lon,
+    lat,
+    height: ground + above,
+    heading: 90,
+    pitch: -Math.atan(above / aheadM(tileWidthM)) / RAD,
+  });
+  context.coverage.refresh();
+  const keys = context.source.calls.map((call) => call.key);
+  /** Requested tiles as [dx, dy] from the tile under the camera. */
+  const offsets = keys.map((k) => {
+    const [, tx, ty] = k.split('/').map(Number);
+    return [tx - x, ty - y];
+  });
+  return {
+    ...context,
+    keys,
+    offsets,
+    key: (dx, dy) => `${z}/${x + dx}/${y + dy}`,
+  };
+}
+
+test('a tilted street view over ground 1,600 m up asks for the tiles it looks at first', () => {
+  // The screen centre meets the ground at the centre of the next tile east.
+  const { state, coverage, keys, offsets, key } = denverStreetView(
+    (tileWidthM) => tileWidthM,
+  );
+  assert.equal(state.coverage.zoom, 14, 'height measured from the ground');
+  assert.deepEqual(
+    keys.slice(0, 2),
+    [key(0, 0), key(1, 0)],
+    'the tile under the camera, then the one the screen centre looks at',
+  );
+  assert.ok(keys.includes(key(-1, 0)), 'the ground behind the camera too');
+  for (const [dx, dy] of offsets)
+    assert.ok(dx >= -1 && dx <= 2 && Math.abs(dy) <= 1, `${dx},${dy} in reach`);
+  coverage.clear();
+});
+
+test('a street view toward the horizon ranks only the ground within range', () => {
+  // The screen centre meets the ground 6 km out, past the 3 km range: the
+  // tiles are ranked around the camera, not along a line to the horizon.
+  const { coverage, keys, offsets, key } = denverStreetView(() => 6000);
+  assert.equal(keys[0], key(0, 0), 'the tile under the camera first');
+  // Behind and ahead are equally near the camera (ties keep row order); a
+  // line of sight to the far ground would rank the tile ahead first.
+  assert.ok(
+    keys.indexOf(key(-1, 0)) < keys.indexOf(key(1, 0)),
+    'the tile ahead is not pulled forward',
+  );
+  for (const [dx, dy] of offsets)
+    assert.ok(Math.abs(dx) <= 1 && Math.abs(dy) <= 1, `${dx},${dy} around it`);
+  coverage.clear();
 });

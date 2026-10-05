@@ -117,10 +117,6 @@ export function createMapillarySource({
       return new Uint8Array(await response.arrayBuffer());
     },
 
-    getImage(id, { signal, fields = IMAGE_FIELDS } = {}) {
-      return graph(String(id), { fields }, { signal });
-    },
-
     async getSequenceImages(
       sequenceId,
       { signal, limit = SEQUENCE_IMAGES_LIMIT } = {},

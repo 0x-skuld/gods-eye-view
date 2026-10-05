@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as Cesium from 'cesium';
-import { MESH_CELL_DEG, createMeshSampler } from './meshSampler.js';
+import {
+  MESH_CELL_DEG,
+  MESH_MISS_RETRY_MS,
+  createMeshSampler,
+} from './meshSampler.js';
 
 const settle = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms));
 const RAD = Math.PI / 180;
@@ -77,4 +81,58 @@ test('far cells are skipped, misses are not latched, and nothing runs while disa
   assert.equal(sampler.meshAt(10.005, 50), undefined);
   assert.ok(Math.abs(probes[0].lon - 10.005) < MESH_CELL_DEG);
   sampler.destroy();
+});
+
+/** Probes run on a 16 ms timer headless; with mocked timers, run them now. */
+function probeNow(t) {
+  t.mock.timers.tick(20);
+}
+
+test('a missed cell is probed again after the retry window, not before', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const { viewer, probes } = fakeViewer({ holes: () => true });
+  const sampler = createMeshSampler({ getViewer: () => viewer });
+  sampler.setEnabled(true);
+  sampler.request([[10.001, 50]]);
+  probeNow(t);
+  assert.equal(probes.length, 1, 'probed, and missed');
+  t.mock.timers.tick(MESH_MISS_RETRY_MS - 100);
+  sampler.request([[10.001, 50]]);
+  probeNow(t);
+  assert.equal(probes.length, 1, 'within the window: not probed');
+  t.mock.timers.tick(100 + 1);
+  sampler.request([[10.001, 50]]);
+  probeNow(t);
+  assert.equal(probes.length, 2, 'after the window: probed again');
+  sampler.destroy();
+});
+
+test('remembered misses are bounded like the samples (review P3)', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const { viewer, probes } = fakeViewer({ holes: () => true });
+  const sampler = createMeshSampler({ getViewer: () => viewer, cacheMax: 2 });
+  sampler.setEnabled(true);
+  for (const lon of [10.001, 10.002, 10.003]) {
+    sampler.request([[lon, 50]]);
+    probeNow(t);
+  }
+  assert.equal(probes.length, 3);
+  // The third miss overflowed the list, which was dropped: the first cell
+  // is asked about again rather than remembered forever.
+  sampler.request([[10.001, 50]]);
+  probeNow(t);
+  assert.equal(probes.length, 4);
+  sampler.destroy();
+});
+
+test('destroy forgets the samples', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const { viewer } = fakeViewer();
+  const sampler = createMeshSampler({ getViewer: () => viewer });
+  sampler.setEnabled(true);
+  sampler.request([[10.001, 50]]);
+  probeNow(t);
+  assert.equal(sampler.meshAt(10.001, 50), 100);
+  sampler.destroy();
+  assert.equal(sampler.meshAt(10.001, 50), undefined);
 });

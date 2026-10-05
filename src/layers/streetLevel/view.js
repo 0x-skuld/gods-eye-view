@@ -1,6 +1,31 @@
 import * as Cesium from 'cesium';
 
 /**
+ * Approximate metres between two {lon, lat} points: equirectangular, good
+ * for the street-scale distances the layer measures.
+ */
+export function metresBetween(a, b) {
+  const lat = (((a.lat + b.lat) / 2) * Math.PI) / 180;
+  return Math.hypot(
+    (b.lon - a.lon) * 111_320 * Math.cos(lat),
+    (b.lat - a.lat) * 110_540,
+  );
+}
+
+/**
+ * Run low-priority work when the browser is idle, within `timeout` ms; a
+ * browser without idle callbacks (and Node) runs it a frame later. The task
+ * gets the idle deadline, or null.
+ * @param {(deadline: IdleDeadline|null) => void} task
+ * @param {number} timeout
+ */
+export function whenIdle(task, timeout) {
+  if (typeof globalThis.requestIdleCallback === 'function')
+    globalThis.requestIdleCallback(task, { timeout });
+  else setTimeout(() => task(null), 16);
+}
+
+/**
  * Height of the surface under the camera above the ellipsoid, in metres. The
  * globe's terrain answers when the globe is shown; Google 3D hides the globe,
  * so there the bare-earth height from `groundAt(lon, lat)` answers instead.

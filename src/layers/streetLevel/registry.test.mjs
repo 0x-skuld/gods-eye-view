@@ -9,9 +9,7 @@ const def = (overrides = {}) => ({
   requiresKeyId: 'mapillary',
   pickPrefix: 'mly:',
   colors: { coverage: '#05cb63' },
-  credit: { key: 'mapillary', html: 'Mapillary' },
-  capabilities: { coverage: 'tiles', sequences: true },
-  externalUrl: (id) => `https://example.test/${id}`,
+  credit: { html: 'Mapillary' },
   create: () => ({}),
   ...overrides,
 });
@@ -42,8 +40,6 @@ test('every required field is checked by name', () => {
     'pickPrefix',
     'colors',
     'credit',
-    'capabilities',
-    'externalUrl',
     'create',
   ])
     assert.throws(
@@ -52,10 +48,7 @@ test('every required field is checked by name', () => {
       key,
     );
   assert.throws(() => validateProviders([def({ create: 1 })]), /create/);
-  assert.throws(
-    () => validateProviders([def({ credit: { key: 'x' } })]),
-    /credit/,
-  );
+  assert.throws(() => validateProviders([def({ credit: {} })]), /credit/);
   assert.throws(
     () => validateProviders([def({ colors: { pano: '#f0f' } })]),
     /coverage colour/,

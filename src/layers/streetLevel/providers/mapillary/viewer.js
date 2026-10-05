@@ -11,7 +11,8 @@ export function createMapillaryViewer({ source, render } = {}) {
   let Library = null;
   let container = null;
   let pendingOpen = null;
-  let prewarming = false;
+  /** The prewarm in flight, if any. */
+  let prewarming = null;
   /** In-flight viewer construction, so pre-warm and open never build two. */
   let creating = null;
   /** Bumped by `unmount`, so a construction it overtook builds nothing. */
@@ -167,6 +168,13 @@ export function createMapillaryViewer({ source, render } = {}) {
     close() {
       pendingOpen = null;
       current = null;
+      // A playing sequence would keep stepping through (and downloading)
+      // images in the hidden viewer.
+      try {
+        viewer?.getComponent('sequence')?.stop();
+      } catch {
+        /* sequence component not available */
+      }
     },
 
     unmount() {
@@ -190,16 +198,22 @@ export function createMapillaryViewer({ source, render } = {}) {
      * opening one only costs the image download. Safe to call repeatedly.
      */
     async prewarm(host) {
-      if (prewarming || !host) return;
-      prewarming = true;
-      try {
-        await ensureLibrary();
-        if (!viewer) await ensureViewer(host);
-      } catch {
-        /* the real open reports errors */
-      } finally {
-        prewarming = false;
-      }
+      if (!host) return;
+      // A prewarm already in flight may give up (the layer went off and on
+      // while the library downloaded): wait for it, then build if it did not.
+      if (prewarming) await prewarming;
+      if (viewer) return;
+      const run = (async () => {
+        try {
+          await ensureLibrary();
+          if (!viewer) await ensureViewer(host);
+        } catch {
+          /* the real open reports errors */
+        }
+      })();
+      prewarming = run;
+      await run;
+      if (prewarming === run) prewarming = null;
     },
 
     /** Show the whole image ('letterbox') or crop it to the frame ('fill'). */
