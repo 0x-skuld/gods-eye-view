@@ -12,6 +12,35 @@ import { displayPanelScroller } from './displayPanelScroll.js';
 const pendingCollapseRetries = new WeakSet();
 
 /**
+ * Read where the left rail's top edge is going to settle, not where it is.
+ * The left pass commits `--left-stack-safe-top` and requests this pass in the
+ * same frame, but `top` then animates; nothing re-runs this pass when the
+ * animation ends, because ResizeObserver ignores moves. Mid-flight, take the
+ * running transition's end value (which also covers Cyber's fixed rail top),
+ * falling back to the left pass's committed target.
+ * @param {HTMLElement} leftStack Rail supplying the shared top baseline.
+ * @param {number} viewportHeight Current viewport height in px.
+ * @param {Function} getComputedStyle DOM style reader.
+ * @returns {number} Settled top in px, or NaN when there is no left rail.
+ */
+function settledLeftRailTop(leftStack, viewportHeight, getComputedStyle) {
+  const top = leftStack?.getBoundingClientRect().top;
+  if (!Number.isFinite(top)) return NaN;
+  const transition = leftStack
+    .getAnimations?.()
+    .find((animation) => animation.transitionProperty === 'top');
+  if (!transition) return top;
+  const keyframes = transition.effect?.getKeyframes?.() || [];
+  const targetTop = parseFloat(keyframes.at(-1)?.top);
+  const currentTop = parseFloat(getComputedStyle(leftStack).top);
+  // The rect and the computed `top` move together; keep any offset between them.
+  if (Number.isFinite(targetTop) && Number.isFinite(currentTop))
+    return top + targetTop - currentTop;
+  const targetPct = parseFloat(leftStack.dataset?.safeTopPct);
+  return Number.isFinite(targetPct) ? (targetPct * viewportHeight) / 100 : top;
+}
+
+/**
  * Measure and place the right panel rail for one synchronous layout pass.
  * The caller owns scheduling, obstacle selection, disclosure preferences and
  * persistence. Auto-collapse is presentation only and reports through callbacks.
@@ -113,7 +142,11 @@ export function layoutRightPanelRail({
   const viewportHeight = Math.max(1, windowRef.innerHeight);
   const safeGap = Math.max(8, viewportHeight * 0.012);
   const stackRect = stack.getBoundingClientRect();
-  const leftStackTop = leftStack?.getBoundingClientRect().top;
+  const leftStackTop = settledLeftRailTop(
+    leftStack,
+    viewportHeight,
+    getComputedStyle,
+  );
   const alignedTop = Number.isFinite(leftStackTop)
     ? leftStackTop
     : viewportHeight * 0.26;

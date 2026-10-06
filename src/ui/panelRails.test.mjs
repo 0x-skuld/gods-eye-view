@@ -357,6 +357,56 @@ test('right rail aligns to the current left rail and excludes hidden obstacles',
   assert.equal(f.stack.dataset.safeTop, '200.0');
 });
 
+// The left pass commits its top and requests this pass in the same frame, but
+// `top` then animates for 150 ms and nothing re-runs the right pass when it
+// lands. CI docked the right rail at 234 px (26vh) while the left settled at
+// 266.4 px (29.6vh). Mid-flight the right rail must read the destination.
+function animatingLeftRail({ keyframes = true } = {}) {
+  const f = fixture('right');
+  const left = f.options.leftStack;
+  left.rect.top = 250;
+  left.computed.top = '250px';
+  left.dataset.safeTopPct = '29.60';
+  left.getAnimations = () => [
+    { transitionProperty: 'bottom', effect: null },
+    {
+      transitionProperty: 'top',
+      effect: {
+        getKeyframes: () =>
+          keyframes ? [{ top: '234px' }, { top: '266.4px' }] : [],
+      },
+    },
+  ];
+  return f;
+}
+
+test('right rail aligns to where a mid-transition left rail settles', () => {
+  const f = animatingLeftRail();
+  f.run();
+  assert.equal(f.stack.dataset.safeTop, '266.4');
+  assert.equal(
+    f.stack.style.getPropertyValue('--right-stack-safe-top'),
+    '266.4px',
+  );
+});
+
+test('right rail falls back to the committed left target when the transition end is unreadable', () => {
+  const f = animatingLeftRail({ keyframes: false });
+  f.run();
+  assert.equal(f.stack.dataset.safeTop, '266.4');
+});
+
+test('right rail follows a settled left rail whose CSS overrides the committed target', () => {
+  // Cyber pins the left rail with `top: ... !important`, so the committed
+  // percentage is not where it renders and no `top` transition runs.
+  const f = fixture('right', { hud: { visible: true, variant: 'cyber' } });
+  f.options.leftStack.rect.top = 220;
+  f.options.leftStack.dataset.safeTopPct = '26.00';
+  f.options.leftStack.getAnimations = () => [];
+  f.run();
+  assert.equal(f.stack.dataset.safeTop, '220.0');
+});
+
 test('natural height includes visible content, margins and wrapper chrome, excluding hidden rows', () => {
   const panel = element('panel');
   const inner = element('inner', { top: 100 });
