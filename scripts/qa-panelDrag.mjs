@@ -12,7 +12,11 @@
  * Every retry is logged with what led to it (the pre-press hit check, the
  * stillness wait, the panel box at the hit check and at the press) and as a
  * GitHub `::warning::`. With QA_FAIL_ON_RETRY=1 (or `--fail-on-retry`) a
- * retry fails the run instead.
+ * miss the panel's own movement cannot explain fails the run instead: if its
+ * box was the same at the hit check and at the press, the pointer missed a
+ * header that stood still. A panel whose content changed its layout between
+ * the two (a photo finishing loading, a live count wrapping a line) is
+ * retried with a warning that names the move.
  */
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -41,6 +45,14 @@ export function pressMissed(attempt) {
 }
 
 /** The panel's box, rounded, as `left,top widthxheight`. */
+/** Whether the panel's box changed (by more than 2 px) between two reads. */
+export function panelMoved(before, after) {
+  if (!before || !after) return false;
+  return ['left', 'top', 'width', 'height'].some(
+    (key) => Math.abs((after[key] ?? NaN) - (before[key] ?? NaN)) > 2,
+  );
+}
+
 export function formatBox(box) {
   if (!box) return 'unknown';
   const r = (value) => Math.round(value ?? NaN);
@@ -268,7 +280,7 @@ async function pressUntilDecided(
       retries,
       extra: note ? await note() : '',
     });
-    if (failOnRetry)
+    if (failOnRetry && !panelMoved(box, attempt.pressed))
       throw new Error(
         `QA_FAIL_ON_RETRY=1 turns this retry into a failure: ${why}`,
       );

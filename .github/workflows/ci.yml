@@ -73,8 +73,9 @@ jobs:
     timeout-minutes: 30
     env:
       GEV_REQUIRE_ALLOCATION_GATE: '0'
-      # A header press that misses is a real layout shift under the pointer
-      # (the right rail now aligns to where the left rail settles), not noise.
+      # A header press that misses while the panel stood still is a failure
+      # (the right rail now aligns to where the left rail settles); a miss the
+      # panel's own layout change explains is retried with a ::warning::.
       QA_FAIL_ON_RETRY: '1'
     steps:
       - name: Check out source

@@ -1660,6 +1660,9 @@ async function main() {
       await step(
         'collapsing a floating window docks it as the rail strip',
         async () => {
+          // The double-click just docked a panel showing a photo: let the photo
+          // and its sequence finish loading before pressing the header again.
+          await uiUntil((u) => !u.street.loading && !u.sequence.loading);
           await floatPanel();
           await page.click(
             '.panel-collapse-btn[data-collapse-target="street-level-panel"]',

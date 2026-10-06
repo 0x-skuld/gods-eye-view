@@ -134,7 +134,7 @@ test('the gate requires the server’s real Mapillary status route', async () =>
  * panel and a header double-click docks it, unless `stuck`.
  */
 function fakePanelPage({ presses = [], floating = false, stuck = false } = {}) {
-  const state = { floating, downs: 0, last: null, dragging: false };
+  const state = { floating, downs: 0, last: null, dragging: false, shift: 0 };
   const listeners = [];
   const node = (tagName, id, classes, inHeader) => ({
     tagName,
@@ -154,7 +154,7 @@ function fakePanelPage({ presses = [], floating = false, stuck = false } = {}) {
   const document = {
     querySelector: () => ({ getBoundingClientRect: rect(120, 210, 100, 20) }),
     getElementById: () => ({
-      getBoundingClientRect: rect(100, 200, 300, 400),
+      getBoundingClientRect: () => rect(100, 200 + state.shift, 300, 400)(),
       classList: {
         contains: (name) => name === 'panel-floating' && state.floating,
       },
@@ -180,7 +180,10 @@ function fakePanelPage({ presses = [], floating = false, stuck = false } = {}) {
     // 'none': the pointerdown never reaches the page.
     if (state.last === 'none') return;
     const target = state.last === 'header' ? header : other;
+    // 'moved': the panel's layout shifted just before the press landed.
+    if (state.last === 'moved') state.shift = -116;
     for (const listener of listeners.splice(0)) inPage(listener, { target });
+    state.shift = 0;
   };
   return {
     state,
@@ -561,6 +564,30 @@ test('QA_FAIL_ON_RETRY turns a retry into a failure that says why', async () => 
     /QA_FAIL_ON_RETRY=1 .*missed the street-level-panel header.*pre-press hit check passed/,
   );
   assert.equal(page.state.downs, 1);
+});
+
+test('QA_FAIL_ON_RETRY retries, with a warning, a miss the panel moving explains', async () => {
+  const { liftPanelByHeader, panelMoved } =
+    await import('../../scripts/qa-panelDrag.mjs');
+  assert.equal(panelMoved({ left: 0, top: 382 }, { left: 0, top: 266 }), true);
+  assert.equal(panelMoved({ left: 0, top: 382 }, { left: 1, top: 383 }), false);
+  const page = fakePanelPage({ presses: ['moved', 'header'] });
+  const lines = [];
+  const attempt = await liftPanelByHeader(page, 'street-level-panel', {
+    dx: -400,
+    dy: 80,
+    log: (line) => lines.push(line),
+    pauseMs: 0,
+    failOnRetry: true,
+  });
+  assert.equal(attempt.done, true, 'the second press lifted it');
+  assert.equal(page.state.downs, 2);
+  assert.ok(
+    lines.some((line) =>
+      /::warning title=Panel press retried::.*-> at press 100,84/.test(line),
+    ),
+    lines.join('\n'),
+  );
 });
 
 test('both gates save failure evidence and fail on render-loop errors', () => {
