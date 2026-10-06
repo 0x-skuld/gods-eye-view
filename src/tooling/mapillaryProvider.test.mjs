@@ -185,9 +185,9 @@ test('tile route validates the path and refuses to proxy without a token', async
 });
 
 /**
- * Drive the tile route against a scripted upstream: `answer(call)` returns the
- * Response for each upstream fetch. Refusals are never cached, so no disk tile
- * is written.
+ * Drive the tile route against a scripted upstream: `answer(call, url)`
+ * returns the Response for each upstream fetch; `inits` holds each fetch's
+ * options. Refusals are never cached, so no disk tile is written.
  */
 async function withUpstream(answer, run) {
   const savedFetch = globalThis.fetch;
@@ -195,13 +195,15 @@ async function withUpstream(answer, run) {
   process.env.MAPILLARY_CLIENT_TOKEN = 'MLY|test|token';
   _resetTileMemoryForTest();
   const calls = [];
-  globalThis.fetch = async (url) => {
+  const inits = [];
+  globalThis.fetch = async (url, init) => {
     calls.push(String(url));
-    return answer(calls.length);
+    inits.push(init);
+    return answer(calls.length, String(url));
   };
   try {
     const { call, start } = install(mapillaryProxy());
-    await run({ calls, call, start });
+    await run({ calls, inits, call, start });
   } finally {
     // No background write or sweep (dated by a mocked clock) outlives the test.
     await tiles._settleTileWritesForTest();
@@ -687,6 +689,77 @@ for (const status of [400, 410, 422])
       },
     );
   });
+
+const redirect = (location) =>
+  new Response(null, {
+    status: 302,
+    headers: location === null ? {} : { location },
+  });
+
+test('a redirect within the Mapillary tile origin is followed by hand (IC8 P2)', async () => {
+  await fsp.rm(tileFile({ z: 14, x: 13, y: 13 }), { force: true });
+  await withUpstream(
+    (n) =>
+      n === 1
+        ? redirect('/maps/vtp/mly1_public/2/14/13/13?moved=1')
+        : new Response(tile([{ name: 'sequence' }]), { status: 200 }),
+    async ({ calls, inits, call }) => {
+      const res = await call('/api/mapillary/tiles', '/coverage/14/13/13');
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(listTileLayers(res.body), ['sequence']);
+      assert.equal(calls.length, 2);
+      assert.equal(
+        calls[1],
+        'https://tiles.mapillary.com/maps/vtp/mly1_public/2/14/13/13?moved=1',
+      );
+      for (const init of inits)
+        assert.equal(init.redirect, 'manual', 'fetch never follows itself');
+      assert.doesNotMatch(leakText(res), /MLY\|/);
+    },
+  );
+});
+
+for (const [why, location] of [
+  ['another host', 'https://evil.example/collect'],
+  ['a look-alike host', 'https://tiles.mapillary.com.evil.example/t'],
+  ['another port', 'https://tiles.mapillary.com:8443/t'],
+  ['plain HTTP', 'http://tiles.mapillary.com/maps/vtp/t'],
+  ['credentials in the URL', 'https://user:pw@tiles.mapillary.com/t'],
+  ['a scheme-relative host', '//evil.example/t'],
+  ['no Location', null],
+])
+  test(`a redirect off the tile origin (${why}) is a 502, and the token stays home (IC8 P2)`, async () => {
+    await withUpstream(
+      (n) =>
+        n === 1
+          ? redirect(location)
+          : new Response(tile([{ name: 'sequence' }]), { status: 200 }),
+      async ({ calls, inits, call }) => {
+        const res = await call('/api/mapillary/tiles', '/coverage/14/14/14');
+        assert.equal(res.statusCode, 502);
+        assert.deepEqual(json(res), {
+          error: 'Mapillary tile redirect left the tile origin',
+        });
+        assert.equal(calls.length, 1, 'the redirect was not followed');
+        assert.equal(inits[0].redirect, 'manual');
+        assert.doesNotMatch(leakText(res), /MLY\|/);
+      },
+    );
+  });
+
+test('an endless same-origin redirect stops after a few hops (IC8 P2)', async () => {
+  await withUpstream(
+    (n) => redirect(`/maps/vtp/mly1_public/2/14/15/15?hop=${n}`),
+    async ({ calls, call }) => {
+      const res = await call('/api/mapillary/tiles', '/coverage/14/15/15');
+      assert.equal(res.statusCode, 502);
+      assert.deepEqual(json(res), {
+        error: 'Mapillary tile redirected too often',
+      });
+      assert.equal(calls.length, tiles.TILE_MAX_REDIRECTS + 1);
+    },
+  );
+});
 
 test('cross-site requests are refused on both routes; the app itself passes (review gekh)', async () => {
   await withUpstream(

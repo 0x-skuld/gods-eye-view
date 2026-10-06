@@ -115,6 +115,9 @@ test('the expanded viewer is a modal dialog that restores focus', () => {
   assert.match(controls, /setAttribute\('role', 'dialog'\)/);
   assert.match(controls, /setAttribute\('aria-modal', 'true'\)/);
   assert.match(controls, /_expandReturnFocus/);
+  // A real modal: the rest of the application is inert while it is shown.
+  assert.match(controls, /node\.inert = true/);
+  assert.match(controls, /node\.inert = false/);
 });
 
 test('labels say what the buttons do', () => {

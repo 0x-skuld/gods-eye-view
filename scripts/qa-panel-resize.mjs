@@ -8,6 +8,12 @@
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { RESIZE_DIRECTIONS, resizeBox } from '../src/ui/panelResize.js';
+import {
+  describePress,
+  dockPanelByDoubleClick,
+  dragPointer,
+  liftPanelByHeader,
+} from './qa-panelDrag.mjs';
 
 export const PANEL_ID = 'cctv-panel';
 export const STORAGE_KEY = `godsEyeView.v8.panelPos.${PANEL_ID}`;
@@ -170,14 +176,7 @@ async function main() {
       }, PANEL_ID);
       return rect;
     };
-    const drag = async (from, dx, dy) => {
-      await page.mouse.move(from.x, from.y);
-      await page.mouse.down();
-      await page.mouse.move(from.x + dx / 2, from.y + dy / 2, { steps: 6 });
-      await page.mouse.move(from.x + dx, from.y + dy, { steps: 6 });
-      await page.mouse.up();
-      await new Promise((resolve) => setTimeout(resolve, 120));
-    };
+    const drag = (from, dx, dy) => dragPointer(page, from, dx, dy);
 
     await page.goto(`${url}/`, { waitUntil: 'domcontentloaded' });
     await page.evaluate((key) => {
@@ -223,66 +222,23 @@ async function main() {
         return out.join(' ');
       }, PANEL_ID);
     const aboveAtDock = await railAbove();
-    /** One header drag; reports what the press landed on. */
-    const tryLift = async () => {
-      await page.evaluate((id) => {
-        window.addEventListener(
-          'pointerdown',
-          (event) => {
-            const r = document.getElementById(id).getBoundingClientRect();
-            const target = event.target;
-            window.__qaPressBox = {
-              left: r.left,
-              top: r.top,
-              width: r.width,
-              // What the press landed on, so a failed lift says why.
-              target: `${target.tagName?.toLowerCase()}${target.id ? `#${target.id}` : ''}.${[...(target.classList || [])].join('.')}`,
-              inHeader: Boolean(target.closest?.(`#${id} .panel-header`)),
-            };
-          },
-          { capture: true, once: true },
-        );
-      }, PANEL_ID);
-      // Press only where the header really is: if the rail is still shifting,
-      // wait (bounded) for the title point to land on the CCTV header.
-      let grab = await headerPoint();
-      for (let tries = 0; tries < 20; tries++) {
-        const onHeader = await page.evaluate(
-          ({ x, y, id }) =>
-            Boolean(
-              document.elementFromPoint(x, y)?.closest(`#${id} .panel-header`),
-            ),
-          { ...grab, id: PANEL_ID },
-        );
-        if (onHeader) break;
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        grab = await headerPoint();
-      }
-      await drag(grab, -200, -100);
-      return {
-        grab,
-        lifted: await readPanel(),
-        pressed: await page.evaluate(() => window.__qaPressBox),
-      };
-    };
-    // A press the rail shifted out from under the header (seen on the CI
+    // Press only where the header really is, recording what the press landed
+    // on. A press the rail shifted out from under the header (seen on the CI
     // runner: something above CCTV grows ~32 px after load) proves nothing
     // about the drag, so it is retried; a press that landed in the header and
-    // did not lift fails at once.
-    let attempt = await tryLift();
-    for (let retry = 0; retry < 2; retry++) {
-      if (attempt.lifted.floating || attempt.pressed?.inHeader) break;
-      console.log(
-        `note: the press missed the header (on ${attempt.pressed?.target}; rail above CCTV ${aboveAtDock} -> ${await railAbove()}); retrying`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      attempt = await tryLift();
-    }
-    const { grab, lifted, pressed } = attempt;
+    // did not lift fails at once (scripts/qa-panelDrag.mjs).
+    const attempt = await liftPanelByHeader(page, PANEL_ID, {
+      dx: -200,
+      dy: -100,
+      note: async () =>
+        `rail above CCTV ${aboveAtDock} -> ${await railAbove()}`,
+    });
+    const { pressed } = attempt;
+    const lifted = await readPanel();
     assert.equal(
       lifted.floating,
       true,
-      `a header drag lifts the panel out (pressed ${grab.x},${grab.y} on ${pressed?.target}, in header: ${pressed?.inHeader}; panel docked at ${docked.top}, at press ${pressed?.top})`,
+      `a header drag lifts the panel out (${describePress(attempt)}; panel docked at ${docked.top}, at press ${pressed?.top})`,
     );
     assert.equal(
       lifted.collapsed,
@@ -397,21 +353,12 @@ async function main() {
     console.log('PASS: reload restores position and size');
 
     // Double-click the header to snap back.
-    const point = await headerPoint();
-    const headerHit = await page.evaluate(({ x, y }) => {
-      const node = document.elementFromPoint(x, y);
-      return node
-        ? `${node.tagName.toLowerCase()}${node.id ? `#${node.id}` : ''}.${[...node.classList].join('.')}`
-        : 'nothing';
-    }, point);
-    await page.mouse.click(point.x, point.y, { clickCount: 1 });
-    await page.mouse.click(point.x, point.y, { clickCount: 2 });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    const dock = await dockPanelByDoubleClick(page, PANEL_ID);
     const snapped = await readPanel();
     assert.equal(
       snapped.floating,
       false,
-      `double-click snaps back (pointer on ${headerHit})`,
+      `double-click snaps back (${describePress(dock)})`,
     );
     assert.equal(snapped.inRail, true);
     assert.equal(snapped.inlineWidth, '');

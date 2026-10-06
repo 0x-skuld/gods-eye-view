@@ -13,13 +13,22 @@
  * is needed. The steps that open a photo need real imagery and are skipped.
  * Fixture runs add what a live run cannot stage: a key Mapillary rejects, and
  * a second page whose server has no key (the keyless gate most installs see).
- * Filter assertions are stricter because the fixture data is known.
+ * Filter assertions are stricter because the fixture data is known. Every run
+ * first asks the server's real status route from Node, before the browser
+ * intercepts anything, so a server without the Mapillary routes fails.
  */
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { LAYER_STATE_REGISTRY } from '../src/data/layerState.js';
 import { tileBounds } from '../src/layers/streetLevel/tileMath.js';
 import { encodeCoverageTile } from '../src/layers/streetLevel/providers/mapillary/coverageFixture.mjs';
+import {
+  describePress,
+  dockPanelByDoubleClick,
+  liftPanelByHeader,
+} from './qa-panelDrag.mjs';
+
+const PANEL_ID = 'street-level-panel';
 
 /** Viewports every layout assertion runs at. */
 export const VIEWPORTS = Object.freeze([
@@ -103,6 +112,49 @@ export function fixtureTile(z, x, y, now = Date.now()) {
     });
   }
   return encodeCoverageTile(tile, { sequences });
+}
+
+/**
+ * Ask the server's real Mapillary status route, outside the browser's
+ * interception, and require its JSON shape. Fixture runs answer the route in
+ * the page, so without this a server that never registered it would pass.
+ * Node sends no Origin or Sec-Fetch-Site, so the same-site gate admits it.
+ * @param {string} url the application's base URL
+ * @param {typeof fetch} [fetchImpl]
+ * @returns {Promise<{configured: boolean}>}
+ */
+export async function assertRealStatusRoute(url, fetchImpl = fetch) {
+  const route = new URL('/api/mapillary/status', url).href;
+  let response;
+  try {
+    response = await fetchImpl(route, {
+      headers: { Accept: 'application/json' },
+    });
+  } catch (error) {
+    throw new Error(`${route} is unreachable: ${error?.message || error}`, {
+      cause: error,
+    });
+  }
+  const type = response.headers.get('content-type') || '';
+  const text = await response.text();
+  assert.equal(
+    response.status,
+    200,
+    `${route} must be the server's Mapillary route (HTTP ${response.status}: ${text.slice(0, 120)})`,
+  );
+  assert.match(type, /application\/json/, `${route} answers JSON, not ${type}`);
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    assert.fail(`${route} answered unparseable JSON: ${text.slice(0, 120)}`);
+  }
+  assert.equal(
+    typeof body?.configured,
+    'boolean',
+    `${route} reports a boolean \`configured\`: ${text.slice(0, 120)}`,
+  );
+  return body;
 }
 
 /**
@@ -277,6 +329,14 @@ async function main() {
     });
   };
   try {
+    // Before any interception: fixture runs answer this route in the page.
+    await step(
+      'the server registers the real Mapillary status route',
+      async () => {
+        const real = await assertRealStatusRoute(url);
+        console.log(`  (server status: configured=${real.configured})`);
+      },
+    );
     const page = await browser.newPage();
     const fixture = { configured: true, tiles: 'ok', tileRequests: 0 };
     if (fixtures) await serveFixtures(page, fixture);
@@ -865,19 +925,21 @@ async function main() {
         const r = node.getBoundingClientRect();
         return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
       });
+    // Lifting and docking re-resolve the header and retry only a press that
+    // provably missed it: right after a dock the rail is still animating, and
+    // a title point read once can be under another panel (scripts/
+    // qa-panelDrag.mjs, shared with the panel-resize gate).
     const floatPanel = async () => {
-      const title = await center('#street-level-panel .panel-title');
-      await page.mouse.move(title.x, title.y);
-      await page.mouse.down();
-      await page.mouse.move(title.x - 200, title.y + 40, { steps: 8 });
-      await page.mouse.move(title.x - 400, title.y + 80, { steps: 8 });
-      await page.mouse.up();
-      await sleep(400);
+      const attempt = await liftPanelByHeader(page, PANEL_ID, {
+        dx: -400,
+        dy: 80,
+      });
       assert.equal(
-        await floating(),
+        attempt.done,
         true,
-        'a header drag lifts the panel out of the rail',
+        `a header drag lifts the panel out of the rail (${describePress(attempt)})`,
       );
+      assert.equal(await floating(), true);
     };
     await photoStep(
       'the panel floats on a header drag, resizes, and the viewer takes the room',
@@ -946,11 +1008,13 @@ async function main() {
     );
     await step('a header double-click docks a floating window', async () => {
       await floatPanel();
-      const title = await center('#street-level-panel .panel-title');
-      await page.mouse.click(title.x, title.y, { clickCount: 1 });
-      await page.mouse.click(title.x, title.y, { clickCount: 2 });
-      await sleep(400);
-      assert.equal(await floating(), false, 'docked again');
+      // Waits on the docked state itself, not a fixed sleep.
+      const attempt = await dockPanelByDoubleClick(page, PANEL_ID);
+      assert.equal(
+        attempt.done,
+        true,
+        `docked again (${describePress(attempt)})`,
+      );
     });
     await step(
       'collapsing a floating window docks it as the rail strip',

@@ -57,6 +57,13 @@ export class StreetLevelControls {
     this._resizeQueued = false;
     this._wrapHome = null;
     this._expandReturnFocus = null;
+    /**
+     * The <body> children this class made inert while the expanded viewer is
+     * a modal on screen; only these are released again.
+     * @type {Set<Element>}
+     */
+    this._inerted = new Set();
+    this._modalObserver = null;
     this._elements = this._collect();
     this._bind();
   }
@@ -332,7 +339,10 @@ export class StreetLevelControls {
       wrap.setAttribute('aria-label', 'Street-level image');
       wrap.tabIndex = -1;
       wrap.focus({ preventScroll: true });
+      this._watchModal(true);
     } else {
+      // Release the application first: the focus returned below may be in it.
+      this._watchModal(false);
       wrap.classList.remove('sl-viewer-wrap-expanded');
       wrap.removeAttribute('role');
       wrap.removeAttribute('aria-modal');
@@ -391,9 +401,56 @@ export class StreetLevelControls {
     );
   }
 
+  /**
+   * Make the application modal-inert while the expanded viewer is on screen:
+   * every other <body> child is `inert` (one already inert is left alone), so
+   * no control around the viewer takes a click or focus. A viewer that CSS
+   * hides (Clean View, recording, cockpit) releases them, since a hidden
+   * modal must not leave the app dead. Returns whether the dialog is shown.
+   */
+  _syncModal() {
+    if (this.destroyed || !this._isDialogShown()) {
+      this._releaseModal();
+      return false;
+    }
+    const wrap = this._elements.viewerWrap;
+    for (const node of [...(document.body?.children || [])]) {
+      if (node === wrap || node.inert) continue;
+      node.inert = true;
+      this._inerted.add(node);
+    }
+    return true;
+  }
+
+  /** Give the application back every node `_syncModal` made inert. */
+  _releaseModal() {
+    for (const node of this._inerted) node.inert = false;
+    this._inerted.clear();
+  }
+
+  /**
+   * While expanded, re-check the modal whenever <body> changes class (the
+   * modes that hide the viewer) or gains a child (which must be inert too).
+   * Shrinking stops watching and releases the application.
+   */
+  _watchModal(on) {
+    this._modalObserver?.disconnect();
+    this._modalObserver = null;
+    if (!on) return this._releaseModal();
+    if (typeof MutationObserver === 'function' && document.body) {
+      this._modalObserver = new MutationObserver(() => this._syncModal());
+      this._modalObserver.observe(document.body, {
+        attributes: true,
+        attributeFilter: ['class'],
+        childList: true,
+      });
+    }
+    this._syncModal();
+  }
+
   _onDialogKey(event) {
     if (event.key !== 'Escape' && event.key !== 'Tab') return;
-    if (!this._isDialogShown()) return;
+    if (!this._syncModal()) return;
     // Only keys meant for the viewer: from inside it, from nowhere (<body>)
     // or from the globe. A field elsewhere (search) keeps its Esc and Tab.
     const target = event.target;
@@ -607,6 +664,7 @@ export class StreetLevelControls {
     if (this.destroyed) return;
     this.destroyed = true;
     this.setViewerExpanded(false);
+    this._watchModal(false);
     this.listeners.abort();
     this._resizeObserver?.disconnect();
     this._resizeObserver = null;

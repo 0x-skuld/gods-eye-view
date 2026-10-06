@@ -306,6 +306,47 @@ export async function sweepTileDisk({
   return { removed, bytes };
 }
 
+/** The one origin the tile token may be sent to, at every redirect hop. */
+const TILE_ORIGIN = new URL(MAPILLARY_TILE_HOST).origin;
+/** Redirect hops followed before the upstream counts as broken. */
+export const TILE_MAX_REDIRECTS = 3;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/**
+ * Fetch a tile URL, following redirects by hand: each hop must stay HTTPS on
+ * the Mapillary tile origin (no credentials in the URL), so the access token
+ * in the query is never sent to another host. A refused or endless redirect
+ * is an upstream fault (502).
+ */
+async function fetchPinned(url, init) {
+  let next = url;
+  for (let hop = 0; ; hop++) {
+    const response = await fetch(next, { ...init, redirect: 'manual' });
+    if (!REDIRECT_STATUSES.has(response.status)) return response;
+    await response.body?.cancel().catch(() => {});
+    if (hop >= TILE_MAX_REDIRECTS)
+      throw new TileUpstreamError(502, 'Mapillary tile redirected too often');
+    let target = null;
+    try {
+      target = new URL(response.headers.get('location') ?? '', next);
+    } catch {
+      /* unparseable Location */
+    }
+    if (
+      !response.headers.get('location') ||
+      target?.protocol !== 'https:' ||
+      target.origin !== TILE_ORIGIN ||
+      target.username ||
+      target.password
+    )
+      throw new TileUpstreamError(
+        502,
+        'Mapillary tile redirect left the tile origin',
+      );
+    next = target.href;
+  }
+}
+
 async function fetchUpstream(address, signal) {
   const token = mapillaryToken();
   if (!token) throw new TileRequestError('Mapillary token not configured', 503);
@@ -315,7 +356,7 @@ async function fetchUpstream(address, signal) {
   const timeout = AbortSignal.timeout(TILE_FETCH_TIMEOUT_MS);
   // Aborts the request itself once its body runs past the size cap.
   const oversize = new AbortController();
-  const response = await fetch(url, {
+  const response = await fetchPinned(url, {
     signal: AbortSignal.any([signal, timeout, oversize.signal].filter(Boolean)),
     headers: { Accept: 'application/x-protobuf' },
   });

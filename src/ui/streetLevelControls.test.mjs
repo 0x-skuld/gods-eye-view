@@ -742,6 +742,134 @@ test('a hidden expanded viewer (Clean View, recording, cockpit) holds neither Es
     controls.destroy();
   }));
 
+/** A MutationObserver stand-in the test fires by hand. */
+function fakeMutationObserver() {
+  const observers = [];
+  class FakeMutationObserver {
+    constructor(callback) {
+      this.callback = callback;
+      this.target = null;
+      this.options = null;
+      observers.push(this);
+    }
+    observe(target, options) {
+      this.target = target;
+      this.options = options;
+    }
+    disconnect() {
+      this.target = null;
+    }
+  }
+  const fire = () => {
+    for (const observer of observers)
+      if (observer.target) observer.callback([], observer);
+  };
+  const watching = () => observers.some((observer) => observer.target);
+  return { FakeMutationObserver, fire, watching };
+}
+
+/** Run `fn` with a fake MutationObserver installed. */
+async function withObserver(fn) {
+  const saved = globalThis.MutationObserver;
+  const fake = fakeMutationObserver();
+  globalThis.MutationObserver = fake.FakeMutationObserver;
+  try {
+    return await fn(fake);
+  } finally {
+    if (saved === undefined) delete globalThis.MutationObserver;
+    else globalThis.MutationObserver = saved;
+  }
+}
+
+/** Every <body> child but the viewer, by id. */
+const inertOutside = (dom) =>
+  dom.document.body.children
+    .filter((node) => node.id !== 'sl-viewer-wrap')
+    .map((node) => [node.id, node.inert === true]);
+
+test('the expanded viewer makes the rest of the app inert and gives it back on shrink (IC8 P2)', () =>
+  withObserver(() =>
+    withDom(async (dom) => {
+      const { controls } = stubPanel(dom, uiState({ open: true }));
+      // Another dialog's own inert backdrop: it is not ours to release.
+      const owned = dom.document.body.appendChild(
+        new dom.globe.constructor(dom.document, 'div', { id: 'owned' }),
+      );
+      owned.inert = true;
+      controls.setViewerExpanded(true);
+      assert.deepEqual(inertOutside(dom), [
+        ['street-level-panel', true],
+        ['cesiumContainer', true],
+        ['location-search', true],
+        ['owned', true],
+      ]);
+      const wrap = dom.document.body.querySelector('#sl-viewer-wrap');
+      assert.notEqual(wrap.inert, true, 'the viewer itself stays live');
+      // Shrinking returns focus into the panel: it must be live again first.
+      dom.root.querySelector('#sl-status').focus();
+      controls.setViewerExpanded(false);
+      assert.deepEqual(inertOutside(dom), [
+        ['street-level-panel', false],
+        ['cesiumContainer', false],
+        ['location-search', false],
+        ['owned', true],
+      ]);
+      controls.destroy();
+    }),
+  ));
+
+test('a CSS-hidden expanded viewer releases the app; showing it again, and new children, go inert (IC8 P2)', () =>
+  withObserver((observer) =>
+    withDom(async (dom) => {
+      const { controls } = stubPanel(dom, uiState({ open: true }));
+      controls.setViewerExpanded(true);
+      assert.equal(observer.watching(), true);
+      const wrap = dom.document.body.querySelector('#sl-viewer-wrap');
+      let visible = true;
+      wrap.checkVisibility = () => visible;
+      // Clean View (or recording, or the cockpit) hides the viewer by CSS.
+      visible = false;
+      dom.document.body.classList.add('ui-clean-view');
+      observer.fire();
+      assert.ok(
+        inertOutside(dom).every(([, inert]) => !inert),
+        'a hidden modal leaves nothing inert',
+      );
+      // Leaving the mode shows the viewer again: the app is inert once more,
+      // and so is a child added to <body> meanwhile.
+      visible = true;
+      const toast = dom.document.body.appendChild(
+        new dom.globe.constructor(dom.document, 'div', { id: 'toast' }),
+      );
+      observer.fire();
+      assert.ok(inertOutside(dom).every(([, inert]) => inert));
+      assert.equal(toast.inert, true);
+      controls.destroy();
+      assert.ok(
+        inertOutside(dom).every(([, inert]) => !inert),
+        'destroy releases the app',
+      );
+      assert.equal(observer.watching(), false, 'and stops watching');
+    }),
+  ));
+
+test('an image closed while expanded releases the app (IC8 P2)', () =>
+  withObserver(() =>
+    withDom(async (dom) => {
+      const { layer, controls } = stubPanel(dom, uiState({ open: true }));
+      controls.setViewerExpanded(true);
+      assert.ok(inertOutside(dom).every(([, inert]) => inert));
+      layer.publish(uiState({ open: false }));
+      assert.equal(controls.isViewerExpanded(), false);
+      assert.ok(inertOutside(dom).every(([, inert]) => !inert));
+      assert.equal(
+        dom.document.activeElement,
+        dom.root.querySelector('#sl-status'),
+      );
+      controls.destroy();
+    }),
+  ));
+
 test('FIT / FILL show the selection while the viewer is expanded (P3)', () =>
   withDom(async (dom) => {
     const { layer, controls } = stubPanel(dom, uiState({ open: true }));
