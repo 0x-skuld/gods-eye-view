@@ -9,8 +9,8 @@
  * a rejected key and a keyless second server.
  *
  * `--strict` fails on any skip not in STRICT_ALLOWED_SKIPS. `--fail-on-retry`
- * (or QA_FAIL_ON_RETRY=1) fails on any header-press retry. A failed run saves
- * evidence under qa-artifacts/street-level/.
+ * (or QA_FAIL_ON_RETRY=1) fails a missed header press unless the panel moved.
+ * A failed run saves evidence under qa-artifacts/street-level/.
  */
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
@@ -22,6 +22,7 @@ import {
   describePress,
   dockPanelByDoubleClick,
   liftPanelByHeader,
+  waitForStill,
 } from './qa-panelDrag.mjs';
 import {
   hookRenderErrors,
@@ -336,6 +337,37 @@ async function clearFirstRun(page) {
     ))
       el.remove();
   });
+}
+
+/**
+ * Click a panel control once the panel holds still and the control is what
+ * lies under its centre: the rail animates panel heights, so a point read
+ * once can miss by the time the pointer goes down.
+ */
+async function clickPanelControl(page, selector, { timeout = 5_000 } = {}) {
+  await waitForStill(page, PANEL_ID);
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const hit = await page.$eval(selector, (el) => {
+      el.scrollIntoView({ block: 'nearest' });
+      const r = el.getBoundingClientRect();
+      const x = r.left + r.width / 2;
+      const y = r.top + r.height / 2;
+      const top = document.elementFromPoint(x, y);
+      return {
+        x,
+        y,
+        ok: Boolean(top && (top === el || el.contains(top))),
+        target: top
+          ? `${top.tagName.toLowerCase()}${top.id ? `#${top.id}` : ''}`
+          : 'nothing',
+      };
+    });
+    if (hit.ok) return page.mouse.click(hit.x, hit.y);
+    if (Date.now() > deadline)
+      throw new Error(`${selector} is covered by ${hit.target}`);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
 }
 
 /** Load the app and clear the first-run dialog. */
@@ -762,7 +794,7 @@ async function main() {
             ),
             'BUTTON:ON:true',
           );
-          await page.click('#sl-status');
+          await clickPanelControl(page, '#sl-status');
           await page.waitForFunction(
             () => !window.__godsEyeView.dataManager.isEnabled('street-level'),
             { timeout: 15_000 },
@@ -772,7 +804,7 @@ async function main() {
             { timeout: 5_000 },
           );
           assert.equal((await ui()).coverage.count, 0);
-          await page.click('#sl-status');
+          await clickPanelControl(page, '#sl-status');
           await waitForCoverage(page);
           assert.equal(
             await page.$eval('#sl-status', (node) =>
@@ -785,7 +817,7 @@ async function main() {
       await step(
         'the only lit provider chip switches the whole layer off, credit and all',
         async () => {
-          await page.click(chip);
+          await clickPanelControl(page, chip);
           await page.waitForFunction(
             () =>
               !window.__godsEyeView.dataManager.isEnabled('street-level') &&
@@ -810,7 +842,7 @@ async function main() {
       await step(
         'lighting the chip turns the layer back on with coverage',
         async () => {
-          await page.click(chip);
+          await clickPanelControl(page, chip);
           await waitForCoverage(page);
           assert.equal(
             await page.$eval(chip, (node) => node.getAttribute('aria-pressed')),
@@ -822,7 +854,7 @@ async function main() {
         'the 360° filter keeps at most the unfiltered sequence count',
         async () => {
           const before = (await ui()).coverage.count;
-          await page.click('[data-sl-pano="pano"]');
+          await clickPanelControl(page, '[data-sl-pano="pano"]');
           await uiUntil((u) => u.filter.pano === 'pano' && !u.coverage.loading);
           const after = (await ui()).coverage.count;
           assert.ok(after <= before, `${after} ≤ ${before}`);
@@ -839,7 +871,7 @@ async function main() {
             { timeout: 10_000 },
             `${STREET_LEVEL_TOKEN}.p.p`,
           );
-          await page.click('[data-sl-pano="all"]');
+          await clickPanelControl(page, '[data-sl-pano="all"]');
           await uiUntil(
             (u, n) => u.filter.pano === 'all' && u.coverage.count === n,
             before,
@@ -962,9 +994,9 @@ async function main() {
               `a pan while accepted requests tiles (${idle} → ${asked})`,
             );
             fixture.tiles = 'rejected';
-            await page.click('#sl-status');
+            await clickPanelControl(page, '#sl-status');
             await statusText('OFF');
-            await page.click('#sl-status');
+            await clickPanelControl(page, '#sl-status');
             await statusText('KEY REJECTED');
             const shown = await page.evaluate(() => ({
               error: document.getElementById('sl-error').textContent,
@@ -984,7 +1016,7 @@ async function main() {
             const after = await tileRequestsQuiet(QUIET_MS);
             assert.equal(after, rejectedAt, 'no tile requests while rejected');
             // Off clears the message; with a good key it comes back as ON.
-            await page.click('#sl-status');
+            await clickPanelControl(page, '#sl-status');
             await statusText('OFF');
             assert.equal(
               await page.$eval(
@@ -995,7 +1027,7 @@ async function main() {
               'no stale error while the layer is off',
             );
             fixture.tiles = 'ok';
-            await page.click('#sl-status');
+            await clickPanelControl(page, '#sl-status');
             await waitForCoverage(page);
             await statusText('ON');
           },
@@ -1278,7 +1310,7 @@ async function main() {
             await followIs(false);
             state = await follow();
             assert.equal(state.disabled, false, 'enabled on Google 3D');
-            await page.click('#sl-follow-btn');
+            await clickPanelControl(page, '#sl-follow-btn');
             await followIs(false, 'true');
             assert.equal((await follow()).pressed, 'true');
             await stacks.set('esri-imagery');
@@ -1407,7 +1439,7 @@ async function main() {
             () =>
               [...document.body.children].filter((node) => node.inert).length,
           );
-          await page.click('#sl-viewer-expand');
+          await clickPanelControl(page, '#sl-viewer-expand');
           await settle(page, () =>
             document
               .getElementById('sl-viewer-wrap')
@@ -1471,7 +1503,7 @@ async function main() {
       await step(
         '× closes the image and deselects it on the globe',
         async () => {
-          await page.click('#sl-viewer-close');
+          await clickPanelControl(page, '#sl-viewer-close');
           await uiUntil(
             (u) => !u.street.open && u.sequence.selectedId === null,
           );
@@ -1544,14 +1576,14 @@ async function main() {
       await step(
         'SHRINK after EXPAND docks the window back in the rail at its default size, viewer inside the panel',
         async () => {
-          await page.click('#sl-viewer-expand');
+          await clickPanelControl(page, '#sl-viewer-expand');
           await settle(page, () =>
             document
               .getElementById('sl-viewer-wrap')
               .classList.contains('sl-viewer-wrap-expanded'),
           );
           assert.equal(await expanded(), true, 'expanded');
-          await page.click('#sl-viewer-expand');
+          await clickPanelControl(page, '#sl-viewer-expand');
           await settle(
             page,
             () =>
@@ -1603,7 +1635,8 @@ async function main() {
           // and its sequence finish loading before pressing the header again.
           await uiUntil((u) => !u.street.loading && !u.sequence.loading);
           await floatPanel();
-          await page.click(
+          await clickPanelControl(
+            page,
             '.panel-collapse-btn[data-collapse-target="street-level-panel"]',
           );
           await settle(page, () => {
