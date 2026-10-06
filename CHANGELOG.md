@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- Add an experimental ChatGPT/Codex OAuth option for cloud voice in Provider
+  Settings. API-key voice remains the default. Local sign-in can start from
+  the auth button and reports completion, failure, timeout, or expired
+  credentials. OAuth credentials stay on the server; local routes require
+  loopback access and same-site requests. OAuth sessions retain usage data
+  and show unknown cost. The auth button keeps keyboard focus after a mode
+  change, and pending sign-in does not discard text in the key fields.
+
 - Add Norway's road cameras from Statens vegvesen as a CCTV pack. The camera
   list is one keyless GeoJSON request to the agency's OGC API view of its
   DATEX 3.1 CCTV table, so no DATEX account is needed. Every working camera

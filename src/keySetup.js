@@ -111,6 +111,21 @@ export function stripKeylessBasemapFromHash(hash) {
 
 const TIER_DOTS = Object.freeze({ metered: '🔴', free: '🟡' });
 
+function updateCloudVoiceAuthControl(auth, busy = false) {
+  const mode = readStoredCloudVoiceAuthMode();
+  const state = auth.querySelector('.key-setup-cloud-auth-state');
+  const toggle = auth.querySelector('[data-cloud-voice-auth-toggle]');
+  state.textContent =
+    mode === 'oauth' ? 'VOICE AUTH · CHATGPT OAUTH' : 'VOICE AUTH · API KEY';
+  toggle.textContent = mode === 'oauth' ? 'USE API KEY' : 'USE CHATGPT OAUTH';
+  toggle.title =
+    mode === 'oauth'
+      ? 'Use OPENAI_API_KEY for the next cloud voice session'
+      : 'Use the signed-in local ChatGPT/Codex OAuth session for the next cloud voice session';
+  // Keep the control focusable while the delegated handler blocks repeats.
+  toggle.setAttribute('aria-disabled', String(busy));
+}
+
 /** Build one key row. All content is our own registry text, set via textContent. */
 function buildRow(documentRef, key) {
   const row = documentRef.createElement('section');
@@ -197,21 +212,14 @@ function buildRow(documentRef, key) {
   if (key.id === 'openai') {
     const auth = documentRef.createElement('div');
     auth.className = 'key-setup-cloud-auth';
-    const mode = readStoredCloudVoiceAuthMode();
     const state = documentRef.createElement('span');
     state.className = 'key-setup-cloud-auth-state';
-    state.textContent =
-      mode === 'oauth' ? 'VOICE AUTH · CHATGPT OAUTH' : 'VOICE AUTH · API KEY';
     const toggle = documentRef.createElement('button');
     toggle.type = 'button';
     toggle.className = 'key-setup-cloud-auth-toggle';
     toggle.dataset.cloudVoiceAuthToggle = 'true';
-    toggle.textContent = mode === 'oauth' ? 'USE API KEY' : 'USE CHATGPT OAUTH';
-    toggle.title =
-      mode === 'oauth'
-        ? 'Use OPENAI_API_KEY for the next cloud voice session'
-        : 'Use the signed-in local ChatGPT/Codex OAuth session for the next cloud voice session';
     auth.append(state, toggle);
+    updateCloudVoiceAuthControl(auth);
     row.append(auth);
   }
   return row;
@@ -297,6 +305,11 @@ export async function initKeySetup({
   let oauthBusy = false;
   let open = false;
 
+  const syncCloudVoiceAuth = () => {
+    for (const auth of rowsHost.querySelectorAll('.key-setup-cloud-auth'))
+      updateCloudVoiceAuthControl(auth, oauthBusy);
+  };
+
   const render = (nextStatus) => {
     if (disposed) return;
     status = nextStatus;
@@ -310,10 +323,7 @@ export async function initKeySetup({
     rowsHost.textContent = '';
     for (const key of status.keys || [])
       rowsHost.append(buildRow(documentRef, key));
-    for (const button of rowsHost.querySelectorAll(
-      '[data-cloud-voice-auth-toggle]',
-    ))
-      button.disabled = oauthBusy;
+    syncCloudVoiceAuth();
   };
 
   const visible = () =>
@@ -451,12 +461,12 @@ export async function initKeySetup({
         const current = readStoredCloudVoiceAuthMode();
         if (current === 'oauth') {
           writeStoredCloudVoiceAuthMode('api-key');
-          render(status);
+          syncCloudVoiceAuth();
           say('Cloud voice will use OPENAI_API_KEY on the next session.');
           return;
         }
-        authButton.disabled = true;
         oauthBusy = true;
+        syncCloudVoiceAuth();
         say('Checking local ChatGPT OAuth sign-in…');
         try {
           const response = await doFetch('/api/realtime/oauth-status', {
@@ -471,7 +481,7 @@ export async function initKeySetup({
             );
           if (payload.available) {
             writeStoredCloudVoiceAuthMode('oauth');
-            render(status);
+            syncCloudVoiceAuth();
             say(
               'ChatGPT OAuth selected for cloud voice. Your API key stays saved and available.',
             );
@@ -500,7 +510,7 @@ export async function initKeySetup({
           }
           if (loginPayload.available) {
             writeStoredCloudVoiceAuthMode('oauth');
-            render(status);
+            syncCloudVoiceAuth();
             say(
               'ChatGPT OAuth selected for cloud voice. Your API key stays saved and available.',
             );
@@ -522,7 +532,7 @@ export async function initKeySetup({
             return;
           }
           writeStoredCloudVoiceAuthMode('oauth');
-          render(status);
+          syncCloudVoiceAuth();
           say(
             'ChatGPT sign-in complete. OAuth will be used for the next cloud voice session.',
           );
@@ -531,10 +541,7 @@ export async function initKeySetup({
           say(`OAuth check failed: ${error?.message || error}`);
         } finally {
           oauthBusy = false;
-          for (const button of rowsHost.querySelectorAll(
-            '[data-cloud-voice-auth-toggle]',
-          ))
-            button.disabled = false;
+          if (!disposed) syncCloudVoiceAuth();
         }
       })();
       return;
