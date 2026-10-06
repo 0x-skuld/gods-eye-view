@@ -40,8 +40,15 @@ export function createStreetLevelLayer({
   parts.groundCaster = services.terrain?.resolveEllipsoidalGround
     ? createGroundCaster({ terrain: services.terrain })
     : null;
+  // Mesh samples follow the application's rules: a real bare-earth prior,
+  // its mesh window, and a tileset that has finished streaming.
   parts.meshSampler = parts.groundCaster
-    ? createMeshSampler({ getViewer: () => state.viewer })
+    ? createMeshSampler({
+        getViewer: () => state.viewer,
+        groundAt: parts.groundCaster.groundAt,
+        withinPrior: services.ground?.meshFloorSampleWithinPrior ?? null,
+        tilesReady: services.meshFloor?.visibleTilesetLoaded ?? null,
+      })
     : null;
   parts.credits = createCredits();
   parts.marker = createMarker(context);
@@ -375,6 +382,7 @@ export function createStreetLevelLayer({
         entry.instance.destroy(viewer);
       parts.marker.destroy(viewer);
       parts.meshSampler?.destroy();
+      parts.follow.destroy();
       unsubscribeMapStack?.();
       unsubscribeMapStack = null;
       mapStack = null;
@@ -403,6 +411,15 @@ export function createStreetLevelLayer({
           : coverage.error,
         loadingLabel,
       };
+    },
+
+    /**
+     * The application's camera authority: `run(noun, move)` and
+     * `subscribeHandoff(listener)`. Framing and FOLLOW claim the camera
+     * through it, and FOLLOW stops when another feature takes the camera.
+     */
+    attachNavigation(navigation) {
+      parts.follow.attachNavigation(navigation);
     },
 
     /** The application map stack; FOLLOW is available only on Google 3D. */

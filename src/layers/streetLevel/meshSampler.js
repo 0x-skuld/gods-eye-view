@@ -5,8 +5,10 @@ import { metresBetween, whenIdle } from './view.js';
  * Google 3D surface heights for ground casting (groundCast.js refineHeights):
  * one cached `scene.sampleHeight` probe per ~11 m cell. Each probe renders a
  * pick pass (1–3 ms), so probes run in budgeted idle slices, nearest the
- * camera first and only within MESH_SAMPLE_RADIUS_M. A miss (tiles not
- * streamed yet) is retried later. Probes hit 3D tilesets only.
+ * camera first and only within MESH_SAMPLE_RADIUS_M. Like the application's
+ * mesh floor, a probe waits for the visible tileset to finish streaming and a
+ * sample counts only within the shared window around a real bare-earth height;
+ * anything else is a miss, retried later. Probes hit 3D tilesets only.
  */
 
 /** Cell size, in degrees (~11 m): samples are shared within a cell. */
@@ -19,6 +21,16 @@ export const MESH_SAMPLE_BUDGET_MS = 6;
 export const MESH_RERANK_M = 100;
 /** A cell whose probe missed is tried again after this long. */
 export const MESH_MISS_RETRY_MS = 8000;
+/** While the visible tileset is streaming, the next probe waits this long. */
+export const MESH_STREAMING_WAIT_MS = 500;
+/**
+ * A sampled cell is probed again once the camera is half as far from it as at
+ * its last probe (finer tiles have loaded by then), down to this distance:
+ * at most a handful of probes per cell.
+ */
+export const MESH_REFRESH_MIN_M = 40;
+/** A refreshed sample that moved less than this is not redrawn. */
+const MESH_REFRESH_CHANGE_M = 0.5;
 /** Cached cells (and remembered misses) before they are dropped and refilled. */
 const MESH_CACHE_MAX = 80_000;
 /** Listeners hear about new samples at most this often. */
@@ -80,10 +92,16 @@ function overlays(scene) {
 }
 
 /**
- * @param {{getViewer: () => object|null, budgetMs?: number, radiusM?: number, cacheMax?: number, now?: () => number}} options
+ * `groundAt(lon, lat)` is the bare-earth height or null, `withinPrior(height,
+ * prior)` the application's mesh window, and `tilesReady(scene)` whether the
+ * visible tileset has finished streaming.
+ * @param {{getViewer: () => object|null, groundAt?: Function, withinPrior?: Function, tilesReady?: Function, budgetMs?: number, radiusM?: number, cacheMax?: number, now?: () => number}} options
  */
 export function createMeshSampler({
   getViewer,
+  groundAt = null,
+  withinPrior = null,
+  tilesReady = null,
   budgetMs = MESH_SAMPLE_BUDGET_MS,
   radiusM = MESH_SAMPLE_RADIUS_M,
   cacheMax = MESH_CACHE_MAX,
@@ -91,6 +109,8 @@ export function createMeshSampler({
 }) {
   /** cell key → sampled mesh height (ellipsoidal metres). */
   const heights = new Map();
+  /** cell key → camera distance (m) at the cell's last probe. */
+  const probedFrom = new Map();
   /** cell key → retry time for probes that hit nothing; bounded like the height cache. */
   const misses = new Map();
   /** cell key → queued cell, so a cell is queued once. */
@@ -114,14 +134,38 @@ export function createMeshSampler({
     return heights.get(meshCellKey(lon, lat));
   }
 
-  /** The point under the camera, or null. */
+  /** The point under the camera, with the camera's height, or null. */
   function cameraCentre() {
     const carto = getViewer()?.camera?.positionCartographic;
     if (!carto) return null;
     return {
       lon: Cesium.Math.toDegrees(carto.longitude),
       lat: Cesium.Math.toDegrees(carto.latitude),
+      height: carto.height,
     };
+  }
+
+  /** Camera distance (m) to a cell at `height`, from its ground distance. */
+  function cameraDistance(ground, centre, height) {
+    const above = (centre.height ?? 0) - (height ?? 0);
+    return Number.isFinite(above)
+      ? Math.hypot(ground, Math.max(0, above))
+      : ground;
+  }
+
+  /** A sampled cell is probed again once the camera is half as far as before. */
+  function dueForRefresh(key, distance) {
+    const last = probedFrom.get(key);
+    return last > MESH_REFRESH_MIN_M && distance < last / 2;
+  }
+
+  /** A probe result the application would accept, or undefined. */
+  function validated(height, lon, lat) {
+    if (!Number.isFinite(height)) return undefined;
+    if (!groundAt) return height;
+    const prior = groundAt(lon, lat);
+    if (!Number.isFinite(prior)) return undefined;
+    return !withinPrior || withinPrior(height, prior) ? height : undefined;
   }
 
   /**
@@ -147,14 +191,20 @@ export function createMeshSampler({
         const [lon, lat] = points[pending.next++];
         if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
         const key = meshCellKey(lon, lat);
-        if (heights.has(key) || wanted.has(key)) continue;
+        if (wanted.has(key)) continue;
         const cell = {
           key,
           lon: cellOf(lon) * MESH_CELL_DEG,
           lat: cellOf(lat) * MESH_CELL_DEG,
           distance: 0,
         };
-        if (metresBetween(cell, centre) > radiusM) continue;
+        const ground = metresBetween(cell, centre);
+        if (ground > radiusM) continue;
+        if (
+          heights.has(key) &&
+          !dueForRefresh(key, cameraDistance(ground, centre, heights.get(key)))
+        )
+          continue;
         const retryAt = misses.get(key);
         if (retryAt !== undefined) {
           if (retryAt > time) continue;
@@ -220,6 +270,15 @@ export function createMeshSampler({
     const scene = getViewer()?.scene;
     const centre = cameraCentre();
     if (!enabled || !scene?.sampleHeightSupported || !centre) return;
+    // Mid-stream tiles answer with coarse heights: wait for the stream.
+    if (tilesReady && !tilesReady(scene)) {
+      running = true;
+      setTimeout(() => {
+        running = false;
+        schedule();
+      }, MESH_STREAMING_WAIT_MS);
+      return;
+    }
     // Nearest first, ranked from where the camera was; out-of-range cells
     // are dropped (they stay bare earth).
     let worked = false;
@@ -241,7 +300,8 @@ export function createMeshSampler({
       const { key, lon, lat } = heapPop(queue);
       wanted.delete(key);
       // Ranked from up to MESH_RERANK_M away: check the range from here.
-      if (metresBetween({ lon, lat }, centre) > radiusM) continue;
+      const ground = metresBetween({ lon, lat }, centre);
+      if (ground > radiusM) continue;
       probed++;
       const probeStarted = now();
       let height;
@@ -254,15 +314,27 @@ export function createMeshSampler({
         height = undefined;
       }
       probeMs = probeMs * 0.75 + (now() - probeStarted) * 0.25;
-      if (!Number.isFinite(height)) {
-        if (misses.size >= cacheMax) misses.clear();
-        misses.set(key, Date.now() + MESH_MISS_RETRY_MS);
+      height = validated(height, lon, lat);
+      const previous = heights.get(key);
+      if (height === undefined) {
+        // A failed refresh keeps the old sample, and waits for a closer camera.
+        if (previous !== undefined)
+          probedFrom.set(key, cameraDistance(ground, centre, previous));
+        else {
+          if (misses.size >= cacheMax) misses.clear();
+          misses.set(key, Date.now() + MESH_MISS_RETRY_MS);
+        }
         continue;
       }
-      if (heights.size >= cacheMax) forget();
+      if (previous === undefined && heights.size >= cacheMax) forget();
       misses.delete(key);
       heights.set(key, height);
-      fresh.push([lon, lat]);
+      probedFrom.set(key, cameraDistance(ground, centre, height));
+      if (
+        previous === undefined ||
+        Math.abs(height - previous) >= MESH_REFRESH_CHANGE_M
+      )
+        fresh.push([lon, lat]);
     }
     if (fresh.length && !notifyTimer)
       notifyTimer = setTimeout(emit, MESH_NOTIFY_MS);
@@ -271,6 +343,7 @@ export function createMeshSampler({
 
   function forget() {
     heights.clear();
+    probedFrom.clear();
     misses.clear();
   }
 

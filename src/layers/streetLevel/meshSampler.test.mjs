@@ -4,9 +4,12 @@ import * as Cesium from 'cesium';
 import {
   MESH_CELL_DEG,
   MESH_MISS_RETRY_MS,
+  MESH_REFRESH_MIN_M,
   MESH_SAMPLE_BUDGET_MS,
+  MESH_STREAMING_WAIT_MS,
   createMeshSampler,
 } from './meshSampler.js';
+import { meshFloorSampleWithinPrior } from '../../data/groundFloor.js';
 import { metresBetween } from './view.js';
 
 const settle = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -266,4 +269,108 @@ test('the sampling range is measured the short way round the date line', (t) => 
   assert.equal(probes.length, 1, 'only the neighbour across ±180°');
   assert.ok(Math.abs(Math.abs(probes[0].lon) - 179.9999) < MESH_CELL_DEG);
   sampler.destroy();
+});
+
+/** A scene whose mesh height can change (finer tiles) and a camera that can move. */
+function liveViewer({ surface = 80, height = 700, ready = () => true } = {}) {
+  const tileset = Object.create(Cesium.Cesium3DTileset.prototype);
+  const probes = [];
+  const viewer = {
+    surface,
+    ready,
+    scene: {
+      sampleHeightSupported: true,
+      primitives: { length: 1, get: () => tileset },
+      sampleHeight(carto) {
+        probes.push(carto);
+        return viewer.surface;
+      },
+    },
+    camera: {
+      positionCartographic: { longitude: 10 * RAD, latitude: 50 * RAD, height },
+    },
+  };
+  return { viewer, probes };
+}
+
+function liveSampler(viewer, options = {}) {
+  return createMeshSampler({
+    getViewer: () => viewer,
+    groundAt: () => 75,
+    withinPrior: meshFloorSampleWithinPrior,
+    tilesReady: () => viewer.ready(),
+    ...options,
+  });
+}
+
+test('a sample is probed again once the camera is twice as close, and the change is redrawn', async () => {
+  const { viewer, probes } = liveViewer({ surface: 80, height: 700 });
+  const sampler = liveSampler(viewer);
+  sampler.setEnabled(true);
+  const heard = [];
+  sampler.onSampled((batch) => heard.push(batch.length));
+  sampler.request([[10.001, 50]]);
+  await settle(900);
+  assert.equal(sampler.meshAt(10.001, 50), 80);
+  // Finer tiles load: the surface is really 100 m.
+  viewer.surface = 100;
+  sampler.request([[10.001, 50]]);
+  await settle();
+  assert.equal(probes.length, 1, 'no new probe from the same distance');
+  assert.equal(sampler.meshAt(10.001, 50), 80);
+  viewer.camera.positionCartographic.height = 250;
+  sampler.request([[10.001, 50]]);
+  await settle(900);
+  assert.equal(probes.length, 2);
+  assert.equal(sampler.meshAt(10.001, 50), 100);
+  assert.deepEqual(heard, [1, 1], 'the new height is announced for a redraw');
+  sampler.destroy();
+});
+
+test('refreshing stops once a cell was probed from close by', async () => {
+  const { viewer, probes } = liveViewer({ surface: 80, height: 110 });
+  viewer.camera.positionCartographic.longitude = 10.001 * RAD;
+  const sampler = liveSampler(viewer);
+  sampler.setEnabled(true);
+  sampler.request([[10.001, 50]]);
+  await settle();
+  viewer.camera.positionCartographic.height = 85;
+  sampler.request([[10.001, 50]]);
+  await settle();
+  assert.equal(probes.length, 1, `probed from under ${MESH_REFRESH_MIN_M} m`);
+  sampler.destroy();
+});
+
+test('probes wait while the visible tileset is still streaming', async () => {
+  let ready = false;
+  const { viewer, probes } = liveViewer({ ready: () => ready });
+  const sampler = liveSampler(viewer);
+  sampler.setEnabled(true);
+  sampler.request([[10.001, 50]]);
+  await settle(MESH_STREAMING_WAIT_MS * 2);
+  assert.equal(probes.length, 0);
+  ready = true;
+  await settle(MESH_STREAMING_WAIT_MS * 2);
+  assert.equal(probes.length, 1);
+  assert.equal(sampler.meshAt(10.001, 50), 80);
+  sampler.destroy();
+});
+
+test('a sample needs a real bare-earth prior and must sit in the shared mesh window', async () => {
+  const { viewer } = liveViewer({ surface: 300 });
+  const unknown = liveSampler(viewer, { groundAt: () => null });
+  unknown.setEnabled(true);
+  unknown.request([[10.001, 50]]);
+  const outside = liveSampler(viewer);
+  outside.setEnabled(true);
+  outside.request([[10.001, 50]]);
+  await settle();
+  assert.equal(unknown.meshAt(10.001, 50), undefined, 'no prior: not kept');
+  assert.equal(
+    outside.meshAt(10.001, 50),
+    undefined,
+    '225 m above it: not kept',
+  );
+  unknown.destroy();
+  outside.destroy();
 });

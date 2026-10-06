@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
+import { readResponseBytesCapped } from '../common/http.js';
 import { stripTileLayers } from './trim.js';
 import {
   MAPILLARY_TILE_HOST,
@@ -350,35 +351,20 @@ async function fetchUpstream(address, signal) {
     }
     throw error;
   }
-  const declared = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > TILE_MAX_BYTES) {
-    await response.body?.cancel().catch(() => {});
+  // Chunked or compressed bodies have no Content-Length: the cap applies as
+  // the body streams, and an oversized one also aborts the request.
+  try {
+    const bytes = await readResponseBytesCapped(
+      response,
+      TILE_MAX_BYTES,
+      signal,
+    );
+    return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  } catch (error) {
+    if (error?.code !== 'RESPONSE_TOO_LARGE') throw error;
+    oversize.abort();
     throw new TileUpstreamError(502, 'Mapillary tile exceeds size cap');
   }
-  return readCapped(response, () => oversize.abort());
-}
-
-/**
- * Read a body, aborting once it passes TILE_MAX_BYTES: chunked or compressed
- * responses have no Content-Length to check first.
- */
-async function readCapped(response, abortRequest) {
-  if (!response.body) return Buffer.alloc(0);
-  const reader = response.body.getReader();
-  const chunks = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > TILE_MAX_BYTES) {
-      abortRequest();
-      await reader.cancel().catch(() => {});
-      throw new TileUpstreamError(502, 'Mapillary tile exceeds size cap');
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks, total);
 }
 
 /** @type {{active: number, queue: Array<() => void>}} upstream slots */

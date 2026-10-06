@@ -4,9 +4,6 @@ import { FOLLOW_EYE_HEIGHT_M } from './policy.js';
 /** Plausible ellipsoidal land heights: Dead Sea to Everest, with geoid slack. */
 const SURFACE_MIN_M = -500;
 const SURFACE_MAX_M = 9000;
-/** Rendered mesh window around the bare earth: roofs and bridges, not whole towers. */
-const MESH_BELOW_DEM_M = 15;
-const MESH_ABOVE_DEM_M = 80;
 
 /** Drive the globe camera from the street-level pose: continuously (follow) or once (framing). */
 export function createCameraFollow({ state, parts }) {
@@ -14,6 +11,48 @@ export function createCameraFollow({ state, parts }) {
 
   function requestRender() {
     render?.governorRequestRender?.('street-level-follow');
+  }
+
+  /**
+   * The application's camera authority (`attachNavigation`): `run(noun, move)`
+   * releases tracking and other owners before `move`, or refuses (cockpit);
+   * `subscribeHandoff` reports a newer owner. Without it, moves run directly.
+   */
+  let navigation = null;
+  let unsubscribeHandoff = null;
+  /** Set while our own claim stamps a handoff, so it does not end FOLLOW. */
+  let claiming = false;
+
+  /** Take the camera for `move`; false when the application refuses. */
+  function claim(move) {
+    if (!navigation?.run) {
+      move();
+      return true;
+    }
+    claiming = true;
+    try {
+      return (
+        navigation.run('photo', () => {
+          move();
+          return true;
+        }) === true
+      );
+    } finally {
+      claiming = false;
+    }
+  }
+
+  /** Another feature took the camera: stop following it. */
+  function onHandoff() {
+    if (claiming || !state.street.follow) return;
+    state.street.follow = false;
+    state.notify?.();
+  }
+
+  function attachNavigation(next) {
+    unsubscribeHandoff?.();
+    navigation = next || null;
+    unsubscribeHandoff = navigation?.subscribeHandoff?.(onHandoff) || null;
   }
 
   /**
@@ -27,12 +66,13 @@ export function createCameraFollow({ state, parts }) {
     const caster = parts?.groundCaster;
     const dem = caster?.groundAt(lon, lat) ?? null;
     if (dem === null) caster?.prepare([[lon, lat]]);
+    // The application's mesh window around bare earth, once that is known.
+    const withinPrior = state.services.ground?.meshFloorSampleWithinPrior;
     const plausible = (height) =>
       Number.isFinite(height) &&
       height >= SURFACE_MIN_M &&
       height <= SURFACE_MAX_M &&
-      (dem === null ||
-        (height >= dem - MESH_BELOW_DEM_M && height <= dem + MESH_ABOVE_DEM_M));
+      (dem === null || !withinPrior || withinPrior(height, dem));
     let height = null;
     try {
       if (scene?.sampleHeightSupported) height = scene.sampleHeight(carto);
@@ -73,29 +113,31 @@ export function createCameraFollow({ state, parts }) {
     const { position, bearing, altitude } = state.street;
     if (!position || !state.viewer) return;
     const ground = groundHeightAt(position.lon, position.lat, altitude);
-    // Owned before the call: starting it cancels the previous flight (ours
-    // included) synchronously, and a zero-length one completes at once.
-    const flight = {};
-    framing = flight;
-    const release = () => {
-      if (framing === flight) framing = null;
-    };
-    state.viewer.camera.flyToBoundingSphere(
-      new Cesium.BoundingSphere(
-        Cesium.Cartesian3.fromDegrees(position.lon, position.lat, ground + 2),
-        4,
-      ),
-      {
-        offset: new Cesium.HeadingPitchRange(
-          Cesium.Math.toRadians(bearing || 0),
-          Cesium.Math.toRadians(-32),
-          140,
+    claim(() => {
+      // Owned before the call: starting it cancels the previous flight (ours
+      // included) synchronously, and a zero-length one completes at once.
+      const flight = {};
+      framing = flight;
+      const release = () => {
+        if (framing === flight) framing = null;
+      };
+      state.viewer.camera.flyToBoundingSphere(
+        new Cesium.BoundingSphere(
+          Cesium.Cartesian3.fromDegrees(position.lon, position.lat, ground + 2),
+          4,
         ),
-        duration: 1.6,
-        complete: release,
-        cancel: release,
-      },
-    );
+        {
+          offset: new Cesium.HeadingPitchRange(
+            Cesium.Math.toRadians(bearing || 0),
+            Cesium.Math.toRadians(-32),
+            140,
+          ),
+          duration: 1.6,
+          complete: release,
+          cancel: release,
+        },
+      );
+    });
   }
 
   /** Stop our framing flight if it is still in the air; another feature's flight is left alone. */
@@ -107,14 +149,32 @@ export function createCameraFollow({ state, parts }) {
   }
 
   function setFollow(enabled) {
-    state.street.follow = enabled === true && state.street.followAvailable;
-    // The framing tween would keep overwriting the follow view until it lands.
-    if (state.street.follow) {
-      cancelFraming();
-      followCamera();
+    const wanted = enabled === true && state.street.followAvailable;
+    if (wanted && !state.street.follow) {
+      // Following owns the camera until another feature takes it.
+      const granted = claim(() => {
+        state.street.follow = true;
+        // The framing tween would keep overwriting the follow view until it lands.
+        cancelFraming();
+        followCamera();
+      });
+      if (!granted) state.street.follow = false;
+    } else if (!wanted) {
+      state.street.follow = false;
     }
     state.notify?.();
   }
 
-  return { followCamera, lookAtPosition, cancelFraming, setFollow };
+  function destroy() {
+    attachNavigation(null);
+  }
+
+  return {
+    followCamera,
+    lookAtPosition,
+    cancelFraming,
+    setFollow,
+    attachNavigation,
+    destroy,
+  };
 }

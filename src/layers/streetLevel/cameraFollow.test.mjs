@@ -156,3 +156,80 @@ test('turning FOLLOW on stops the framing flight so it cannot fight the follow v
   assert.equal(camera.cancelled, 1, 'the framing tween stops');
   assert.equal(views.length, 1, 'and the camera stands at the photo');
 });
+
+/**
+ * The application's camera authority: `run` releases tracking (here, a tracked
+ * entity) and stamps a handoff before the move, or refuses like the cockpit.
+ */
+function navigationFor(state, { refuse = false } = {}) {
+  const listeners = new Set();
+  const nav = {
+    runs: [],
+    run(noun, move) {
+      nav.runs.push(noun);
+      if (refuse) return false;
+      for (const listener of listeners)
+        listener({ generation: nav.runs.length });
+      state.viewer.trackedEntity = undefined;
+      return move(nav.runs.length);
+    },
+    subscribeHandoff(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    handOff() {
+      for (const listener of listeners) listener({ generation: -1 });
+    },
+    listeners,
+  };
+  return nav;
+}
+
+test('framing a photo claims the camera through the application, releasing tracking', () => {
+  const { follow, state, flights } = setup({ sampled: 160 });
+  state.viewer.trackedEntity = { id: 'aircraft' };
+  const nav = navigationFor(state);
+  follow.attachNavigation(nav);
+  follow.lookAtPosition();
+  assert.deepEqual(nav.runs, ['photo']);
+  assert.equal(state.viewer.trackedEntity, undefined);
+  assert.equal(flights.length, 1);
+});
+
+test('a refused claim (cockpit) neither frames the photo nor turns FOLLOW on', () => {
+  const { follow, state, flights, views } = setup({ sampled: 160 });
+  follow.attachNavigation(navigationFor(state, { refuse: true }));
+  follow.lookAtPosition();
+  follow.setFollow(true);
+  assert.equal(flights.length, 0);
+  assert.equal(views.length, 0);
+  assert.equal(state.street.follow, false);
+});
+
+test('FOLLOW claims the camera once and ends when another feature takes it', () => {
+  const { follow, state, views } = setup({ sampled: 160 });
+  let notified = 0;
+  state.notify = () => notified++;
+  const nav = navigationFor(state);
+  follow.attachNavigation(nav);
+  follow.setFollow(true);
+  assert.equal(state.street.follow, true, 'our own handoff keeps FOLLOW on');
+  assert.deepEqual(nav.runs, ['photo']);
+  follow.followCamera();
+  assert.deepEqual(nav.runs, ['photo'], 'pose updates do not claim again');
+  assert.equal(views.length, 2);
+  nav.handOff();
+  assert.equal(state.street.follow, false);
+  assert.ok(notified >= 2);
+  follow.followCamera();
+  assert.equal(views.length, 2, 'the camera is no longer driven');
+});
+
+test('destroying the follow part stops listening for handoffs', () => {
+  const { follow, state } = setup({ sampled: 160 });
+  const nav = navigationFor(state);
+  follow.attachNavigation(nav);
+  assert.equal(nav.listeners.size, 1);
+  follow.destroy();
+  assert.equal(nav.listeners.size, 0);
+});

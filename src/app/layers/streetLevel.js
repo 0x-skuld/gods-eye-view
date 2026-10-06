@@ -15,6 +15,7 @@ export function createApplicationStreetLevel({ surface, sources }) {
       input,
       render,
       ground: surface?.groundFloor ?? null,
+      meshFloor: surface?.meshFloor ?? null,
       terrain: surface?.terrain ?? null,
     },
   });

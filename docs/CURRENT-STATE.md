@@ -2959,7 +2959,10 @@ the mesh hides what is behind buildings and trees. A tile is drawn draped until
 its heights arrive; a geoid fallback leaves it draped. Within 900 m of the
 camera, `meshSampler.js` samples the rendered surface (`scene.sampleHeight`,
 ~11 m cells, nearest first, 6 ms idle budget) so lines also follow trenches,
-steep streets and roads under trees. Roads on elevated decks are still drawn at
+steep streets and roads under trees. It uses the mesh floor's rules (the
+visible tileset has finished streaming, a real bare-earth prior, the shared
+mesh window) and probes a cell again once the camera is half as far from it,
+down to 40 m, so coarse early samples are replaced as finer tiles load. Roads on elevated decks are still drawn at
 ground level. Framing a photo ignores mesh samples far below the bare earth
 (unloaded tiles).
 
@@ -2967,7 +2970,10 @@ The header pill is the layer switch. With one provider its chip is a layer
 switch too; with several, darkening the last lit chip turns the layer off. The
 viewer sits under the header with EXPAND, FIT/FILL, FOLLOW and close above the
 image. FOLLOW needs the Google 3D map stack (`attachMapStackController`) and
-stops when the stack changes. SINCE is a stepped slider whose readout names the
+stops when the stack changes. Framing a photo and turning FOLLOW on claim the
+camera through the application's navigation (`attachNavigation`), which
+releases aircraft and satellite tracking (and is refused in the cockpit);
+FOLLOW stops when another feature takes the camera. SINCE is a stepped slider whose readout names the
 cut-off date. The panel is portable (`street-level-panel` spec, minimum
 320 × 280, `dockOnCollapse`): a floating window gives spare height to the
 viewer, and collapsing it, double-clicking the header or SHRINK after EXPAND
