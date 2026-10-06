@@ -3,6 +3,7 @@ import test from 'node:test';
 import * as Cesium from 'cesium';
 import { createStreetLevelLayer } from './index.js';
 import { MAPILLARY_CREDIT_HTML } from './providers/mapillary/policy.js';
+import { createMapillaryProvider } from './providers/mapillary/index.js';
 import { fakeStreetLevelProvider as fakeProvider } from '../../testSupport/streetLevelFakes.mjs';
 
 /**
@@ -11,6 +12,15 @@ import { fakeStreetLevelProvider as fakeProvider } from '../../testSupport/stree
  */
 function fakeViewer() {
   const credits = [];
+  /** Cesium's flight bookkeeping: a new flight cancels the current one. */
+  let flight = null;
+  const flights = { started: 0, cancelled: 0 };
+  const stopFlight = () => {
+    const current = flight;
+    flight = null;
+    current?.cancel?.();
+    return Boolean(current);
+  };
   const canvas = Object.assign(new EventTarget(), {
     style: {},
     // Keep Cesium's handler on the canvas; there is no real document here.
@@ -19,11 +29,27 @@ function fakeViewer() {
   });
   return {
     credits,
-    scene: { canvas, primitives: { add: (p) => p, remove() {} } },
+    flights,
+    scene: {
+      canvas,
+      primitives: { add: (p) => p, remove() {} },
+      // Enough of a scene for the position marker to clamp to the ground.
+      frameState: { mode: Cesium.SceneMode.SCENE3D },
+      updateHeight: () => () => {},
+      getHeight: () => undefined,
+    },
     camera: {
       changed: new Cesium.Event(),
       moveStart: new Cesium.Event(),
       moveEnd: new Cesium.Event(),
+      flyToBoundingSphere(sphere, options = {}) {
+        stopFlight();
+        flight = options;
+        flights.started++;
+      },
+      cancelFlight() {
+        if (stopFlight()) flights.cancelled++;
+      },
     },
     creditDisplay: {
       addStaticCredit: (credit) => credits.push(credit),
@@ -36,7 +62,11 @@ function fakeViewer() {
 /** A layer over `providers`, initialised and enabled on a stand-in viewer. */
 async function enabledLayer(t, providers = [fakeProvider()]) {
   const saved = globalThis.document;
-  globalThis.document = new EventTarget();
+  // A pose moves the position marker, whose glyph is drawn on a canvas.
+  const drawing = new Proxy({}, { get: () => () => ({ addColorStop() {} }) });
+  globalThis.document = Object.assign(new EventTarget(), {
+    createElement: () => ({ getContext: () => drawing }),
+  });
   const viewer = fakeViewer();
   const layer = createStreetLevelLayer({ providers });
   layer.init(viewer);
@@ -53,10 +83,50 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 function deferred() {
   let resolve;
-  const promise = new Promise((done) => {
+  let reject;
+  const promise = new Promise((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
+}
+
+/** A provider whose viewer reports a pose for every image it opens. */
+function posingProvider() {
+  const provider = fakeProvider();
+  const create = provider.create;
+  provider.create = (context) => {
+    const instance = create(context);
+    let emit = null;
+    instance.viewer.onPose = (listener) => {
+      emit = listener;
+      return () => {
+        emit = null;
+      };
+    };
+    instance.viewer.open = async (imageId) => {
+      provider.calls.open.push(imageId);
+      emit?.({
+        providerId: 'mapillary',
+        imageId,
+        position: { lon: -121.49, lat: 38.58 },
+        bearing: 90,
+      });
+    };
+    return instance;
+  };
+  return provider;
+}
+
+/** nearestImage lookups that answer when the test says, with their signals. */
+function slowLookups() {
+  const lookups = [];
+  const nearestImage = (point, { signal } = {}) => {
+    const answer = deferred();
+    lookups.push({ point, signal, answer });
+    return answer.promise;
+  };
+  return { lookups, nearestImage };
 }
 
 /** A map stack controller that can be switched between stacks. */
@@ -226,4 +296,126 @@ test('a provider withdraws only the error it reported (review P3)', async (t) =>
   await layer.openImage('mapillary', 'img1');
   actions.reportError(null);
   assert.match(layer.getUIState().street.error, /Open the Street Level panel/);
+});
+
+test('closing the photo stops the globe flying to it (review IC8 P1)', async (t) => {
+  const { layer, viewer } = await enabledLayer(t, [posingProvider()]);
+  layer.attachViewerHost({});
+  assert.equal(await layer.openImage('mapillary', 'img1'), true);
+  assert.equal(viewer.flights.started, 1, 'the photo is framed');
+  layer.closeViewer();
+  assert.equal(viewer.flights.cancelled, 1);
+});
+
+test('switching the layer off or destroying it stops the framing flight (review IC8 P1)', async (t) => {
+  const { layer, viewer } = await enabledLayer(t, [posingProvider()]);
+  layer.attachViewerHost({});
+  await layer.openImage('mapillary', 'img1');
+  layer.disable();
+  assert.equal(viewer.flights.cancelled, 1, 'layer off');
+
+  layer.enable(viewer);
+  await layer.openImage('mapillary', 'img2');
+  layer.destroy();
+  assert.equal(viewer.flights.cancelled, 2, 'destroyed');
+});
+
+test('closing the photo leaves a newer navigation flight alone (review IC8 P1)', async (t) => {
+  const { layer, viewer } = await enabledLayer(t, [posingProvider()]);
+  layer.attachViewerHost({});
+  await layer.openImage('mapillary', 'img1');
+  assert.equal(viewer.flights.started, 1, 'the photo is being framed');
+  // A search result flies the globe elsewhere before the framing lands.
+  viewer.camera.flyToBoundingSphere(null, {});
+  layer.closeViewer();
+  assert.equal(viewer.flights.cancelled, 0, 'the search flight keeps going');
+});
+
+test('an older nearest lookup that answers late cannot replace a newer one (review IC8 P2)', async (t) => {
+  const { lookups, nearestImage } = slowLookups();
+  const provider = fakeProvider({ nearestImage });
+  const { layer } = await enabledLayer(t, [provider]);
+  layer.attachViewerHost({});
+  const older = layer.openNearest({ lat: 38.58, lon: -121.49 });
+  const newer = layer.openNearest({ lat: 38.59, lon: -121.48 });
+  lookups[1].answer.resolve('newer');
+  assert.equal(await newer, true);
+  lookups[0].answer.resolve('older');
+  assert.equal(await older, false);
+  assert.deepEqual(provider.calls.open, ['newer']);
+  assert.equal(lookups[0].signal?.aborted, true, 'its request was aborted');
+  assert.equal(lookups[1].signal?.aborted, false);
+});
+
+test('an image picked during a nearest lookup wins over its late answer (review IC8 P2)', async (t) => {
+  const { lookups, nearestImage } = slowLookups();
+  const provider = fakeProvider({ nearestImage });
+  const { layer } = await enabledLayer(t, [provider]);
+  layer.attachViewerHost({});
+  const lookup = layer.openNearest({ lat: 38.58, lon: -121.49 });
+  // A cone click goes through the provider's openImage action.
+  assert.equal(await provider.context().actions.openImage('picked'), true);
+  lookups[0].answer.resolve('nearest');
+  assert.equal(await lookup, false);
+  assert.deepEqual(provider.calls.open, ['picked']);
+  assert.equal(lookups[0].signal?.aborted, true);
+});
+
+test('closing the viewer or switching the layer off retires a nearest lookup (review IC8 P2)', async (t) => {
+  const { lookups, nearestImage } = slowLookups();
+  const provider = fakeProvider({ nearestImage });
+  const { layer, viewer } = await enabledLayer(t, [provider]);
+  layer.attachViewerHost({});
+
+  const closed = layer.openNearest({ lat: 38.58, lon: -121.49 });
+  layer.closeViewer();
+  // The aborted fetch rejects, as fetch does; that is not the user's error.
+  lookups[0].answer.reject(new DOMException('aborted', 'AbortError'));
+  assert.equal(await closed, false);
+  let { street } = layer.getUIState();
+  assert.deepEqual(
+    [street.open, street.loading, street.error],
+    [false, false, null],
+  );
+  assert.equal(lookups[0].signal?.aborted, true, 'closing aborts the request');
+
+  const disabled = layer.openNearest({ lat: 38.58, lon: -121.49 });
+  layer.disable();
+  layer.enable(viewer);
+  lookups[1].answer.resolve('img1');
+  assert.equal(await disabled, false, 'nor does it open once back on');
+  assert.deepEqual(provider.calls.open, []);
+  ({ street } = layer.getUIState());
+  assert.deepEqual(
+    [street.open, street.loading, street.error],
+    [false, false, null],
+  );
+  assert.equal(lookups[1].signal?.aborted, true, 'layer off aborts it too');
+});
+
+test('the Mapillary provider hands the lookup signal to its source (review IC8 P2)', async () => {
+  const requests = [];
+  const source = {
+    hasToken: () => true,
+    getStatus: async () => ({ configured: true }),
+    getTile: async () => new Uint8Array(0),
+    getSequenceImages: async () => [],
+    nearestImages: async (query, options) => {
+      requests.push(options);
+      return [{ id: 7, is_pano: false, captured_at: 10 }];
+    },
+  };
+  const instance = createMapillaryProvider({ source }).create({
+    services: {},
+    getFilter: () => ({ pano: 'all', sinceMs: null }),
+    isActive: () => true,
+    notify() {},
+    actions: { openImage() {}, reportError() {} },
+  });
+  const { signal } = new AbortController();
+  assert.equal(
+    await instance.nearestImage({ lat: 1, lon: 2 }, { signal }),
+    '7',
+  );
+  assert.equal(requests[0]?.signal, signal);
 });

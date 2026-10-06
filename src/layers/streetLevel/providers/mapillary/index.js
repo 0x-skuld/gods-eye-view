@@ -180,14 +180,15 @@ export function createMapillaryProvider({ source }) {
           loading: state.sequence.loading,
         }),
 
-        /** Nearest image that passes the imagery filter, or null. */
-        async nearestImage({ lat, lon }) {
-          const images = await source.nearestImages({
-            lat,
-            lon,
-            radius: NEAREST_RADIUS_M,
-            limit: NEAREST_LIMIT,
-          });
+        /**
+         * Nearest image that passes the imagery filter, or null. The core
+         * aborts `signal` once a newer request overtakes the lookup.
+         */
+        async nearestImage({ lat, lon }, { signal } = {}) {
+          const images = await source.nearestImages(
+            { lat, lon, radius: NEAREST_RADIUS_M, limit: NEAREST_LIMIT },
+            { signal },
+          );
           // The API returns the images in the radius in no particular order.
           const metres = (record) => {
             const [lon2, lat2] = (record.computed_geometry || record.geometry)

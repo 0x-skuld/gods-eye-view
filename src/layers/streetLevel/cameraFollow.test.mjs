@@ -9,6 +9,40 @@ const heightOf = (cartesian) =>
   Cesium.Cartographic.fromCartesian(cartesian).height;
 
 /**
+ * A camera with Cesium's flight bookkeeping: starting a flight cancels the
+ * current one (calling its `cancel`), `cancelFlight` cancels whichever flight
+ * is current, whoever started it, and `land()` completes it. `cancelled`
+ * counts the flights `cancelFlight` stopped.
+ */
+function flightCamera(flights, views) {
+  let current = null;
+  function stop() {
+    const flight = current;
+    current = null;
+    flight?.options.cancel?.();
+    return Boolean(flight);
+  }
+  const camera = {
+    cancelled: 0,
+    flyToBoundingSphere(sphere, options = {}) {
+      stop();
+      current = { sphere, options };
+      flights.push(current);
+    },
+    cancelFlight() {
+      if (stop()) camera.cancelled++;
+    },
+    land() {
+      const flight = current;
+      current = null;
+      flight?.options.complete?.();
+    },
+    setView: (view) => views.push(view),
+  };
+  return camera;
+}
+
+/**
  * A viewer whose scene sample is `sampled` (the Austin case: −14,886 m before
  * the tiles under the photo had loaded) and whose bare earth is `dem`.
  */
@@ -31,11 +65,7 @@ function setup({ sampled, dem = null, globe = null, altitude = 149 }) {
         sampleHeight: () => sampled,
         globe: { getHeight: () => globe },
       },
-      camera: {
-        flyToBoundingSphere: (sphere, options) =>
-          flights.push({ sphere, options }),
-        setView: (view) => views.push(view),
-      },
+      camera: flightCamera(flights, views),
     },
   };
   const parts = {
@@ -86,4 +116,45 @@ test('following stands the camera at eye height above the checked ground', () =>
     Math.abs(heightOf(views[0].destination) - (117 + FOLLOW_EYE_HEIGHT_M)) <
       0.01,
   );
+});
+
+test('cancelFraming stops the framing flight while it is still ours (review IC8 P1)', () => {
+  const { follow, state } = setup({ sampled: 121, dem: 117 });
+  const { camera } = state.viewer;
+  follow.lookAtPosition();
+  follow.cancelFraming();
+  assert.equal(camera.cancelled, 1, 'the flight toward the closed photo stops');
+  follow.cancelFraming();
+  assert.equal(camera.cancelled, 1, 'and only once');
+
+  // Re-framing (the next photo) supersedes the first flight, not the claim.
+  follow.lookAtPosition();
+  follow.lookAtPosition();
+  follow.cancelFraming();
+  assert.equal(camera.cancelled, 2);
+});
+
+test('cancelFraming leaves a landed flight and a newer navigation flight alone (review IC8 P1)', () => {
+  const { follow, state, flights } = setup({ sampled: 121, dem: 117 });
+  const { camera } = state.viewer;
+  follow.lookAtPosition();
+  camera.land();
+  follow.cancelFraming();
+  assert.equal(camera.cancelled, 0, 'landed: nothing to stop');
+
+  follow.lookAtPosition();
+  // A search result flies the globe elsewhere; Cesium cancels ours first.
+  camera.flyToBoundingSphere(null, {});
+  assert.equal(flights.length, 3);
+  follow.cancelFraming();
+  assert.equal(camera.cancelled, 0, 'the newer flight keeps going');
+});
+
+test('turning FOLLOW on stops the framing flight so it cannot fight the follow view', () => {
+  const { follow, state, views } = setup({ sampled: 121, dem: 117 });
+  const { camera } = state.viewer;
+  follow.lookAtPosition();
+  follow.setFollow(true);
+  assert.equal(camera.cancelled, 1, 'the framing tween stops');
+  assert.equal(views.length, 1, 'and the camera stands at the photo');
 });

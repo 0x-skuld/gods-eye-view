@@ -153,9 +153,13 @@ export function createViewerHost({ state, parts }) {
     return true;
   }
 
-  /** Close the image; the mounted adapter stays warm for the next open. */
+  /**
+   * Close the image; the mounted adapter stays warm for the next open. The
+   * globe stops flying toward it too (unmount closes, so layer off does).
+   */
   function close() {
     openSeq++;
+    parts.follow.cancelFraming();
     active?.adapter.close();
     Object.assign(state.street, freshStreet());
     parts.marker.clear();

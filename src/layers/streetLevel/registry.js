@@ -35,7 +35,7 @@
  * @property {(sequenceId: string) => Promise<void>} [selectSequence]
  * @property {() => void} [clearSequence]
  * @property {() => {selectedId: string|null, images: number, loading: boolean}} [sequenceStats]
- * @property {(point: {lat: number, lon: number}) => Promise<string|null>} nearestImage
+ * @property {(point: {lat: number, lon: number}, options?: {signal?: AbortSignal}) => Promise<string|null>} nearestImage   An aborted lookup gives up (it may reject with an AbortError).
  * @property {ViewerAdapter} viewer
  *
  * @typedef {object} GroundCaster

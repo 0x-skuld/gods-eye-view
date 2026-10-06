@@ -239,7 +239,21 @@ export function createStreetLevelLayer({
     parts.credits.hide(state.viewer, entry.def);
   }
 
+  /**
+   * The nearest-image lookup in flight. Anything newer the user asks for (a
+   * later lookup, a picked image, closing, the layer going off) aborts it,
+   * so its late answer can never replace that choice.
+   * @type {AbortController|null}
+   */
+  let nearestLookup = null;
+
+  function abortNearest() {
+    nearestLookup?.abort();
+    nearestLookup = null;
+  }
+
   function openImage(providerId, imageId) {
+    abortNearest();
     return parts.viewerHost.open(providerId, imageId);
   }
 
@@ -358,6 +372,7 @@ export function createStreetLevelLayer({
 
     disable() {
       state.enabled = false;
+      abortNearest();
       unwatchSurface();
       parts.viewerHost.unmount();
       for (const entry of state.providers.values()) entry.instance.deactivate();
@@ -461,6 +476,10 @@ export function createStreetLevelLayer({
       const view = point || viewCentre(state.viewer);
       if (!Number.isFinite(view?.lat) || !Number.isFinite(view?.lon))
         return false;
+      abortNearest();
+      const lookup = new AbortController();
+      nearestLookup = lookup;
+      const { signal } = lookup;
       state.street.loading = true;
       state.street.error = null;
       notify();
@@ -468,20 +487,25 @@ export function createStreetLevelLayer({
       for (const entry of activeEntries()) {
         let imageId = null;
         try {
-          imageId = await entry.instance.nearestImage({
-            lat: view.lat,
-            lon: view.lon,
-          });
+          imageId = await entry.instance.nearestImage(
+            { lat: view.lat, lon: view.lon },
+            { signal },
+          );
         } catch (error) {
+          // Overtaken: whatever replaced it owns the panel, errors included.
+          if (signal.aborted) return false;
           // One provider failing (no key, offline) must not hide the others.
           lastError = error;
           continue;
         }
+        if (signal.aborted) return false;
         if (!state.enabled) break;
         // This provider was switched off while it looked: try the next.
         if (!imageId || !entry.on) continue;
+        nearestLookup = null; // answered: nothing left to abort
         return openImage(entry.def.id, imageId);
       }
+      if (nearestLookup === lookup) nearestLookup = null;
       // Switched off while it looked: nothing to open, nothing to report.
       if (state.enabled && activeEntries().length)
         state.street.error =
@@ -493,6 +517,7 @@ export function createStreetLevelLayer({
     },
     /** Close the image and deselect it everywhere on the map. */
     closeViewer() {
+      abortNearest();
       parts.viewerHost.close();
       parts.clearSequences();
     },

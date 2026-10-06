@@ -70,11 +70,26 @@ export function createCameraFollow({ state, parts }) {
     requestRender();
   }
 
+  /**
+   * The framing flight this module started, while it is still the camera's
+   * current flight. Cesium cancels it (calling `cancel`) when any other
+   * flight starts, so a stale token never cancels someone else's flight.
+   * @type {object|null}
+   */
+  let framing = null;
+
   /** Frame the current image from a short distance behind it. */
   function lookAtPosition() {
     const { position, bearing, altitude } = state.street;
     if (!position || !state.viewer) return;
     const ground = groundHeightAt(position.lon, position.lat, altitude);
+    // Owned before the call: starting it cancels the previous flight (ours
+    // included) synchronously, and a zero-length one completes at once.
+    const flight = {};
+    framing = flight;
+    const release = () => {
+      if (framing === flight) framing = null;
+    };
     state.viewer.camera.flyToBoundingSphere(
       new Cesium.BoundingSphere(
         Cesium.Cartesian3.fromDegrees(position.lon, position.lat, ground + 2),
@@ -87,15 +102,32 @@ export function createCameraFollow({ state, parts }) {
           140,
         ),
         duration: 1.6,
+        complete: release,
+        cancel: release,
       },
     );
   }
 
+  /**
+   * Stop the framing flight if it is still in the air (the image closed or
+   * the layer went off). A flight another feature started since is left be.
+   */
+  function cancelFraming() {
+    if (!framing) return;
+    // Give up ownership first: cancelFlight delivers `cancel` synchronously.
+    framing = null;
+    state.viewer?.camera?.cancelFlight?.();
+  }
+
   function setFollow(enabled) {
     state.street.follow = enabled === true && state.street.followAvailable;
-    if (state.street.follow) followCamera();
+    // The framing tween would keep overwriting the follow view until it lands.
+    if (state.street.follow) {
+      cancelFraming();
+      followCamera();
+    }
     state.notify?.();
   }
 
-  return { followCamera, lookAtPosition, setFollow };
+  return { followCamera, lookAtPosition, cancelFraming, setFollow };
 }

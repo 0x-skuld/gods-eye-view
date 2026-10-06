@@ -39,11 +39,16 @@ function harness(adapter) {
   };
   const def = { id: 'mapillary', name: 'Mapillary', label: 'MAPILLARY' };
   state.providers.set('mapillary', { def, instance: { viewer: adapter } });
+  const framing = { started: 0, cancelled: 0 };
   const parts = {
     marker: { set() {}, clear() {} },
-    follow: { followCamera() {}, lookAtPosition() {} },
+    follow: {
+      followCamera() {},
+      lookAtPosition: () => framing.started++,
+      cancelFraming: () => framing.cancelled++,
+    },
   };
-  return { state, host: createViewerHost({ state, parts }) };
+  return { state, framing, host: createViewerHost({ state, parts }) };
 }
 
 /**
@@ -317,4 +322,18 @@ test('closing the photo stops sequence playback in the hidden viewer (review P2-
   host.close();
   assert.equal(viewer.playback.stops, 1, 'playback stopped with the photo');
   assert.equal(viewers.live, 1, 'the viewer itself stays warm');
+});
+
+test('closing the photo or switching the layer off stops its framing flight (review IC8 P1)', async () => {
+  const adapter = fakeAdapter();
+  const { framing, host } = harness(adapter);
+  await host.open('mapillary', 'a');
+  assert.equal(framing.started, 1, 'the open framed the photo');
+  host.close();
+  assert.equal(framing.cancelled, 1, 'closed: the globe stops flying to it');
+  await host.open('mapillary', 'b');
+  host.unmount('panoramax');
+  assert.equal(framing.cancelled, 1, 'another provider leaves it alone');
+  host.unmount();
+  assert.equal(framing.cancelled, 2, 'layer off: likewise');
 });
