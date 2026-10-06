@@ -2,6 +2,7 @@ import * as Cesium from 'cesium';
 import { positionMarkerGlyph } from './glyphs.js';
 import { COLORS, POSITION_PICK_ID } from './policy.js';
 import { refineHeights } from './groundCast.js';
+import { createHorizonCull } from './view.js';
 
 const SPRITE_ID = 'street-level:marker';
 
@@ -17,6 +18,13 @@ export function createMarker({ state, parts }) {
   function requestRender() {
     render?.governorRequestRender?.('street-level-marker');
   }
+
+  // It skips the depth test: hide it while it is behind the globe.
+  const horizon = createHorizonCull({
+    getViewer: () => state.viewer,
+    items: () => (state.marker.billboard ? [state.marker.billboard] : []),
+    onChange: requestRender,
+  });
 
   function ensure(viewer) {
     if (state.marker.collection) return;
@@ -61,6 +69,7 @@ export function createMarker({ state, parts }) {
     if (!position) {
       collection.removeAll();
       state.marker.billboard = null;
+      horizon.stop();
       requestRender();
       return;
     }
@@ -92,6 +101,7 @@ export function createMarker({ state, parts }) {
       state.marker.billboard.position = cartesian;
     }
     state.marker.billboard.rotation = -Cesium.Math.toRadians(bearing || 0);
+    horizon.update([state.marker.billboard]);
     requestRender();
   }
 
@@ -101,6 +111,7 @@ export function createMarker({ state, parts }) {
   }
 
   function destroy(viewer) {
+    horizon.stop();
     const collection = state.marker.collection;
     if (!collection) return;
     sprites?.unregisterSpriteCollection?.(SPRITE_ID, collection);

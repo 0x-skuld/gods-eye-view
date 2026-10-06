@@ -9,6 +9,15 @@ function clampLat(lat) {
   return Math.max(-MAX_LAT, Math.min(MAX_LAT, lat));
 }
 
+/**
+ * A longitude, or the difference of two, wrapped into [-180, 180]: the short
+ * way round the date line. Values already in range come back unchanged.
+ */
+export function wrapLon(lon) {
+  if (lon >= -180 && lon <= 180) return lon;
+  return ((((lon + 180) % 360) + 360) % 360) - 180;
+}
+
 /** Fractional tile column of a longitude in [-180, 180] at zoom z. */
 function tileXAt(lon, z) {
   return ((lon + 180) / 360) * 2 ** z;
@@ -27,8 +36,7 @@ export function lonToTileX(lon, z) {
   const n = 2 ** z;
   // 180° is the east edge of the last column, not the west edge of the first.
   if (lon >= 180) return n - 1;
-  const wrapped = ((((lon + 180) % 360) + 360) % 360) - 180;
-  return Math.min(n - 1, Math.max(0, Math.floor(tileXAt(wrapped, z))));
+  return Math.min(n - 1, Math.max(0, Math.floor(tileXAt(wrapLon(lon), z))));
 }
 
 /** Tile row for a latitude at zoom z. */

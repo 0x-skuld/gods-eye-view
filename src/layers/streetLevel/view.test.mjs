@@ -3,6 +3,7 @@ import test from 'node:test';
 import * as Cesium from 'cesium';
 import {
   cameraHeightAboveGround,
+  metresBetween,
   viewCentre,
   viewFocus,
   visibleBbox,
@@ -145,4 +146,24 @@ test('looking at the horizon from eye height still boxes the ground around the c
   });
   assert.ok(north - 38.5816 > 0.008 && 38.5816 - south > 0.008);
   assert.ok(east - -121.4944 > 0.008 && -121.4944 - west > 0.008);
+});
+
+test('metresBetween measures the short way round the date line (review IC8 P2)', () => {
+  const east = { lon: 179.9999, lat: 0 };
+  const west = { lon: -179.9999, lat: 0 };
+  // 0.0002° of longitude at the equator, not 40,000 km round the other way.
+  assert.ok(Math.abs(metresBetween(east, west) - 22.264) < 1e-6);
+  assert.ok(Math.abs(metresBetween(west, east) - 22.264) < 1e-6);
+  assert.ok(
+    Math.abs(
+      metresBetween({ lon: 180, lat: 0 }, { lon: -180, lat: 0.0001 }) - 11.054,
+    ) < 1e-6,
+    'the two names of the same meridian',
+  );
+  // Away from the date line nothing changes.
+  assert.ok(
+    Math.abs(
+      metresBetween({ lon: 10, lat: 0 }, { lon: 10.001, lat: 0 }) - 111.32,
+    ) < 1e-9,
+  );
 });

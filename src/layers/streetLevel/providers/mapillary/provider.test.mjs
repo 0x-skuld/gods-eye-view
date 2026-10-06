@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createMapillaryProvider, mapillaryImageUrl } from './index.js';
 import { sequenceIdFromPick } from './coverage.js';
+import { thinImages } from './sequences.js';
 import { validateProviders } from '../../registry.js';
 import { PROVIDER_COLORS } from '../../policy.js';
 import { resolveFilter } from '../../filter.js';
@@ -133,5 +134,49 @@ test('a "since N days" window follows the clock in a long-open tab (review P3)',
     await instance.nearestImage({ lat: 1, lon: 2 }),
     null,
     'two days on, the image is older than the window',
+  );
+});
+
+test('nearestImage measures the short way round the date line (review IC8 P2)', async () => {
+  const at = (id, lon, lat) => ({
+    id,
+    is_pano: false,
+    captured_at: 10,
+    geometry: { type: 'Point', coordinates: [lon, lat] },
+  });
+  const source = fakeSource({
+    nearest: [
+      at('same-side', 179.9995, 0), // ~45 m west, on the camera's side
+      at('across', -179.9999, 0), // ~11 m east, across ±180°
+    ],
+  });
+  const instance = createMapillaryProvider({ source }).create(fakeContext());
+  assert.equal(
+    await instance.nearestImage({ lat: 0, lon: 179.9999 }),
+    'across',
+  );
+  // And from the other side.
+  const west = createMapillaryProvider({
+    source: fakeSource({
+      nearest: [at('same-side', -179.9995, 0), at('across', 179.9999, 0)],
+    }),
+  }).create(fakeContext());
+  assert.equal(await west.nearestImage({ lat: 0, lon: -179.9999 }), 'across');
+});
+
+test('cone thinning across the date line drops images metres apart (review IC8 P2)', () => {
+  const image = (id, lon) => ({ id, lon, lat: 0 });
+  // A sequence driving east over ±180° with images ~1 m apart, then ~11 m on.
+  const kept = thinImages(
+    [
+      image('a', 179.99999),
+      image('b', -179.99999), // ~2 m from a, across the date line
+      image('c', -179.9999), // ~11 m from a
+    ],
+    3,
+  );
+  assert.deepEqual(
+    kept.map(({ id }) => id),
+    ['a', 'c'],
   );
 });

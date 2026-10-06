@@ -1,13 +1,15 @@
 import * as Cesium from 'cesium';
+import { wrapLon } from './tileMath.js';
 
 /**
  * Approximate metres between two {lon, lat} points: equirectangular, good
- * for the street-scale distances the layer measures.
+ * for the street-scale distances the layer measures. Measured the short way
+ * round, so neighbours either side of ±180° are metres apart, not a world.
  */
 export function metresBetween(a, b) {
   const lat = (((a.lat + b.lat) / 2) * Math.PI) / 180;
   return Math.hypot(
-    (b.lon - a.lon) * 111_320 * Math.cos(lat),
+    wrapLon(b.lon - a.lon) * 111_320 * Math.cos(lat),
     (b.lat - a.lat) * 110_540,
   );
 }
@@ -247,4 +249,69 @@ export function viewFocus(
       };
   }
   return { nadir, ahead };
+}
+
+/**
+ * Hide billboards and points behind the horizon, as the cyclones layer does.
+ * Street Level's skip the depth test, so Google 3D and clouds never hide the
+ * near side's; nothing else then stops the far hemisphere's drawing through
+ * the globe, and a finite skip distance cannot, as the horizon's distance
+ * moves with the camera. Re-culls on pre-render only once the camera moved,
+ * and stops listening when there is nothing left to cull.
+ * @param {{getViewer: () => object|null, items: () => Iterable<{position: object, show: boolean}>, onChange?: () => void}} options
+ */
+export function createHorizonCull({ getViewer, items, onChange }) {
+  const occluder = new Cesium.EllipsoidalOccluder(Cesium.Ellipsoid.WGS84);
+  let from = null;
+  let stopListening = null;
+
+  /** Show what is in front of the horizon, hide the rest; the count seen. */
+  function cull(list, position) {
+    occluder.cameraPosition = position;
+    let seen = 0;
+    let changed = false;
+    for (const item of list) {
+      seen++;
+      const show = occluder.isPointVisible(item.position);
+      if (item.show !== show) {
+        item.show = show;
+        changed = true;
+      }
+    }
+    if (changed) onChange?.();
+    return seen;
+  }
+
+  /** Cull everything from the camera at `position`; the count seen. */
+  function cullAll(position) {
+    from = Cesium.Cartesian3.clone(position, from);
+    return cull(items(), position);
+  }
+
+  function onPreRender() {
+    const position = getViewer()?.camera?.positionWC;
+    if (!position || (from && Cesium.Cartesian3.equals(from, position))) return;
+    if (!cullAll(position)) stop();
+  }
+
+  /**
+   * Cull `added` (new or moved items), or everything, now; then everything
+   * again whenever the camera moves.
+   */
+  function update(added) {
+    const viewer = getViewer();
+    const position = viewer?.camera?.positionWC;
+    if (position && !(added ? cull(added, position) : cullAll(position)))
+      return;
+    stopListening ||=
+      viewer?.scene?.preRender?.addEventListener(onPreRender) || null;
+  }
+
+  function stop() {
+    stopListening?.();
+    stopListening = null;
+    from = null;
+  }
+
+  return { update, stop };
 }

@@ -9,6 +9,7 @@ import {
   tileBounds,
   tileLocalToLonLat,
   tilesForBbox,
+  wrapLon,
 } from './tileMath.js';
 
 test('lon/lat to tile matches the Sacramento reference tile', () => {
@@ -124,4 +125,15 @@ test('a focus ranks tiles along the line of sight, not from the box centre (revi
   assert.ok(keys.includes(under), 'the tile under the camera');
   assert.ok(keys.includes(centre), 'the tile at the centre of the screen');
   assert.equal(ranked.total > 9, true);
+});
+
+test('wrapLon wraps longitudes and their differences into [-180, 180]', () => {
+  assert.equal(wrapLon(10.0005), 10.0005, 'in range: unchanged');
+  assert.equal(wrapLon(180), 180);
+  assert.equal(wrapLon(-180), -180);
+  assert.ok(Math.abs(wrapLon(180.001) - -179.999) < 1e-9);
+  assert.ok(Math.abs(wrapLon(-359.9998) - 0.0002) < 1e-9);
+  assert.ok(Math.abs(wrapLon(359.9998) - -0.0002) < 1e-9);
+  assert.ok(Math.abs(wrapLon(540.5) - -179.5) < 1e-9);
+  assert.ok(Number.isNaN(wrapLon(NaN)));
 });

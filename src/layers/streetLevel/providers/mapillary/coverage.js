@@ -2,6 +2,7 @@ import * as Cesium from 'cesium';
 import { decodeCoverageTile } from './decode.js';
 import { passesImageryFilter } from '../../filter.js';
 import {
+  createHorizonCull,
   groundUnderCamera,
   metresBetween,
   viewFocus,
@@ -9,7 +10,7 @@ import {
   whenIdle,
 } from '../../view.js';
 import { densifyLine, MESH_DENSIFY_DEG } from '../../groundCast.js';
-import { MESH_CELL_DEG } from '../../meshSampler.js';
+import { MESH_SAMPLE_RADIUS_M } from '../../meshSampler.js';
 import {
   coverageZoomForHeight,
   overviewZoomForHeight,
@@ -256,27 +257,67 @@ export function createCoverage({ state, source }) {
     removeWhenReady(entry, previous);
   }
 
-  /** The mesh cells under a tile's drawn lines, built once per filter. */
-  function meshCells(entry) {
-    if (entry.meshCells) return entry.meshCells;
-    const cells = new Map();
-    for (const sequence of entry.sequences.values())
-      for (const [lon, lat] of sequence.parts.flatMap((part) =>
-        densifyLine(part, MESH_DENSIFY_DEG),
-      ))
-        cells.set(
-          `${Math.round(lon / MESH_CELL_DEG)},${Math.round(lat / MESH_CELL_DEG)}`,
-          [lon, lat],
-        );
-    entry.meshCells = [...cells.values()];
-    return entry.meshCells;
+  /** The point under the camera: where the mesh sampler measures its range from. */
+  function meshCentre() {
+    const carto = state.viewer?.camera?.positionCartographic;
+    if (!carto) return null;
+    return {
+      lon: Cesium.Math.toDegrees(carto.longitude),
+      lat: Cesium.Math.toDegrees(carto.latitude),
+    };
   }
 
-  /** Ask for mesh samples under a cast tile's lines (the sampler keeps the near ones). */
+  /** Whether any of a {west, south, east, north} box is within the sampler's range. */
+  function inMeshRange(box, centre) {
+    const nearest = {
+      lon: Math.min(box.east, Math.max(box.west, centre.lon)),
+      lat: Math.min(box.north, Math.max(box.south, centre.lat)),
+    };
+    return metresBetween(centre, nearest) <= MESH_SAMPLE_RADIUS_M;
+  }
+
+  /**
+   * A tile's drawn lines with their bounding boxes, built once per filter;
+   * each line's mesh points are densified the first time it is in range.
+   */
+  function meshParts(entry) {
+    if (entry.meshParts) return entry.meshParts;
+    entry.meshParts = [];
+    for (const sequence of entry.sequences.values())
+      for (const part of sequence.parts) {
+        const box = {
+          west: Infinity,
+          south: Infinity,
+          east: -Infinity,
+          north: -Infinity,
+        };
+        for (const [lon, lat] of part) {
+          if (lon < box.west) box.west = lon;
+          if (lon > box.east) box.east = lon;
+          if (lat < box.south) box.south = lat;
+          if (lat > box.north) box.north = lat;
+        }
+        entry.meshParts.push({ part, box, points: null });
+      }
+    return entry.meshParts;
+  }
+
+  /**
+   * Ask for mesh samples under a cast tile's lines within the sampler's range
+   * of the camera; the rest are asked for when a camera move brings them in.
+   */
   function requestMesh(entry) {
     const sampler = state.context.meshSampler;
     if (!sampler || entry.kind !== 'sequence' || !terrainMode()) return;
-    sampler.request(meshCells(entry));
+    const centre = meshCentre();
+    if (!centre || !entry.bounds || !inMeshRange(entry.bounds, centre)) return;
+    const points = [];
+    for (const line of meshParts(entry)) {
+      if (!inMeshRange(line.box, centre)) continue;
+      line.points ||= densifyLine(line.part, MESH_DENSIFY_DEG);
+      for (const point of line.points) points.push(point);
+    }
+    if (points.length) sampler.request(points);
   }
 
   /**
@@ -382,7 +423,7 @@ export function createCoverage({ state, source }) {
           color: green,
           pixelSize: COVERAGE_OVERVIEW_POINT_PX,
           // Google 3D terrain and clouds must not hide the near side's dots;
-          // `cullHorizon` hides the far side's, which this lets through.
+          // the horizon cull hides the far side's, which this lets through.
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         }),
       );
@@ -390,53 +431,18 @@ export function createCoverage({ state, source }) {
     return { collection, points: drawn };
   }
 
-  /**
-   * Hide the overview points behind the horizon, as the cyclones layer does.
-   * They skip the depth test, so nothing else stops the far hemisphere's
-   * coverage drawing over this one at whole-earth zooms; a finite skip
-   * distance cannot do it, as the horizon's distance moves with the camera.
-   */
-  function cullHorizon() {
-    const position = state.viewer?.camera?.positionWC;
-    if (!position) return;
-    const entries = [
-      ...state.coverage.tiles.values(),
-      ...state.coverage.stale.values(),
-    ].filter((entry) => entry.overviewPoints);
-    if (!entries.length) {
-      stopHorizonCull();
-      return;
-    }
-    const from = state.coverage.cullFrom;
-    if (from && Cesium.Cartesian3.equals(from, position)) return;
-    state.coverage.cullFrom = Cesium.Cartesian3.clone(position, from);
-    let changed = false;
-    for (const entry of entries)
-      if (cullPoints(entry.overviewPoints, position)) changed = true;
-    if (changed) requestRender();
+  /** Every overview point on the globe, current zoom and old alike. */
+  function* overviewPoints() {
+    for (const entry of drawnEntries())
+      if (entry.overviewPoints) yield* entry.overviewPoints;
   }
 
-  /** Show the points in front of the horizon seen from `position`, hide the rest. */
-  function cullPoints(points, position) {
-    const occluder = (state.coverage.occluder ||=
-      new Cesium.EllipsoidalOccluder(Cesium.Ellipsoid.WGS84));
-    occluder.cameraPosition = position;
-    let changed = false;
-    for (const point of points) {
-      const show = occluder.isPointVisible(point.position);
-      if (point.show !== show) {
-        point.show = show;
-        changed = true;
-      }
-    }
-    return changed;
-  }
-
-  function stopHorizonCull() {
-    state.coverage.stopHorizonCull?.();
-    state.coverage.stopHorizonCull = null;
-    state.coverage.cullFrom = null;
-  }
+  // Overview points skip the depth test: hide the far hemisphere's.
+  const horizon = createHorizonCull({
+    getViewer: () => state.viewer,
+    items: overviewPoints,
+    onChange: requestRender,
+  });
 
   function attachPrimitive(entry) {
     const scene = state.viewer?.scene;
@@ -463,11 +469,8 @@ export function createCoverage({ state, source }) {
       entry.overviewPoints = points;
       entry.count = points.length;
       scene.primitives.add(collection);
-      // Cull the new points now, then every frame the camera has moved.
-      const camera = state.viewer.camera?.positionWC;
-      if (camera) cullPoints(points, camera);
-      state.coverage.stopHorizonCull ||=
-        scene.preRender?.addEventListener(cullHorizon) || null;
+      // Cull the new points now, then all of them whenever the camera moves.
+      horizon.update(points);
     }
   }
 
@@ -777,7 +780,7 @@ export function createCoverage({ state, source }) {
     state.coverage.remeshTimer = null;
     state.coverage.remeshDirty.clear();
     stopSelectionWatch();
-    stopHorizonCull();
+    horizon.stop();
     requestRender();
   }
 
@@ -787,7 +790,7 @@ export function createCoverage({ state, source }) {
     for (const entry of state.coverage.tiles.values()) {
       cancelCast(entry);
       entry.castRequested = false;
-      entry.meshCells = null;
+      entry.meshParts = null;
       detachPrimitive(entry);
       attachPrimitive(entry);
     }
@@ -823,12 +826,26 @@ export function createCoverage({ state, source }) {
     }
   }
 
+  /**
+   * Every tile drawn on the globe: the current zoom's, and the old zoom's
+   * kept visible until the new one is in (see retire).
+   */
+  function drawnEntries() {
+    return [...state.coverage.tiles.values(), ...state.coverage.stale.values()];
+  }
+
+  /** A tile's primitives on the globe: its own, and the ones a swap still shows. */
+  function drawnRecords(entry) {
+    const records = entry.primitives || [];
+    return entry.swap ? [...records, ...entry.swap.old] : records;
+  }
+
   /** Recolour one sequence, every part of it, in place (selection highlight). */
   function recolorSequence(id, selected) {
-    for (const entry of state.coverage.tiles.values()) {
+    for (const entry of drawnEntries()) {
       const sequence = entry.sequences.get(id);
       if (!sequence) continue;
-      for (const record of entry.primitives || []) {
+      for (const record of drawnRecords(entry)) {
         // Still building: `syncSelection` catches it up once it is ready.
         if (!record.primitive.ready) continue;
         recolorInstances(record.primitive, sequence, selected);
@@ -867,11 +884,15 @@ export function createCoverage({ state, source }) {
     const stop = scene.postRender.addEventListener(() => {
       let building = false;
       let changed = false;
-      for (const entry of state.coverage.tiles.values())
+      for (const entry of drawnEntries()) {
         for (const record of entry.primitives || []) {
           if (!record.primitive.ready) building = true;
           else if (syncSelection(entry, record)) changed = true;
         }
+        // Lines a swap still shows were ready (or never show): catch up only.
+        for (const record of entry.swap?.old || [])
+          if (syncSelection(entry, record)) changed = true;
+      }
       if (changed) requestRender();
       if (!building) stopSelectionWatch();
     });

@@ -83,6 +83,32 @@ test('densifyLine splits long segments and keeps the vertices', () => {
   assert.deepEqual(densifyLine([[10, 50]]), [[10, 50]]);
 });
 
+test('densifyLine crosses the date line the short way and wraps what it adds (review IC8 P2)', () => {
+  // 0.0002° apart: short enough to stay one segment, not 65 points via 0°.
+  const short = [
+    [179.9999, 0],
+    [-179.9999, 0],
+  ];
+  assert.deepEqual(densifyLine(short), short);
+  const line = [
+    [179.999, 50.0005],
+    [-179.999, 50.0005],
+  ];
+  const dense = densifyLine(line, 0.0005);
+  assert.equal(dense.length, 5);
+  assert.deepEqual(dense[0], line[0]);
+  assert.deepEqual(dense.at(-1), line[1]);
+  for (const [lon] of dense)
+    assert.ok(lon >= -180 && lon <= 180 && Math.abs(lon) >= 179.999, `${lon}`);
+  assert.ok(Math.abs(dense[1][0] - 179.9995) < 1e-9);
+  assert.ok(Math.abs(Math.abs(dense[2][0]) - 180) < 1e-9);
+  assert.ok(Math.abs(dense[3][0] - -179.9995) < 1e-9);
+  // Westward across the date line too.
+  const back = densifyLine([...line].reverse(), 0.0005);
+  assert.equal(back.length, 5);
+  assert.ok(Math.abs(back[1][0] - -179.9995) < 1e-9);
+});
+
 test('the caster interpolates cached grid corners and adds the lift', async () => {
   const terrain = fakeTerrain();
   const caster = createGroundCaster({ terrain, step: 0.001 });
@@ -304,4 +330,42 @@ test('prepared lines always cast with the mesh, however their segments cross the
     if (caster.castLine(line, { meshAt: () => undefined }) === null) failures++;
   }
   assert.equal(failures, 0);
+});
+
+test('a line across the date line casts along the date line (review IC8 P2)', async () => {
+  // Ground that rises northward only, so both sides of ±180° agree.
+  const calls = [];
+  const terrain = {
+    async resolveEllipsoidalGround(coords) {
+      calls.push(...coords);
+      return coords.map(({ lat }) => ({
+        ellipsoid: 100 + (lat - 50) * 2000,
+        source: 'reearth',
+      }));
+    },
+  };
+  const caster = createGroundCaster({ terrain, step: 0.001 });
+  const line = [
+    [179.9995, 50.0005],
+    [180, 50.0005],
+    [-179.9995, 50.0005],
+  ];
+  assert.equal(await caster.prepareLines([line]), true);
+  for (const meshAt of [null, () => undefined]) {
+    const flat = caster.castLine(line, { meshAt });
+    assert.ok(flat, 'every point casts');
+    assert.ok(
+      flat.length / 3 <= 8,
+      `${flat.length / 3} points, not a line round the world`,
+    );
+    for (let i = 0; i < flat.length; i += 3) {
+      assert.ok(Math.abs(flat[i]) >= 179.999 && Math.abs(flat[i]) <= 180);
+      assert.ok(Math.abs(flat[i + 2] - (101 + GROUND_CAST_LIFT_M)) < 1e-6);
+    }
+  }
+  // Only ground near the date line is asked for, and every longitude is a
+  // real one (the far corner of a point on 180° is asked for at -179.999°).
+  assert.ok(calls.length <= 16, `${calls.length} corners`);
+  for (const { lon } of calls)
+    assert.ok(Math.abs(lon) >= 179.999 && Math.abs(lon) <= 180, `${lon}`);
 });

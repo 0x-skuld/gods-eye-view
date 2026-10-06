@@ -512,49 +512,52 @@ test('the per-tile cap applies after the imagery filter, so a dense tile keeps i
   coverage.clear();
 });
 
+/** The colour attribute value of a line, selected or not. */
+function colourValue(selected) {
+  return Array.from(
+    Cesium.ColorGeometryInstanceAttribute.toValue(
+      selected
+        ? Cesium.Color.fromCssColorString(COLORS.selected)
+        : Cesium.Color.fromCssColorString(COLORS.coverage).withAlpha(0.92),
+    ),
+  );
+}
+
+/** Take over a drawn primitive's readiness and seq-1's colour attribute. */
+function controlled(record, ready) {
+  const control = { ready, attributes: { color: undefined } };
+  Object.defineProperty(record.primitive, 'ready', {
+    get: () => control.ready,
+  });
+  record.primitive.getGeometryInstanceAttributes = (id) =>
+    id === 'mly:seq:seq-1' ? control.attributes : undefined;
+  return control;
+}
+
 test('a selection made or cleared while a tile builds is applied once it is ready', async () => {
   const { viewer, source, state, coverage, bytes } = setup();
   coverage.refresh();
   source.calls[0].resolve(bytes);
   await settle();
   const [entry] = state.coverage.tiles.values();
-  const value = (selected) =>
-    Array.from(
-      Cesium.ColorGeometryInstanceAttribute.toValue(
-        selected
-          ? Cesium.Color.fromCssColorString(COLORS.selected)
-          : Cesium.Color.fromCssColorString(COLORS.coverage).withAlpha(0.92),
-      ),
-    );
-  /** Stand in for a primitive the worker has not finished, with its colours. */
-  function building(record) {
-    const control = { ready: false, attributes: { color: undefined } };
-    Object.defineProperty(record.primitive, 'ready', {
-      get: () => control.ready,
-    });
-    record.primitive.getGeometryInstanceAttributes = (id) =>
-      id === 'mly:seq:seq-1' ? control.attributes : undefined;
-    return control;
-  }
-
   // Selected while its line is still building: nothing to recolour yet...
-  const first = building(entry.primitives[0]);
+  const first = controlled(entry.primitives[0], false);
   state.sequence.selectedId = 'seq-1';
   coverage.recolorSequence('seq-1', true);
   assert.equal(first.attributes.color, undefined);
   // ...so the highlight lands once it is ready.
   first.ready = true;
   frame(viewer.postRender);
-  assert.deepEqual(Array.from(first.attributes.color), value(true));
+  assert.deepEqual(Array.from(first.attributes.color), colourValue(true));
 
   // Rebuilt with the highlight baked in, then cleared mid-build: not stuck.
   coverage.rebuild();
-  const second = building(entry.primitives[0]);
+  const second = controlled(entry.primitives[0], false);
   coverage.recolorSequence('seq-1', false);
   state.sequence.selectedId = null;
   second.ready = true;
   frame(viewer.postRender);
-  assert.deepEqual(Array.from(second.attributes.color), value(false));
+  assert.deepEqual(Array.from(second.attributes.color), colourValue(false));
   coverage.clear();
   assert.equal(viewer.postRender.size, 0, 'the selection watch is gone');
 });
@@ -725,5 +728,114 @@ test('a street view toward the horizon ranks only the ground within range', () =
   );
   for (const [dx, dy] of offsets)
     assert.ok(Math.abs(dx) <= 1 && Math.abs(dy) <= 1, `${dx},${dy} around it`);
+  coverage.clear();
+});
+
+test('a selection cleared while the old zoom is still shown uncolours its lines (review IC8 P2)', async () => {
+  const { viewer, source, state, coverage, bytes } = setup();
+  coverage.refresh();
+  source.calls[0].resolve(bytes);
+  await settle();
+  const [entry] = state.coverage.tiles.values();
+  const line = controlled(entry.primitives[0], true);
+  state.sequence.selectedId = 'seq-1';
+  coverage.recolorSequence('seq-1', true);
+  assert.deepEqual(Array.from(line.attributes.color), colourValue(true));
+  // Zoom out: the street tile stays on screen while the new zoom loads...
+  viewer.view.height = 100_000;
+  coverage.refresh();
+  assert.equal(state.coverage.stale.size, 1, 'the old zoom is kept');
+  // ...and the selection is cleared meanwhile.
+  state.sequence.selectedId = null;
+  coverage.recolorSequence('seq-1', false);
+  assert.deepEqual(
+    Array.from(line.attributes.color),
+    colourValue(false),
+    'the retained line is not left cyan',
+  );
+  coverage.clear();
+});
+
+test('a selection made while the old zoom is still building is applied once it is ready (review IC8 P2)', async () => {
+  const { viewer, source, state, coverage, bytes } = setup();
+  coverage.refresh();
+  source.calls[0].resolve(bytes);
+  await settle();
+  const [entry] = state.coverage.tiles.values();
+  const line = controlled(entry.primitives[0], false);
+  viewer.view.height = 100_000;
+  coverage.refresh();
+  assert.equal(state.coverage.stale.size, 1);
+  frame(viewer.postRender);
+  state.sequence.selectedId = 'seq-1';
+  coverage.recolorSequence('seq-1', true);
+  line.ready = true;
+  frame(viewer.postRender);
+  assert.deepEqual(
+    line.attributes.color && Array.from(line.attributes.color),
+    colourValue(true),
+    'the highlight lands on the retained line',
+  );
+  coverage.clear();
+  assert.equal(viewer.postRender.size, 0, 'the selection watch is gone');
+});
+
+test('only lines within the mesh sampler range of the camera are asked for (review IC8 P2)', async () => {
+  let heightsReady = false;
+  const groundCaster = {
+    prepareLines: async () => (heightsReady = true),
+    castLine: (coords) =>
+      heightsReady ? coords.flatMap(([lon, lat]) => [lon, lat, 30]) : null,
+  };
+  const requested = [];
+  const meshSampler = {
+    onSampled() {},
+    request: (points) => requested.push(...points),
+    meshAt: () => undefined,
+  };
+  const { source, coverage, centre } = setup({
+    surface: 'terrain',
+    groundCaster,
+    meshSampler,
+  });
+  const { east, north } = tileBounds(centre.tile.x, centre.tile.y, 14);
+  coverage.refresh();
+  source.calls[0].resolve(
+    encodeCoverageTile(centre.tile, {
+      sequences: [
+        {
+          id: 'here',
+          parts: [
+            [
+              [centre.lon - 0.001, centre.lat],
+              [centre.lon + 0.001, centre.lat],
+            ],
+          ],
+        },
+        // ~1.1 km from the camera, in the tile's north-east corner.
+        {
+          id: 'corner',
+          parts: [
+            [
+              [east - 0.002, north - 0.002],
+              [east - 0.0005, north - 0.0005],
+            ],
+          ],
+        },
+      ],
+    }),
+  );
+  await settle();
+  await settle();
+  assert.ok(requested.length > 0, 'the near line is asked for');
+  const farthest = Math.max(
+    ...requested.map(([lon, lat]) =>
+      Math.hypot(
+        (lon - centre.lon) * 111_320 * Math.cos(centre.lat * RAD),
+        (lat - centre.lat) * 110_540,
+      ),
+    ),
+  );
+  assert.ok(farthest < 200, `nothing from the corner (${farthest} m)`);
   coverage.clear();
 });

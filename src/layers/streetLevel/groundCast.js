@@ -14,6 +14,8 @@
  * and the caller keeps its draped placement.
  */
 
+import { wrapLon } from './tileMath.js';
+
 /** Grid spacing in degrees (~111 m north-south): the ground-floor grid. */
 export const GROUND_CAST_STEP_DEG = 0.001;
 /** Longest line segment left undivided, in degrees, so lines follow the grid. */
@@ -107,6 +109,8 @@ export function nextSurfaceMode(current, { photoreal, heightM, available }) {
 
 /**
  * Split long segments so a line follows the terrain between its vertices.
+ * A segment across ±180° is split the short way round, and the points it
+ * adds are wrapped back into [-180, 180].
  * @param {Array<[number, number]>} coords [lon, lat] pairs
  * @param {number} [maxStep] longest segment, in degrees
  * @returns {Array<[number, number]>}
@@ -117,11 +121,12 @@ export function densifyLine(coords, maxStep = GROUND_CAST_DENSIFY_DEG) {
   for (let i = 1; i < coords.length; i++) {
     const [lon0, lat0] = coords[i - 1];
     const [lon1, lat1] = coords[i];
-    const span = Math.max(Math.abs(lon1 - lon0), Math.abs(lat1 - lat0));
+    const dLon = wrapLon(lon1 - lon0);
+    const span = Math.max(Math.abs(dLon), Math.abs(lat1 - lat0));
     const parts = Math.min(64, Math.ceil(span / maxStep - 1e-9));
     for (let k = 1; k < parts; k++) {
       const t = k / parts;
-      out.push([lon0 + (lon1 - lon0) * t, lat0 + (lat1 - lat0) * t]);
+      out.push([wrapLon(lon0 + dLon * t), lat0 + (lat1 - lat0) * t]);
     }
     out.push(coords[i]);
   }
@@ -177,9 +182,11 @@ export function createGroundCaster({
     const missing = missingCorners(points);
     if (!missing.length) return true;
     if (missing.length > maxCorners) return false;
+    // A corner east of 180° (the far corner of a point on the meridian) is
+    // asked for at its longitude on the other side.
     const results = await terrain.resolveEllipsoidalGround(
       missing.map(([, { i, j }]) => ({
-        lon: Number((i * step).toFixed(6)),
+        lon: Number(wrapLon(i * step).toFixed(6)),
         lat: Number((j * step).toFixed(6)),
       })),
       { signal },
