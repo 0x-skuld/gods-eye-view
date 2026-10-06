@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as Cesium from 'cesium';
-import { SWAP_MAX_WAIT_MS, createCoverage } from './coverage.js';
+import {
+  SWAP_MAX_WAIT_MS,
+  createCoverage,
+  meshBoxInRange,
+} from './coverage.js';
 import { encodeCoverageTile } from './coverageFixture.mjs';
 import { rayCamera } from '../../../../testSupport/streetLevelFakes.mjs';
 import {
@@ -892,4 +896,17 @@ test('a rate limit holds every refresh inside its wait, not only the first (revi
   assert.ok(source.calls.length > 1, 'asked again once the wait is over');
   coverage.clear();
   coverage.resetErrors();
+});
+
+test('a line across the date line from the camera is in mesh range (gekh P3)', () => {
+  // A z14 tile's width of lines just past -180, the camera 111 m short of it.
+  const camera = { lon: 179.999, lat: 0 };
+  const east = { west: -180, east: -179.978, south: -0.001, north: 0.001 };
+  assert.equal(meshBoxInRange(east, camera), true);
+  // The mirror case, from the other side.
+  const west = { west: 179.978, east: 180, south: -0.001, north: 0.001 };
+  assert.equal(meshBoxInRange(west, { lon: -179.999, lat: 0 }), true);
+  // ~2.2 km away across the line: out of range either way.
+  const far = { west: -179.99, east: -179.97, south: -0.001, north: 0.001 };
+  assert.equal(meshBoxInRange(far, camera), false);
 });

@@ -95,6 +95,24 @@ export function sequenceIdFromPick(pickId) {
  * and tree tops. A tile is drawn draped first and swapped for its cast lines
  * once the terrain heights are in, so coverage never waits on the terrain.
  */
+/**
+ * Whether any point of a line's bounding `box` is within the mesh sampler's
+ * range of the camera ground point `centre`, measured the short way round
+ * the date line.
+ */
+export function meshBoxInRange(box, centre) {
+  // Take the camera's longitude to the box's side of the date line first:
+  // clamping 179.999 into a box at -179.99 would pick its far edge.
+  const lon =
+    centre.lon +
+    360 * Math.round(((box.west + box.east) / 2 - centre.lon) / 360);
+  const nearest = {
+    lon: Math.min(box.east, Math.max(box.west, lon)),
+    lat: Math.min(box.north, Math.max(box.south, centre.lat)),
+  };
+  return metresBetween(centre, nearest) <= MESH_SAMPLE_RADIUS_M;
+}
+
 export function createCoverage({ state, source }) {
   const { render } = state.services;
 
@@ -268,13 +286,6 @@ export function createCoverage({ state, source }) {
   }
 
   /** Whether any of a {west, south, east, north} box is within the sampler's range. */
-  function inMeshRange(box, centre) {
-    const nearest = {
-      lon: Math.min(box.east, Math.max(box.west, centre.lon)),
-      lat: Math.min(box.north, Math.max(box.south, centre.lat)),
-    };
-    return metresBetween(centre, nearest) <= MESH_SAMPLE_RADIUS_M;
-  }
 
   /**
    * A tile's drawn lines with their bounding boxes, built once per filter;
@@ -310,10 +321,11 @@ export function createCoverage({ state, source }) {
     const sampler = state.context.meshSampler;
     if (!sampler || entry.kind !== 'sequence' || !terrainMode()) return;
     const centre = meshCentre();
-    if (!centre || !entry.bounds || !inMeshRange(entry.bounds, centre)) return;
+    if (!centre || !entry.bounds || !meshBoxInRange(entry.bounds, centre))
+      return;
     const points = [];
     for (const line of meshParts(entry)) {
-      if (!inMeshRange(line.box, centre)) continue;
+      if (!meshBoxInRange(line.box, centre)) continue;
       line.points ||= densifyLine(line.part, MESH_DENSIFY_DEG);
       for (const point of line.points) points.push(point);
     }
@@ -668,6 +680,7 @@ export function createCoverage({ state, source }) {
   function refresh() {
     const viewer = state.viewer;
     if (!viewer || !state.context.isActive() || state.keyRequired) return;
+    if (state.statusKnown === false) return;
     if (state.keyRejected || state.coverage.holdUntil > Date.now()) return;
     const ground = groundUnderCamera(viewer, {
       groundAt: state.context.groundCaster?.groundAt,

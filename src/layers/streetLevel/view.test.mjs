@@ -265,3 +265,58 @@ test('the horizon cull stops listening once nothing is left, and starts again fo
   assert.equal(h.changes(), 2, 'a redraw for each change');
   h.cull.stop();
 });
+
+/** A cull over `points` ([lon, lat, height]) seen from a camera at `camera`. */
+function cullFrom(camera, points) {
+  const items = points.map(([lon, lat, height]) => ({
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, height),
+    show: true,
+  }));
+  const horizon = createHorizonCull({
+    getViewer: () => ({
+      camera: { positionWC: Cesium.Cartesian3.fromDegrees(...camera) },
+      scene: { preRender: { addEventListener: () => () => {} } },
+    }),
+    items: () => items,
+  });
+  horizon.update();
+  horizon.stop();
+  return items.map((item) => item.show);
+}
+
+test('cones and the marker stay visible on ground below the WGS84 ellipsoid (gekh P2)', () => {
+  // NYC in FOLLOW: eye 2.4 m above ground at -22 m, a cone 10 m away.
+  assert.deepEqual(
+    cullFrom([-74.006, 40.7128, -19.6], [[-74.006, 40.71289, -22]]),
+    [true],
+  );
+  // Colombo framing view: camera at -21 m, cones at -95 m about 80 m away.
+  assert.deepEqual(
+    cullFrom(
+      [79.8612, 6.9271, -21],
+      [
+        [79.8612, 6.92782, -95],
+        [79.86192, 6.9271, -95],
+      ],
+    ),
+    [true, true],
+  );
+  // Austin, ground well above the ellipsoid: as before.
+  assert.deepEqual(
+    cullFrom([-97.7431, 30.2672, 132], [[-97.7431, 30.2681, 130]]),
+    [true],
+  );
+});
+
+test('the horizon cull still hides the far side of the Earth from orbit (gekh P2)', () => {
+  assert.deepEqual(
+    cullFrom(
+      [0, 0, 20_000_000],
+      [
+        [10, 10, 0],
+        [180, 0, 0],
+      ],
+    ),
+    [true, false],
+  );
+});

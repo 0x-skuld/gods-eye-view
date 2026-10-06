@@ -2,9 +2,8 @@ import * as Cesium from 'cesium';
 import { imageConeGlyph } from '../../glyphs.js';
 import { passesImageryFilter } from '../../filter.js';
 import { refineHeights } from '../../groundCast.js';
-import { createHorizonCull } from '../../view.js';
+import { createHorizonCull, metresBetween } from '../../view.js';
 import { meshCellKey } from '../../meshSampler.js';
-import { metresBetween } from '../../view.js';
 import {
   COLORS,
   IMAGE_CONE_MIN_SPACING_M,

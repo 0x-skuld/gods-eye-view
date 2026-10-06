@@ -16,8 +16,6 @@ import {
   PICK_PREFIX,
 } from './policy.js';
 
-export { MAPILLARY_PROVIDER_ID, mapillaryImageUrl } from './policy.js';
-
 /** Per-provider mutable state, created once per `create()`. */
 function createProviderState(context) {
   return {
@@ -25,6 +23,11 @@ function createProviderState(context) {
     services: context.services,
     viewer: null,
     keyRequired: false,
+    /**
+     * False until the first status answer: coverage asks for nothing before
+     * it, so a key-less install never sends tile requests that get 503.
+     */
+    statusKnown: false,
     /** Mapillary refused the configured token: nothing is requested until re-enabled. */
     keyRejected: false,
     status: null,
@@ -101,6 +104,10 @@ export function createMapillaryProvider({ source }) {
             state.status = null;
             state.keyRequired = !source.hasToken();
           }
+          const first = !state.statusKnown;
+          state.statusKnown = true;
+          // Coverage held back until now: draw it if the layer is on.
+          if (first) parts.coverage.refresh();
           context.notify();
           return { configured: !state.keyRequired };
         },

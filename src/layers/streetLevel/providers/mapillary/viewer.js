@@ -124,7 +124,10 @@ export function createMapillaryViewer({ source, render } = {}) {
         zoom: true,
         attribution: true,
       },
-      trackResize: true,
+      // The panel's ResizeObserver resizes the viewer, and skips it while it
+      // is hidden (0x0); MapillaryJS's own window tracking would resize a
+      // hidden viewer and ask for a tile at z=NaN.
+      trackResize: false,
       renderMode: libraryRenderMode(renderMode),
     });
     container = host;

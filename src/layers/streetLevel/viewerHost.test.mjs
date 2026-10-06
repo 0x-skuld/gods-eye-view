@@ -365,7 +365,8 @@ function fakeLibrary() {
     positionGate: null,
   };
   class Viewer {
-    constructor() {
+    constructor(options) {
+      this.options = options;
       viewers.created++;
       viewers.live++;
       viewers.instances.push(this);
@@ -454,6 +455,15 @@ test('a prewarm that gave up when the layer went off and on mid-download is foll
   await Promise.all([first, second]);
   assert.equal(viewers.created, 1, 'the second prewarm built the viewer');
   assert.equal(viewers.live, 1);
+  adapter.unmount();
+});
+
+test('the Mapillary viewer leaves resizing to the panel, so a hidden one never asks for z=NaN (gekh P3)', async () => {
+  const { gate, viewers } = fakeLibrary();
+  gate.resolve();
+  const adapter = createMapillaryViewer({ source: { token: 't' } });
+  await adapter.mount({});
+  assert.equal(viewers.instances[0].options.trackResize, false);
   adapter.unmount();
 });
 

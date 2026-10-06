@@ -251,6 +251,14 @@ export function viewFocus(
   return { nadir, ahead };
 }
 
+/** How far below WGS84 the horizon cull's occluder sits, in metres. */
+export const HORIZON_CULL_DEPTH_M = 1000;
+const HORIZON_CULL_ELLIPSOID = new Cesium.Ellipsoid(
+  Cesium.Ellipsoid.WGS84.radii.x - HORIZON_CULL_DEPTH_M,
+  Cesium.Ellipsoid.WGS84.radii.y - HORIZON_CULL_DEPTH_M,
+  Cesium.Ellipsoid.WGS84.radii.z - HORIZON_CULL_DEPTH_M,
+);
+
 /**
  * Hide billboards and points behind the horizon, as the cyclones layer does.
  * Street Level's skip the depth test, so Google 3D and clouds never hide the
@@ -258,10 +266,16 @@ export function viewFocus(
  * the globe, and a finite skip distance cannot, as the horizon's distance
  * moves with the camera. Re-culls on pre-render only once the camera moved,
  * and stops listening when there is nothing left to cull.
+ *
+ * The occluder is the WGS84 ellipsoid shrunk by HORIZON_CULL_DEPTH_M, below
+ * any real surface: on the ellipsoid itself a camera standing on ground that
+ * lies below it (NYC −22 m, Colombo −95 m) would see every lower point as
+ * behind the horizon and hide the cones around it. A kilometre changes
+ * nothing for the far side of the Earth seen from orbit.
  * @param {{getViewer: () => object|null, items: () => Iterable<{position: object, show: boolean}>, onChange?: () => void}} options
  */
 export function createHorizonCull({ getViewer, items, onChange }) {
-  const occluder = new Cesium.EllipsoidalOccluder(Cesium.Ellipsoid.WGS84);
+  const occluder = new Cesium.EllipsoidalOccluder(HORIZON_CULL_ELLIPSOID);
   let from = null;
   let stopListening = null;
 

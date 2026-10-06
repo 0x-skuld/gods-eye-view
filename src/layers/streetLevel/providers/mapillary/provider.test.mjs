@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createMapillaryProvider, mapillaryImageUrl } from './index.js';
+import { createMapillaryProvider } from './index.js';
+import { mapillaryImageUrl } from './policy.js';
 import { sequenceIdFromPick } from './coverage.js';
 import { thinImages } from './sequences.js';
 import { validateProviders } from '../../registry.js';
 import { PROVIDER_COLORS } from '../../policy.js';
 import { resolveFilter } from '../../filter.js';
+import * as Cesium from 'cesium';
+import { rayCamera } from '../../../../testSupport/streetLevelFakes.mjs';
 
 function fakeSource({ nearest = [] } = {}) {
   return {
@@ -179,4 +182,71 @@ test('cone thinning across the date line drops images metres apart (review IC8 P
     kept.map(({ id }) => id),
     ['a', 'c'],
   );
+});
+
+/** A viewer looking straight down on downtown Sacramento from 900 m. */
+function streetViewer() {
+  const collection = () => ({
+    add: (item) => item,
+    remove: () => true,
+    contains: () => false,
+    get length() {
+      return 0;
+    },
+  });
+  const event = () => ({ addEventListener: () => () => {} });
+  const camera = Object.assign(
+    rayCamera({
+      lon: -121.4944,
+      lat: 38.5816,
+      altitude: 900,
+      pitch: -90,
+      width: 100,
+      height: 100,
+    }),
+    { changed: event(), moveEnd: event() },
+  );
+  return {
+    camera,
+    scene: {
+      canvas: { clientWidth: 100, clientHeight: 100 },
+      globe: { show: false, ellipsoid: Cesium.Ellipsoid.WGS84 },
+      primitives: collection(),
+      groundPrimitives: collection(),
+      preRender: event(),
+      postRender: event(),
+      requestRender() {},
+    },
+  };
+}
+
+test('coverage asks for no tiles before the key status is known (gekh P3)', async () => {
+  for (const configured of [false, true]) {
+    let answer;
+    const tiles = [];
+    const source = {
+      ...fakeSource(),
+      hasToken: () => configured,
+      getStatus: () => new Promise((resolve) => (answer = resolve)),
+      getTile: (...args) => {
+        tiles.push(args);
+        return new Promise(() => {});
+      },
+    };
+    const instance = createMapillaryProvider({ source }).create(fakeContext());
+    const viewer = streetViewer();
+    instance.init(viewer);
+    const status = instance.status();
+    instance.activate(viewer);
+    assert.equal(tiles.length, 0, 'nothing before the status answers');
+    answer({ configured });
+    await status;
+    if (configured)
+      assert.ok(tiles.length > 0, 'coverage loads as soon as the key is known');
+    else {
+      assert.equal(tiles.length, 0, 'a key-less install never asks');
+      assert.equal(instance.coverageStats().keyRequired, true);
+    }
+    instance.destroy(viewer);
+  }
 });
