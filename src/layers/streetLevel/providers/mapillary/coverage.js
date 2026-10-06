@@ -510,12 +510,14 @@ export function createCoverage({ state, source }) {
     state.coverage.pending.set(key, controller);
     notify();
     try {
-      // Fetch and the one-time terrain-height table load run side by side.
-      const fetching = source.getTile('coverage', tile.z, tile.x, tile.y, {
-        signal: controller.signal,
-      });
-      if (kind === 'sequence') await ensureTerrainReady();
-      const bytes = await fetching;
+      // Fetch and the one-time terrain-height table load run side by side,
+      // both handled from the start so an early tile failure is not unhandled.
+      const [bytes] = await Promise.all([
+        source.getTile('coverage', tile.z, tile.x, tile.y, {
+          signal: controller.signal,
+        }),
+        kind === 'sequence' ? ensureTerrainReady() : null,
+      ]);
       // Only an abort, a retire, a clear or a newer request for this tile
       // discards the bytes; a refresh that still wants the tile keeps them.
       const current = () =>

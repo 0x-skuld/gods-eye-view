@@ -356,6 +356,61 @@ async function main() {
       near(restored[key], record[key], 2, `restored ${key}`);
     console.log('PASS: reload restores position and size');
 
+    // A collapsed window keeps the height chosen for it, through a drag of
+    // its header strip and a reload.
+    const setCollapsed = async (collapsed) => {
+      await page.evaluate(
+        (id, want) => {
+          const panel = document.getElementById(id);
+          if (panel.classList.contains('collapsed') !== want)
+            document
+              .querySelector(
+                `.panel-collapse-btn[data-collapse-target="${id}"]`,
+              )
+              .click();
+        },
+        PANEL_ID,
+        collapsed,
+      );
+      await page.waitForFunction(
+        (id, want) =>
+          document.getElementById(id).classList.contains('collapsed') === want,
+        {},
+        PANEL_ID,
+        collapsed,
+      );
+      await nextFrames(page);
+    };
+    await drag(handlePoint(await readPanel(), 'se'), 0, 200);
+    const chosen = await readPanel();
+    assert.ok(
+      chosen.height > MIN_SIZE.height + 150,
+      `the window grew to ${chosen.height}px`,
+    );
+    await setCollapsed(true);
+    const strip = await readPanel();
+    assert.ok(strip.height < chosen.height - 100, 'collapsed to its header');
+    await drag(await headerPoint(), 40, 30);
+    const movedStrip = await readPanel();
+    assert.equal(movedStrip.floating, true, 'the strip stays a window');
+    near(
+      JSON.parse(movedStrip.stored).height,
+      chosen.height,
+      2,
+      'stored height while collapsed',
+    );
+    await boot();
+    await setCollapsed(false);
+    near(
+      (await readPanel()).height,
+      chosen.height,
+      2,
+      'height after expanding',
+    );
+    console.log(
+      'PASS: a collapsed window keeps its height through a drag and a reload',
+    );
+
     const dock = await dockPanelByDoubleClick(page, PANEL_ID);
     const snapped = await readPanel();
     assert.equal(

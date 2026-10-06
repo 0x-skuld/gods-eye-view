@@ -540,3 +540,41 @@ test('a floating header never lands under the command dock or voice pill', () =>
     f.restore();
   }
 });
+
+test('a collapsed floating window keeps its chosen height through a drag and a reload', () => {
+  const f = fixture();
+  try {
+    const { panel, handle } = floatingPanel(f, 'cctv-panel');
+    panel.style.height = '500px';
+    panel.classList.add('collapsed');
+    // Collapsed, the window measures only its header strip.
+    panel.getBoundingClientRect = () => {
+      const left = parseFloat(panel.style.left);
+      const top = parseFloat(panel.style.top);
+      return {
+        left,
+        top,
+        width: 360,
+        height: 50,
+        right: left + 360,
+        bottom: top + 50,
+      };
+    };
+    pointer(handle, 'pointerdown', { x: 200, y: 90 });
+    pointer(window, 'pointermove', { x: 260, y: 140 });
+    pointer(window, 'pointerup', { x: 260, y: 140 });
+    const record = JSON.parse(
+      f.store.get('godsEyeView.v8.panelPos.cctv-panel'),
+    );
+    assert.equal(record.height, 500, 'the chosen height, not the strip');
+    assert.equal(record.width, 360);
+
+    // Reload: a fresh panel restores the size it expands to.
+    const reloaded = f.element();
+    reloaded.id = 'cctv-panel';
+    f.owner._restorePanelPosition('cctv-panel', reloaded);
+    assert.equal(reloaded.style.height, '500px');
+  } finally {
+    f.restore();
+  }
+});

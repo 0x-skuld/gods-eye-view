@@ -906,3 +906,27 @@ test('a line across the date line from the camera is in mesh range', () => {
   const far = { west: -179.99, east: -179.97, south: -0.001, north: 0.001 };
   assert.equal(meshBoxInRange(far, camera), false);
 });
+
+test('a tile that fails before the terrain table loads is reported at once, never unhandled', async () => {
+  const { source, state, coverage, tileKey } = setup();
+  let terrainLoaded;
+  state.coverage.terrainReady = new Promise((resolve) => {
+    terrainLoaded = resolve;
+  });
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    coverage.refresh();
+    source.calls
+      .find((call) => call.key === tileKey)
+      .reject(new Error('Mapillary tiles HTTP 500'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(state.coverage.lastError, 'Mapillary tiles HTTP 500');
+    assert.deepEqual(unhandled, []);
+  } finally {
+    terrainLoaded();
+    await settle();
+    process.off('unhandledRejection', onUnhandled);
+  }
+});

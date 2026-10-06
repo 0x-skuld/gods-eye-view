@@ -429,10 +429,17 @@ export class PanelPositionControls {
       top: Math.round(rect.top),
     };
     if (this._portablePanels.has(panelId)) {
-      // Only an explicitly set size is remembered: freezing a collapsed
-      // panel's measured height would stop it from ever expanding again.
-      if (panelEl.style.width) record.width = Math.round(rect.width);
-      if (panelEl.style.height) record.height = Math.round(rect.height);
+      // Only an explicitly set size is remembered, and the inline value
+      // rather than the measured box: a collapsed window measures only its
+      // header but keeps the size the user chose for when it expands.
+      const chosen = (inline, measured) => {
+        const px = parseFloat(inline);
+        return Math.round(Number.isFinite(px) ? px : measured);
+      };
+      if (panelEl.style.width)
+        record.width = chosen(panelEl.style.width, rect.width);
+      if (panelEl.style.height)
+        record.height = chosen(panelEl.style.height, rect.height);
       record.floating = true;
     }
     try {
