@@ -20,6 +20,11 @@ import {
   mapillaryToken,
 } from './constants.js';
 
+/** Log a background failure without its stack (never the token: none is in scope). */
+function warn(what, error) {
+  console.warn(`[Mapillary Proxy] ${what}:`, error?.message || error);
+}
+
 /** Thrown for a request this proxy refuses before contacting Mapillary. */
 export class TileRequestError extends Error {
   constructor(message, status = 400) {
@@ -224,10 +229,7 @@ function writeDisk(address, bytes, at = null) {
       })
       .catch(async (error) => {
         await fsp.rm(tmp, { force: true }).catch(() => {});
-        console.warn(
-          '[Mapillary Proxy] tile cache write failed:',
-          error?.message || error,
-        );
+        warn('tile cache write failed', error);
       })
       .finally(() => {
         if (newest()) _diskWrites.delete(file);
@@ -248,10 +250,7 @@ function scheduleSweep(root) {
     .catch((error) => {
       if (_sweepWarned) return;
       _sweepWarned = true;
-      console.warn(
-        '[Mapillary Proxy] tile cache sweep failed:',
-        error?.message || error,
-      );
+      warn('tile cache sweep failed', error);
     })
     .finally(() => {
       if (_sweeping === tracked) _sweeping = null;
@@ -417,10 +416,7 @@ function trim(address, bytes) {
   try {
     return stripTileLayers(bytes, address.dropLayers);
   } catch (error) {
-    console.warn(
-      '[Mapillary Proxy] tile trim failed, serving raw:',
-      error?.message || error,
-    );
+    warn('tile trim failed, serving raw', error);
     return bytes;
   }
 }

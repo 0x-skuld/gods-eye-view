@@ -2,22 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { composeUIState, summarizeCoverage } from './uiState.js';
 import { COLORS } from './policy.js';
+import { providerSnapshot } from '../../testSupport/streetLevelFakes.mjs';
 
-const provider = (overrides = {}) => ({
-  id: 'mapillary',
-  name: 'Mapillary',
-  label: 'MAPILLARY',
-  on: true,
-  configured: true,
-  keyRequired: false,
-  requiresKeyId: 'mapillary',
-  loading: false,
-  count: 10,
-  hint: '',
-  error: null,
-  color: '#05cb63',
-  ...overrides,
-});
+const provider = (overrides = {}) =>
+  providerSnapshot({ count: 10, ...overrides });
 const base = {
   enabled: true,
   filter: { pano: 'all', sinceDays: 0 },

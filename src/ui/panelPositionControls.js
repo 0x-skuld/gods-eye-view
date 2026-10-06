@@ -72,6 +72,14 @@ function fitWindowExtent(value, minimum, viewportExtent) {
  * Only a mouse or pen lifts and resizes a portable panel. On a phone the
  * rail is a scroll container, so a finger on a header is a swipe.
  */
+/** Pin a panel's top-left corner at (left, top) as a fixed window would sit. */
+function placeAt(panelEl, left, top) {
+  panelEl.style.left = `${left}px`;
+  panelEl.style.top = `${top}px`;
+  panelEl.style.right = 'auto';
+  panelEl.style.bottom = 'auto';
+}
+
 function isPrecisePointer(event) {
   const pointerType = event.pointerType || 'mouse';
   return pointerType === 'mouse' || pointerType === 'pen';
@@ -433,10 +441,7 @@ export class PanelPositionControls {
             Math.round(pos.top),
             panelEl,
           );
-      panelEl.style.left = `${left}px`;
-      panelEl.style.top = `${top}px`;
-      panelEl.style.right = 'auto';
-      panelEl.style.bottom = 'auto';
+      placeAt(panelEl, left, top);
       if (panelId === 'pp-toggles') {
         this._pinPanelToRight(panelEl);
       }
@@ -513,10 +518,7 @@ export class PanelPositionControls {
    */
   _liftPanelOut(panelId, panelEl, rect = panelEl.getBoundingClientRect()) {
     if (panelEl.classList.contains('panel-floating')) return false;
-    panelEl.style.left = `${Math.round(rect.left)}px`;
-    panelEl.style.top = `${Math.round(rect.top)}px`;
-    panelEl.style.right = 'auto';
-    panelEl.style.bottom = 'auto';
+    placeAt(panelEl, Math.round(rect.left), Math.round(rect.top));
     if (!panelEl.classList.contains('collapsed')) {
       panelEl.style.width = `${Math.round(rect.width)}px`;
     }
@@ -580,10 +582,7 @@ export class PanelPositionControls {
       const offsetX = event.clientX - rect.left;
       const offsetY = event.clientY - rect.top;
 
-      panelEl.style.left = `${rect.left}px`;
-      panelEl.style.top = `${rect.top}px`;
-      panelEl.style.right = 'auto';
-      panelEl.style.bottom = 'auto';
+      placeAt(panelEl, rect.left, rect.top);
       panelEl.classList.add('panel-dragging');
       this._promotePanelZ(panelEl);
 

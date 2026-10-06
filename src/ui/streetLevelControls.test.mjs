@@ -9,6 +9,7 @@ import {
   REGISTERED_LAYER_IDS,
   encodeLayerStateParams,
 } from '../data/layerState.js';
+import { fakeStreetLevelProvider } from '../testSupport/streetLevelFakes.mjs';
 
 /* ── A small DOM: just what the panel controls touch ───────────────────── */
 
@@ -296,47 +297,8 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 /* ── A Street Level layer with one stand-in provider ───────────────────── */
 
 function standInProvider() {
-  const filters = [];
-  return {
-    filters,
-    def: {
-      id: 'mapillary',
-      name: 'Mapillary',
-      label: 'MAPILLARY',
-      requiresKeyId: null,
-      pickPrefix: 'mly:',
-      colors: { coverage: '#05cb63' },
-      credit: { html: 'Mapillary' },
-      create: () => ({
-        status: async () => ({ configured: true }),
-        init() {},
-        activate() {},
-        deactivate() {},
-        destroy() {},
-        refreshCoverage() {},
-        setFilter: (filter) => filters.push(filter),
-        coverageStats: () => ({
-          count: 0,
-          zoom: null,
-          kind: null,
-          loading: false,
-          hint: '',
-          error: null,
-          keyRequired: false,
-        }),
-        handlePick: () => false,
-        nearestImage: async () => null,
-        viewer: {
-          mount: async () => {},
-          open: async () => {},
-          close() {},
-          unmount() {},
-          resize() {},
-          onPose: () => () => {},
-        },
-      }),
-    },
-  };
+  const def = fakeStreetLevelProvider({ html: 'Mapillary' });
+  return { filters: def.filters, def };
 }
 
 /** Every other registered layer, as a module with no options. */

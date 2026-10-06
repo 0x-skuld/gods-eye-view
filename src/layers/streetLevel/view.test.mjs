@@ -7,6 +7,7 @@ import {
   viewFocus,
   visibleBbox,
 } from './view.js';
+import { rayCamera } from '../../testSupport/streetLevelFakes.mjs';
 
 const RAD = Math.PI / 180;
 /** A viewer 300 m above a street 1,600 m up (Denver-like). */
@@ -82,50 +83,21 @@ test('an ordinary view keeps west < east', () => {
   );
 });
 
-/**
- * A pinhole camera `agl` metres above ground `ground` m up, looking north at
- * `pitch` degrees, whose rays meet whatever ellipsoid they are given (real
- * Cesium ray maths, as `camera.pickEllipsoid` does it).
- */
+/** A pinhole viewer `agl` m above ground `ground` m up, looking north. */
 function pinhole({ lon, lat, ground, agl, pitch, w = 1600, h = 900 }) {
-  const position = Cesium.Cartesian3.fromDegrees(lon, lat, ground + agl);
-  const frame = Cesium.Transforms.eastNorthUpToFixedFrame(position);
-  const p = pitch * RAD;
-  const forward = [0, Math.cos(p), Math.sin(p)];
-  const up = [0, -Math.sin(p), Math.cos(p)];
-  const half = Math.tan(30 * RAD);
   return {
     scene: {
       canvas: { clientWidth: w, clientHeight: h },
       globe: { show: false, ellipsoid: Cesium.Ellipsoid.WGS84 },
     },
-    camera: {
-      positionWC: position,
-      positionCartographic: Cesium.Cartographic.fromDegrees(
-        lon,
-        lat,
-        ground + agl,
-      ),
-      pickEllipsoid(point, ellipsoid = Cesium.Ellipsoid.WGS84) {
-        const sx = ((2 * point.x) / w - 1) * half * (w / h);
-        const sy = (1 - (2 * point.y) / h) * half;
-        const local = [0, 1, 2].map(
-          (i) => forward[i] + sx * (i === 0 ? 1 : 0) + sy * up[i],
-        );
-        const direction = Cesium.Cartesian3.normalize(
-          Cesium.Matrix4.multiplyByPointAsVector(
-            frame,
-            new Cesium.Cartesian3(...local),
-            new Cesium.Cartesian3(),
-          ),
-          new Cesium.Cartesian3(),
-        );
-        const ray = new Cesium.Ray(position, direction);
-        const hit = Cesium.IntersectionTests.rayEllipsoid(ray, ellipsoid);
-        return hit ? Cesium.Ray.getPoint(ray, hit.start) : undefined;
-      },
-      computeViewRectangle: () => undefined,
-    },
+    camera: rayCamera({
+      lon,
+      lat,
+      altitude: ground + agl,
+      pitch,
+      width: w,
+      height: h,
+    }),
   };
 }
 

@@ -200,6 +200,23 @@ function readPanel(page) {
   });
 }
 
+/** Wait until Street Level is on, drawn, settled and not key-gated. */
+function waitForCoverage(page, { timeout = 90_000 } = {}) {
+  return page.waitForFunction(
+    () => {
+      const dm = window.__godsEyeView.dataManager;
+      const u = dm.layers.get('street-level').module.getUIState();
+      return (
+        dm.isEnabled('street-level') &&
+        u.coverage.count > 0 &&
+        !u.coverage.loading &&
+        !u.keyRequired
+      );
+    },
+    { timeout },
+  );
+}
+
 /** Without a key on the server the panel gates its controls and says why. */
 async function assertKeylessGate(page) {
   await page.evaluate(() =>
@@ -360,15 +377,7 @@ async function main() {
             origin: 'user',
           }),
         );
-        await page.waitForFunction(
-          () => {
-            const u = window.__godsEyeView.dataManager.layers
-              .get('street-level')
-              .module.getUIState();
-            return u.coverage.count > 0 && !u.coverage.loading;
-          },
-          { timeout: 90_000 },
-        );
+        await waitForCoverage(page);
         const info = await panel();
         assert.equal(info.controlsDisabled, false);
         // Cesium paints on-screen credits a frame or two after they register.
@@ -410,18 +419,7 @@ async function main() {
         );
         assert.equal((await ui()).coverage.count, 0);
         await page.click('#sl-status');
-        await page.waitForFunction(
-          () => {
-            const dm = window.__godsEyeView.dataManager;
-            const u = dm.layers.get('street-level').module.getUIState();
-            return (
-              dm.isEnabled('street-level') &&
-              u.coverage.count > 0 &&
-              !u.coverage.loading
-            );
-          },
-          { timeout: 90_000 },
-        );
+        await waitForCoverage(page);
         assert.equal(
           await page.$eval('#sl-status', (node) =>
             node.getAttribute('aria-pressed'),
@@ -458,18 +456,7 @@ async function main() {
       'lighting the chip turns the layer back on with coverage',
       async () => {
         await page.click(chip);
-        await page.waitForFunction(
-          () => {
-            const dm = window.__godsEyeView.dataManager;
-            const u = dm.layers.get('street-level').module.getUIState();
-            return (
-              dm.isEnabled('street-level') &&
-              u.coverage.count > 0 &&
-              !u.coverage.loading
-            );
-          },
-          { timeout: 90_000 },
-        );
+        await waitForCoverage(page);
         assert.equal(
           await page.$eval(chip, (node) => node.getAttribute('aria-pressed')),
           'true',
@@ -614,17 +601,7 @@ async function main() {
           );
           fixture.tiles = 'ok';
           await page.click('#sl-status');
-          await page.waitForFunction(
-            () => {
-              const u = window.__godsEyeView.dataManager.layers
-                .get('street-level')
-                .module.getUIState();
-              return (
-                u.coverage.count > 0 && !u.coverage.loading && !u.keyRequired
-              );
-            },
-            { timeout: 90_000 },
-          );
+          await waitForCoverage(page);
           await statusText('ON');
         },
       );
@@ -806,16 +783,7 @@ async function main() {
               .module.getUIState().surface === 'draped',
           { timeout: 10_000 },
         );
-        const coverageLoaded = () =>
-          page.waitForFunction(
-            () => {
-              const u = window.__godsEyeView.dataManager.layers
-                .get('street-level')
-                .module.getUIState();
-              return u.coverage.count > 0 && !u.coverage.loading;
-            },
-            { timeout: 60_000 },
-          );
+        const coverageLoaded = () => waitForCoverage(page, { timeout: 60_000 });
         await coverageLoaded();
         assert.equal((await surface()).surface, 'draped', 'draped on Esri');
         const photoreal = await page.evaluate(() =>

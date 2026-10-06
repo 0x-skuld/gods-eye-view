@@ -3,64 +3,7 @@ import test from 'node:test';
 import * as Cesium from 'cesium';
 import { createStreetLevelLayer } from './index.js';
 import { MAPILLARY_CREDIT_HTML } from './providers/mapillary/policy.js';
-
-/**
- * The smallest provider the core accepts. `stats` is what coverageStats()
- * answers; `calls` counts what the core asked of the provider and its viewer.
- */
-function fakeProvider({
-  id = 'mapillary',
-  pickPrefix = 'mly:',
-  html = MAPILLARY_CREDIT_HTML,
-  nearestImage = async () => null,
-} = {}) {
-  const calls = { activate: 0, deactivate: 0, mount: 0, open: [], unmount: 0 };
-  const stats = {
-    count: 0,
-    zoom: null,
-    kind: null,
-    loading: false,
-    hint: '',
-    error: null,
-    keyRequired: false,
-  };
-  let context = null;
-  return {
-    calls,
-    stats,
-    context: () => context,
-    id,
-    name: 'Mapillary',
-    label: 'MAPILLARY',
-    requiresKeyId: null,
-    pickPrefix,
-    colors: { coverage: '#05cb63' },
-    credit: { html },
-    create: (providerContext) => {
-      context = providerContext;
-      return {
-        status: async () => ({ configured: true }),
-        init() {},
-        activate: () => calls.activate++,
-        deactivate: () => calls.deactivate++,
-        destroy() {},
-        refreshCoverage() {},
-        setFilter() {},
-        coverageStats: () => ({ ...stats }),
-        handlePick: () => false,
-        nearestImage,
-        viewer: {
-          mount: async () => calls.mount++,
-          open: async (imageId) => calls.open.push(imageId),
-          close() {},
-          unmount: () => calls.unmount++,
-          resize() {},
-          onPose: () => () => {},
-        },
-      };
-    },
-  };
-}
+import { fakeStreetLevelProvider as fakeProvider } from '../../testSupport/streetLevelFakes.mjs';
 
 /**
  * A stand-in Cesium viewer the layer can be enabled on: a canvas for the

@@ -3,6 +3,7 @@ import test from 'node:test';
 import * as Cesium from 'cesium';
 import { SWAP_MAX_WAIT_MS, createCoverage } from './coverage.js';
 import { encodeCoverageTile } from './coverageFixture.mjs';
+import { rayCamera } from '../../../../testSupport/streetLevelFakes.mjs';
 import {
   COLORS,
   COVERAGE_MAX_SEQUENCES,
@@ -641,46 +642,19 @@ test('the draped lines go after the wait even if the cast lines never get ready'
   coverage.clear();
 });
 
-/**
- * A camera `height` m above WGS84 looking along `heading` with `pitch` (deg),
- * a 60°×40° view on a 100×100 canvas, whose screen rays really meet the
- * ellipsoid they are given (as Cesium's `pickEllipsoid` does).
- */
+/** A camera over a 100×100 canvas with a 60°×40° view (see rayCamera). */
 function tiltedCamera({ lon, lat, height, heading, pitch }) {
-  const position = Cesium.Cartesian3.fromDegrees(lon, lat, height);
-  const frameAt = Cesium.Transforms.eastNorthUpToFixedFrame(position);
-  function ray(point) {
-    const h = (heading + (point.x / 100 - 0.5) * 60) * RAD;
-    const p = (pitch + (0.5 - point.y / 100) * 40) * RAD;
-    const local = new Cesium.Cartesian3(
-      Math.sin(h) * Math.cos(p),
-      Math.cos(h) * Math.cos(p),
-      Math.sin(p),
-    );
-    const direction = Cesium.Matrix4.multiplyByPointAsVector(
-      frameAt,
-      local,
-      new Cesium.Cartesian3(),
-    );
-    return new Cesium.Ray(
-      position,
-      Cesium.Cartesian3.normalize(direction, direction),
-    );
-  }
-  return {
-    positionWC: position,
-    positionCartographic: {
-      longitude: lon * RAD,
-      latitude: lat * RAD,
-      height,
-    },
-    pickEllipsoid(point, ellipsoid) {
-      const r = ray(point);
-      const hit = Cesium.IntersectionTests.rayEllipsoid(r, ellipsoid);
-      return hit ? Cesium.Ray.getPoint(r, hit.start) : undefined;
-    },
-    computeViewRectangle: () => undefined,
-  };
+  return rayCamera({
+    lon,
+    lat,
+    altitude: height,
+    heading,
+    pitch,
+    width: 100,
+    height: 100,
+    fovX: 60,
+    fovY: 40,
+  });
 }
 
 /**

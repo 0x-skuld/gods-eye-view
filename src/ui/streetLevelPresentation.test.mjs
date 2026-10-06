@@ -5,22 +5,9 @@ import {
   SINCE_STOPS,
   sinceStopIndex,
 } from './streetLevelPresentation.js';
+import { providerSnapshot } from '../testSupport/streetLevelFakes.mjs';
 
-const provider = (overrides = {}) => ({
-  id: 'mapillary',
-  name: 'Mapillary',
-  label: 'MAPILLARY',
-  on: true,
-  configured: true,
-  keyRequired: false,
-  requiresKeyId: 'mapillary',
-  loading: false,
-  count: 0,
-  hint: '',
-  error: null,
-  color: '#05cb63',
-  ...overrides,
-});
+const provider = providerSnapshot;
 
 function snapshot(overrides = {}) {
   const base = {

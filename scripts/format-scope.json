@@ -274,6 +274,7 @@
   "src/ui/styles.js",
   "src/ui/shellLifecycle.test.mjs",
   "src/testSupport/readStylesheet.mjs",
+  "src/testSupport/streetLevelFakes.mjs",
   "src/splitFlap.js",
   "style.css",
   "src/ui/styles/overlays.css",
