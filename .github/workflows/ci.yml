@@ -60,15 +60,22 @@ jobs:
         run: npm run build
 
   street-level-browser:
-    # The Street Level gate in its hermetic mode: Mapillary status and coverage
-    # tiles are answered from generated fixtures, so no token or Mapillary
-    # network is needed. The steps that open a photo need live imagery and
-    # are skipped here; run `npm run qa:street-level` with a token for them.
+    # The Street Level gate in its hermetic mode, against a production build
+    # served by `vite preview`: coverage tiles, the Graph API and the image
+    # CDN are answered from fixtures (scripts/fixtures/street-level), so no
+    # real token and no Mapillary network are needed, and the whole photo
+    # flow runs. The server gets a dummy, non-secret client token: the build
+    # bakes it into the bundle (the viewer needs one to ask for photos) and
+    # the preview server's status route reports it as configured. The page
+    # intercepts every *.mapillary.com request, so the token never leaves it.
     name: Street Level browser gate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       GEV_REQUIRE_ALLOCATION_GATE: '0'
+      # A header press that misses is a real layout shift under the pointer
+      # (the right rail now aligns to where the left rail settles), not noise.
+      QA_FAIL_ON_RETRY: '1'
     steps:
       - name: Check out source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -84,25 +91,42 @@ jobs:
       - name: Install locked dependencies and headless Chrome
         run: npm ci
 
-      - name: Start the dev server
+      - name: Build production bundle with a dummy Mapillary token
+        env:
+          MAPILLARY_CLIENT_TOKEN: 'MLY|0|qa-fixture'
+        run: npm run build
+
+      - name: Start the preview server
+        env:
+          MAPILLARY_CLIENT_TOKEN: 'MLY|0|qa-fixture'
         run: |
-          npx vite --port 4173 --strictPort > vite.log 2>&1 &
+          npx vite preview --port 4173 --strictPort > preview.log 2>&1 &
           for attempt in $(seq 1 90); do
             curl -sf http://localhost:4173/ > /dev/null && exit 0
             sleep 2
           done
-          cat vite.log
+          cat preview.log
           exit 1
 
       - name: Street Level gate with Mapillary fixtures
-        run: npm run qa:street-level:fixtures -- --url http://localhost:4173
+        run: npm run qa:street-level:fixtures -- --strict --url http://localhost:4173
 
       - name: Portable panel gate
+        if: success() || failure()
         run: npm run qa:panel-resize -- --url http://localhost:4173
 
-      - name: Dev server log
+      - name: Preview server log
         if: failure()
-        run: cat vite.log
+        run: cat preview.log
+
+      - name: Upload gate evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-gate-evidence
+          path: qa-artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
 
   windows-onboarding:
     name: Windows onboarding

@@ -3,7 +3,10 @@
  * Prove the portable CCTV panel in a real browser: a header drag lifts it out
  * of the right rail, every resize handle moves only its own edges, minimum
  * sizes hold, the window survives a reload and a header double-click snaps
- * it back and forgets the stored position.
+ * it back and forgets the stored position. Page errors and Cesium render-loop
+ * errors fail the run; a failed run saves screenshots, console and failed
+ * requests under qa-artifacts/panel-resize/ (scripts/qa-browserEvidence.mjs).
+ * `--fail-on-retry` (or QA_FAIL_ON_RETRY=1) fails on any header-press retry.
  */
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
@@ -13,11 +16,20 @@ import {
   dockPanelByDoubleClick,
   dragPointer,
   liftPanelByHeader,
+  nextFrames,
 } from './qa-panelDrag.mjs';
+import {
+  hookRenderErrors,
+  readRenderErrors,
+  saveFailureArtifacts,
+  watchPage,
+} from './qa-browserEvidence.mjs';
 
 export const PANEL_ID = 'cctv-panel';
 export const STORAGE_KEY = `godsEyeView.v8.panelPos.${PANEL_ID}`;
 export const MIN_SIZE = { width: 300, height: 160 };
+/** Where a failed run leaves its screenshots and logs. */
+export const ARTIFACT_DIR = 'qa-artifacts/panel-resize';
 const VIEWPORT = { width: 1400, height: 900 };
 const EDGE_BY_SIDE = { n: 'top', s: 'bottom', e: 'right', w: 'left' };
 
@@ -82,6 +94,7 @@ async function main() {
   const args = process.argv.slice(2);
   const urlIndex = args.indexOf('--url');
   const url = urlIndex >= 0 ? args[urlIndex + 1] : 'http://localhost:4173';
+  if (args.includes('--fail-on-retry')) process.env.QA_FAIL_ON_RETRY = '1';
   const browser = await puppeteer.launch({
     headless: true,
     executablePath:
@@ -89,11 +102,13 @@ async function main() {
       (await puppeteer.executablePath()),
     args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader'],
   });
+  const monitors = [];
   try {
     const page = await browser.newPage();
     await page.setViewport(VIEWPORT);
     const errors = [];
-    page.on('pageerror', (error) => errors.push(error.stack || error.message));
+    monitors.push(watchPage(page, { name: 'panel', errors }));
+    await hookRenderErrors(page);
 
     const boot = async () => {
       await page.goto(`${url}/`, { waitUntil: 'domcontentloaded' });
@@ -112,7 +127,7 @@ async function main() {
           node.remove();
       });
       await page.mouse.click(VIEWPORT.width / 2, VIEWPORT.height / 2);
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      await nextFrames(page);
     };
     const readPanel = () =>
       page.evaluate((id) => {
@@ -259,7 +274,17 @@ async function main() {
       `lifted top (${moved})`,
     );
     near(lifted.width, pressed.width, 2, 'lifted width');
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    // The rail lets go of the lifted panel on its next layout pass.
+    await page
+      .waitForFunction(
+        (id) =>
+          document
+            .getElementById(id)
+            .style.getPropertyValue('--right-panel-allocated-height') === '',
+        { timeout: 5_000 },
+        PANEL_ID,
+      )
+      .catch(() => {});
     const afterLayout = await readPanel();
     assert.equal(afterLayout.allocated, '', 'the rail no longer allocates it');
     const railExcludes = await page.evaluate((id) => {
@@ -294,7 +319,6 @@ async function main() {
     {
       const header = await headerPoint();
       await drag(header, 0, 120 - header.y);
-      await new Promise((resolve) => setTimeout(resolve, 200));
     }
 
     // Every handle moves only its own edges.
@@ -366,7 +390,22 @@ async function main() {
     assert.equal(snapped.stored, null, 'the storage key is gone');
     console.log('PASS: header double-click returns the panel to the rail');
 
-    assert.deepEqual(errors, []);
+    const renderErrors = await readRenderErrors(page);
+    assert.deepEqual(
+      [...errors, ...renderErrors.map((text) => `scene.renderError: ${text}`)],
+      [],
+      'no page errors and no Cesium render-loop errors',
+    );
+    console.log('PASS: no page errors and no render-loop errors');
+  } catch (error) {
+    const dir = await saveFailureArtifacts({
+      dir: ARTIFACT_DIR,
+      browser,
+      monitors,
+      error,
+    }).catch(() => null);
+    if (dir) console.error(`failure evidence saved in ${dir}/`);
+    throw error;
   } finally {
     await browser.close();
   }
