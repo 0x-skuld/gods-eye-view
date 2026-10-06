@@ -38,3 +38,21 @@ test('decodeParams round-trips and ignores unknown or malformed keys', () => {
   assert.equal(empty.providers.size, 0);
   assert.deepEqual(empty.filter, current);
 });
+
+test('decodeParams applies "any date" (0 days) over a current window (share-link defaults)', () => {
+  const decoded = decodeParams(
+    { sinceDays: 0 },
+    { providerIds: ['mapillary'], filter: { pano: 'flat', sinceDays: 365 } },
+  );
+  assert.deepEqual(decoded.filter, { pano: 'flat', sinceDays: 0 });
+  // The provider switch off is a value too, not an absence.
+  assert.deepEqual(
+    [
+      ...decodeParams(
+        { mapillary: false },
+        { providerIds: ['mapillary'], filter: { pano: 'all', sinceDays: 0 } },
+      ).providers,
+    ],
+    [['mapillary', false]],
+  );
+});

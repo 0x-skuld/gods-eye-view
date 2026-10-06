@@ -839,3 +839,57 @@ test('only lines within the mesh sampler range of the camera are asked for (revi
   assert.ok(farthest < 200, `nothing from the corner (${farthest} m)`);
   coverage.clear();
 });
+
+test('the old zoom goes as soon as the new zoom has loaded, not after the stale wait', async () => {
+  const { viewer, source, state, coverage, bytes } = setup();
+  coverage.refresh();
+  source.calls[0].resolve(bytes);
+  await settle();
+  const [old] = viewer.scene.groundPrimitives.items;
+  assert.ok(old, 'the z14 lines are drawn');
+  viewer.view.height = 3000; // zoom out to z13
+  coverage.refresh();
+  assert.equal(state.coverage.zoom, 13);
+  const fresh = source.calls.slice(1);
+  assert.ok(fresh.length > 0, 'the new zoom is loading');
+  assert.equal(state.coverage.stale.size, 1, 'the old zoom stays meanwhile');
+  assert.ok(viewer.scene.groundPrimitives.items.has(old));
+  for (const call of fresh) {
+    assert.ok(
+      viewer.scene.groundPrimitives.items.has(old),
+      'kept while a new tile is still loading',
+    );
+    call.resolve(new Uint8Array());
+    await settle();
+  }
+  // The last new tile is in: the old lines go now, long before the wait.
+  assert.equal(state.coverage.pending.size, 0);
+  assert.equal(state.coverage.stale.size, 0);
+  assert.equal(viewer.scene.groundPrimitives.items.has(old), false);
+  assert.equal(state.coverage.staleTimer, null, 'the stale wait is cancelled');
+  coverage.clear();
+});
+
+test('a rate limit holds every refresh inside its wait, not only the first (review IC8 P2)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const { viewer, source, coverage } = setup();
+  coverage.refresh();
+  source.calls[0].reject(
+    Object.assign(new Error('rate limited'), { retryAfterSec: 30 }),
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  t.mock.timers.tick(1000);
+  viewer.view.lon += 0.05;
+  coverage.refresh();
+  assert.equal(source.calls.length, 1, 'held 1 s into a 30 s wait');
+  t.mock.timers.tick(28_000);
+  viewer.view.lon += 0.05;
+  coverage.refresh();
+  assert.equal(source.calls.length, 1, 'held 29 s into a 30 s wait');
+  t.mock.timers.tick(1000);
+  assert.ok(source.calls.length > 1, 'asked again once the wait is over');
+  coverage.clear();
+  coverage.resetErrors();
+});

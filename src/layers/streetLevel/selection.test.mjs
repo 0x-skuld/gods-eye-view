@@ -8,7 +8,7 @@ import { createSelection } from './selection.js';
  * `frame()` runs them; timers and Date.now() are mocked so a burst of moves
  * has a known timeline.
  */
-function harness() {
+function harness({ selected = false } = {}) {
   const saved = {
     document: globalThis.document,
     requestAnimationFrame: globalThis.requestAnimationFrame,
@@ -17,6 +17,23 @@ function harness() {
   const frames = [];
   globalThis.requestAnimationFrame = (task) => frames.push(task);
   globalThis.document = new EventTarget();
+  // The document's keydown listeners, so a test can hand them any target.
+  const keyListeners = new Set();
+  const addListener = globalThis.document.addEventListener.bind(
+    globalThis.document,
+  );
+  const removeListener = globalThis.document.removeEventListener.bind(
+    globalThis.document,
+  );
+  globalThis.document.addEventListener = (type, listener, options) => {
+    if (type === 'keydown') keyListeners.add(listener);
+    addListener(type, listener, options);
+  };
+  globalThis.document.removeEventListener = (type, listener, options) => {
+    if (type === 'keydown') keyListeners.delete(listener);
+    removeListener(type, listener, options);
+  };
+  const sequences = { selected, cleared: 0 };
   const picks = [];
   /** What the pointer is over: a line this layer owns, or nothing. */
   const scene = { under: null };
@@ -48,8 +65,11 @@ function harness() {
     state,
     parts: {
       router: { ownsPick: (id) => id === 'mly:seq:1', resolve: () => null },
-      hasSelectedSequence: () => false,
-      clearSequences() {},
+      hasSelectedSequence: () => sequences.selected,
+      clearSequences() {
+        sequences.cleared++;
+        sequences.selected = false;
+      },
     },
   });
   selection.install(viewer);
@@ -58,6 +78,20 @@ function harness() {
   );
   return {
     state,
+    sequences,
+    /** A keydown reaching the document from `target`; the event as handled. */
+    key(key, target, { defaultPrevented = false } = {}) {
+      const event = {
+        key,
+        target,
+        defaultPrevented,
+        preventDefault() {
+          this.defaultPrevented = true;
+        },
+      };
+      for (const listener of [...keyListeners]) listener(event);
+      return event;
+    },
     scene,
     canvas,
     camera,
@@ -164,6 +198,61 @@ test('a hover frame queued before the layer went off does not pick', () => {
     h.state.enabled = false;
     h.wait(200);
     assert.equal(h.picks.length, 0);
+  } finally {
+    h.restore();
+  }
+});
+
+/**
+ * An element as Esc sees it: `closest` matches the tag names a selector list
+ * names, and `isContentEditable` is what the browser reports, inherited from
+ * an editing host.
+ */
+function element(tag, { isContentEditable = false } = {}) {
+  return {
+    tagName: tag.toUpperCase(),
+    isContentEditable,
+    closest(selector) {
+      const names = selector.split(',').map((part) => part.trim());
+      return names.includes(tag) ? this : null;
+    },
+  };
+}
+
+test('Esc on the globe clears the selected sequence', () => {
+  const h = harness({ selected: true });
+  try {
+    const event = h.key('Escape', element('canvas'));
+    assert.equal(h.sequences.cleared, 1);
+    assert.equal(event.defaultPrevented, true, 'and claims the key');
+    h.key('Escape', element('canvas'));
+    assert.equal(h.sequences.cleared, 1, 'nothing left to clear');
+  } finally {
+    h.restore();
+  }
+});
+
+test('an Esc something else already handled keeps the selection (M60)', () => {
+  const h = harness({ selected: true });
+  try {
+    h.key('Escape', element('canvas'), { defaultPrevented: true });
+    assert.equal(h.sequences.cleared, 0);
+  } finally {
+    h.restore();
+  }
+});
+
+test('Esc in a text field or rich-text editor keeps the selection (M61)', () => {
+  const h = harness({ selected: true });
+  try {
+    for (const tag of ['input', 'textarea', 'select']) {
+      const event = h.key('Escape', element(tag));
+      assert.equal(h.sequences.cleared, 0, `typing in a <${tag}>`);
+      assert.equal(event.defaultPrevented, false, `<${tag}> keeps its Esc`);
+    }
+    // A <div contenteditable> (or anything inside one) is a text field too.
+    h.key('Escape', element('div', { isContentEditable: true }));
+    assert.equal(h.sequences.cleared, 0, 'typing in a contenteditable');
   } finally {
     h.restore();
   }

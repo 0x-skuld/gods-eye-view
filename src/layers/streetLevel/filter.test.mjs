@@ -6,6 +6,7 @@ import {
   resolveFilter,
   sameFilter,
 } from './filter.js';
+import { MAX_SINCE_DAYS } from './policy.js';
 
 const DAY = 86_400_000;
 
@@ -79,5 +80,22 @@ test('sameFilter compares the stored form', () => {
   assert.equal(
     sameFilter({ pano: 'all', sinceDays: 0 }, { pano: 'all', sinceDays: 1 }),
     false,
+  );
+});
+
+test('normalizeFilter takes "any date" (0 days) over a current window (share-link defaults)', () => {
+  // Dragging SINCE back to ANY DATE, or a link that says so, must stick.
+  assert.equal(
+    normalizeFilter({ sinceDays: 0 }, { pano: 'all', sinceDays: 365 })
+      .sinceDays,
+    0,
+  );
+  assert.equal(
+    normalizeFilter(
+      { sinceDays: MAX_SINCE_DAYS },
+      { pano: 'all', sinceDays: 0 },
+    ).sinceDays,
+    MAX_SINCE_DAYS,
+    'the longest window is kept whole',
   );
 });

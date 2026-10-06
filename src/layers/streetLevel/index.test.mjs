@@ -419,3 +419,66 @@ test('the Mapillary provider hands the lookup signal to its source (review IC8 P
   );
   assert.equal(requests[0]?.signal, signal);
 });
+
+test('setParams takes "any date" (0 days) and a provider switch over the current values (share-link defaults)', async (t) => {
+  const provider = fakeProvider();
+  const { layer } = await enabledLayer(t, [provider]);
+  layer.setParams({ pano: 'flat', sinceDays: 365 });
+  assert.equal(layer.getParams().sinceDays, 365);
+  layer.setParams({ sinceDays: 0 });
+  assert.deepEqual(layer.getParams(), {
+    mapillary: true,
+    pano: 'flat',
+    sinceDays: 0,
+  });
+  assert.equal(
+    provider.filters.at(-1).sinceMs,
+    null,
+    'providers drop the cut-off',
+  );
+  layer.setParams({ mapillary: false });
+  assert.equal(layer.getParams().mapillary, false);
+});
+
+/** A layer initialised on a stand-in viewer but never enabled. */
+function initialisedLayer(t, providers) {
+  const saved = globalThis.document;
+  const drawing = new Proxy({}, { get: () => () => ({ addColorStop() {} }) });
+  globalThis.document = Object.assign(new EventTarget(), {
+    createElement: () => ({ getContext: () => drawing }),
+  });
+  const viewer = fakeViewer();
+  const layer = createStreetLevelLayer({ providers });
+  layer.init(viewer);
+  t.after(() => {
+    layer.destroy();
+    globalThis.document = saved;
+  });
+  return { layer, viewer };
+}
+
+test('switching a provider on while the layer is off activates nothing (M01)', async (t) => {
+  const provider = fakeProvider();
+  const prewarmed = [];
+  const create = provider.create;
+  provider.create = (context) => {
+    const instance = create(context);
+    instance.viewer.prewarm = async (host) => prewarmed.push(host);
+    return instance;
+  };
+  const { layer, viewer } = initialisedLayer(t, [provider]);
+  layer.attachViewerHost({});
+  layer.setProviderEnabled('mapillary', false);
+  layer.setProviderEnabled('mapillary', true);
+  layer.setParams({ mapillary: false });
+  layer.setParams({ mapillary: true });
+  await new Promise((resolve) => setTimeout(resolve, 40)); // past whenIdle
+  assert.equal(provider.calls.activate, 0, 'no coverage drawn');
+  assert.deepEqual(viewer.credits, [], 'no credit shown');
+  assert.deepEqual(prewarmed, [], 'no viewer stood up');
+  assert.equal(layer.getUIState().providers[0].on, true, 'the switch is kept');
+  // Enabling the layer is what activates it, once.
+  layer.enable(viewer);
+  assert.equal(provider.calls.activate, 1);
+  assert.equal(viewer.credits.length, 1);
+});

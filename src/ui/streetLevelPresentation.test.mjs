@@ -100,6 +100,23 @@ test('a key Mapillary rejected reads KEY REJECTED and names the fix (review IC8 
   assert.equal(view.providers[0].title, `Mapillary: ${error}`);
 });
 
+test('a key problem outranks loading on the pill: KEY REJECTED, then KEY REQUIRED (M65)', () => {
+  // A keyless provider can still report loading (its status check, a retry):
+  // the pill must say what is wrong, not that something is on its way.
+  const loading = { enabled: true, coverage: { loading: true } };
+  assert.equal(
+    presentStreetLevelPanel(snapshot({ ...loading, keyRequired: true })).status
+      .text,
+    'KEY REQUIRED',
+  );
+  assert.equal(
+    presentStreetLevelPanel(
+      snapshot({ ...loading, keyRequired: true, keyRejected: true }),
+    ).status.text,
+    'KEY REJECTED',
+  );
+});
+
 test('the header pill is the on/off switch and reads OFF, LOADING or ON', () => {
   assert.deepEqual(presentStreetLevelPanel(snapshot()).status, {
     text: 'OFF',

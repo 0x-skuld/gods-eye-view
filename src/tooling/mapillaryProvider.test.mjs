@@ -13,7 +13,9 @@ import * as tiles from '../../server/providers/mapillary/tiles.js';
 import {
   TILE_DISK_FILE_OVERHEAD_BYTES,
   TILE_MAX_BYTES,
+  TILE_MEMORY_BUDGET_BYTES,
   TILE_MEMORY_ENTRY_OVERHEAD_BYTES,
+  TILE_RATE_LIMIT_MAX_HOLD_MS,
   TILE_ROUTE_MAX_PER_MIN,
   TILE_UPSTREAM_CONCURRENCY,
 } from '../../server/providers/mapillary/constants.js';
@@ -258,6 +260,45 @@ test('a 429 passes its Retry-After on and holds misses until it is over (review 
     },
   );
 });
+
+for (const [why, retryAfter] of [
+  ['seconds', () => '999999'],
+  ['an HTTP date', () => new Date(Date.now() + 365 * 24 * HOUR).toUTCString()],
+])
+  test(`a far-off Retry-After (${why}) holds misses for at most TILE_RATE_LIMIT_MAX_HOLD_MS`, async (t) => {
+    const maxSec = TILE_RATE_LIMIT_MAX_HOLD_MS / 1000;
+    await withUpstream(
+      () =>
+        new Response('{}', {
+          status: 429,
+          headers: { 'Retry-After': retryAfter() },
+        }),
+      async ({ calls, call }) => {
+        const first = await call('/api/mapillary/tiles', '/coverage/14/5/5');
+        assert.equal(first.statusCode, 429);
+        assert.equal(first.headers['retry-after'], String(maxSec));
+        assert.equal(json(first).retryAfter, maxSec);
+        const now = Date.now();
+        t.mock.method(
+          Date,
+          'now',
+          () => now + TILE_RATE_LIMIT_MAX_HOLD_MS - 5000,
+        );
+        const held = await call('/api/mapillary/tiles', '/coverage/14/6/6');
+        assert.equal(held.statusCode, 429);
+        assert.ok(
+          json(held).retryAfter <= 5,
+          'the hold counts down from the cap',
+        );
+        assert.equal(calls.length, 1, 'held: Mapillary is not asked again');
+        Date.now.mock.mockImplementation(
+          () => now + TILE_RATE_LIMIT_MAX_HOLD_MS + 1000,
+        );
+        await call('/api/mapillary/tiles', '/coverage/14/6/6');
+        assert.equal(calls.length, 2, 'asked again once the capped hold ends');
+      },
+    );
+  });
 
 test('normalizeTileAddress enforces layer names, zoom ranges and tile bounds', () => {
   assert.equal(
@@ -598,6 +639,45 @@ test('the upstream tile fetch is cancelled once every waiter has left', async ()
     await waitFor(() => upstream.length === 2, 'a fresh fetch');
     upstream[1].release();
     assert.equal((await again).source, 'upstream');
+  });
+});
+
+test('a request arriving before a cancelled fetch has wound down starts a fresh one', async () => {
+  const tile = { layer: 'coverage', z: 13, x: 130, y: 100 };
+  await withDeferredUpstream([tile], async ({ body, settle }) => {
+    // A real fetch rejects some time after its abort; until then the
+    // cancelled flight is still registered for its tile.
+    const upstream = [];
+    globalThis.fetch = (url, { signal } = {}) =>
+      new Promise((resolve, reject) => {
+        const call = { aborted: false };
+        call.release = () => resolve(new Response(body, { status: 200 }));
+        call.windDown = () => reject(signal.reason);
+        signal?.addEventListener('abort', () => (call.aborted = true), {
+          once: true,
+        });
+        upstream.push(call);
+      });
+    const first = new AbortController();
+    const a = fetchTile(tile, { signal: first.signal });
+    await waitFor(() => upstream.length === 1, 'the upstream fetch');
+    first.abort();
+    await assert.rejects(a, { name: 'AbortError' });
+    assert.equal(upstream[0].aborted, true, 'the last waiter cancelled it');
+    // Joining the cancelled flight would end in its AbortError (a 502).
+    const b = fetchTile(tile);
+    await waitFor(() => upstream.length === 2, 'a fresh upstream fetch');
+    // The cancelled flight winding down must not unregister the fresh one.
+    upstream[0].windDown();
+    await settle();
+    const c = fetchTile(tile);
+    await settle();
+    assert.equal(upstream.length, 2, 'a third request joins the fresh fetch');
+    upstream[1].release();
+    const fresh = await b;
+    assert.equal(fresh.source, 'upstream');
+    assert.deepEqual(listTileLayers(fresh.bytes), ['sequence']);
+    assert.equal((await c).source, 'inflight');
   });
 });
 
@@ -1008,6 +1088,126 @@ test('empty tiles are charged against the memory budget (review gekh)', async ()
         entries: 3,
         bytes: 3 * TILE_MEMORY_ENTRY_OVERHEAD_BYTES,
       });
+    },
+  );
+});
+
+/** A one-layer tile of exactly `size` bytes (a big opaque payload). */
+function tileOfSize(size) {
+  const probe = tile([{ name: 'sequence', payload: Buffer.alloc(size) }]);
+  const bytes = tile([
+    { name: 'sequence', payload: Buffer.alloc(2 * size - probe.length) },
+  ]);
+  assert.equal(bytes.length, size);
+  return bytes;
+}
+
+/**
+ * Serve each address's big tile from a scripted upstream, with disk writes
+ * off: a tile memory dropped can only come back from Mapillary.
+ */
+async function withBigTiles(t, bodies, run) {
+  for (const address of bodies.keys())
+    await fsp.rm(tileFile(address), { force: true });
+  t.mock.method(fsp, 'writeFile', async () => {
+    throw new Error('disk writes are off in this test');
+  });
+  t.mock.method(console, 'warn', () => {});
+  const byPath = new Map(
+    [...bodies].map(([{ z, x, y }, body]) => [`/2/${z}/${x}/${y}?`, body]),
+  );
+  await withUpstream(
+    (_n, url) => {
+      const [, body] = [...byPath].find(([key]) => url.includes(key));
+      return new Response(body, { status: 200 });
+    },
+    ({ calls }) => {
+      const fetched = (address) =>
+        calls.filter((url) =>
+          url.includes(`/2/${address.z}/${address.x}/${address.y}?`),
+        ).length;
+      return run({ fetched });
+    },
+  );
+}
+
+test('the memory cache evicts the least recently used tile, not the oldest fetched', async (t) => {
+  const MB = 1024 * 1024;
+  // Three fit in the budget, a fourth does not.
+  const size = 30 * MB;
+  const cost = size + TILE_MEMORY_ENTRY_OVERHEAD_BYTES;
+  assert.ok(3 * cost <= TILE_MEMORY_BUDGET_BYTES);
+  assert.ok(4 * cost > TILE_MEMORY_BUDGET_BYTES);
+  const body = tileOfSize(size);
+  const [a, b, c, d] = [20, 21, 22, 23].map((x) => ({
+    layer: 'coverage',
+    z: 14,
+    x,
+    y: 20,
+  }));
+  await withBigTiles(
+    t,
+    new Map([a, b, c, d].map((address) => [address, body])),
+    async ({ fetched }) => {
+      for (const address of [a, b, c])
+        assert.equal((await fetchTile(address)).source, 'upstream');
+      assert.deepEqual(tiles._tileMemoryForTest(), {
+        entries: 3,
+        bytes: 3 * cost,
+      });
+      // A is used again, so B is now the least recently used.
+      assert.equal((await fetchTile(a)).source, 'memory');
+      assert.equal((await fetchTile(d)).source, 'upstream');
+      assert.deepEqual(tiles._tileMemoryForTest(), {
+        entries: 3,
+        bytes: 3 * cost,
+      });
+      for (const address of [a, c, d])
+        assert.equal(
+          (await fetchTile(address)).source,
+          'memory',
+          `${address.x} kept`,
+        );
+      // B was evicted; asking for it again goes back to Mapillary.
+      assert.equal((await fetchTile(b)).source, 'upstream');
+      assert.equal(fetched(b), 2);
+      assert.equal(fetched(a), 1);
+    },
+  );
+});
+
+test('a tile costing more than half the memory budget is served but not kept', async (t) => {
+  const half = TILE_MEMORY_BUDGET_BYTES / 2;
+  // At exactly half the budget a tile is kept; one byte more and it is not.
+  const fits = tileOfSize(half - TILE_MEMORY_ENTRY_OVERHEAD_BYTES);
+  const tooBig = tileOfSize(half - TILE_MEMORY_ENTRY_OVERHEAD_BYTES + 1);
+  assert.ok(tooBig.length <= TILE_MAX_BYTES, 'within the upstream size cap');
+  const small = { layer: 'coverage', z: 14, x: 24, y: 20 };
+  const kept = { layer: 'coverage', z: 14, x: 25, y: 20 };
+  const big = { layer: 'coverage', z: 14, x: 26, y: 20 };
+  await withBigTiles(
+    t,
+    new Map([
+      [small, tile([{ name: 'sequence' }])],
+      [kept, fits],
+      [big, tooBig],
+    ]),
+    async ({ fetched }) => {
+      await fetchTile(small);
+      const before = tiles._tileMemoryForTest();
+      const served = await fetchTile(big);
+      assert.equal(served.source, 'upstream');
+      assert.equal(served.bytes.length, tooBig.length, 'served in full');
+      assert.deepEqual(
+        tiles._tileMemoryForTest(),
+        before,
+        'nothing evicted to make room',
+      );
+      assert.equal((await fetchTile(small)).source, 'memory');
+      assert.equal((await fetchTile(big)).source, 'upstream', 'not kept');
+      assert.equal(fetched(big), 2);
+      assert.equal((await fetchTile(kept)).source, 'upstream');
+      assert.equal((await fetchTile(kept)).source, 'memory', 'half fits');
     },
   );
 });

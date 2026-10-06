@@ -108,6 +108,49 @@ test('a box across the date line takes tiles on both sides of it, not the far si
   assert.ok(limited.every((tile) => tile.x <= 8 || tile.x >= 247));
 });
 
+test('a box across the date line ranks the tiles at the line first, without and with a focus', () => {
+  const z = 14;
+  const n = 2 ** z;
+  const bbox = [179.9, 0, -179.9, 0.1];
+  const key = (t) => `${t.x}/${t.y}`;
+  const keys = (list) => new Set(list.map(key));
+  const [north, south] = [latToTileY(0.1, z), latToTileY(0, z)];
+  const plain = tilesForBbox(bbox, z);
+  assert.equal(plain.total, 10 * (south - north + 1), '5 columns either side');
+  // The box centre is the date line itself, not the middle of the map: the
+  // middle two rows of the columns touching it come first, then the ring
+  // around them, all within two columns of the line.
+  const [mid1, mid2] = [(north + south - 1) / 2, (north + south + 1) / 2];
+  assert.deepEqual(
+    keys(plain.tiles.slice(0, 4)),
+    new Set([`${n - 1}/${mid1}`, `${n - 1}/${mid2}`, `0/${mid1}`, `0/${mid2}`]),
+  );
+  for (const tile of plain.tiles.slice(4, 12))
+    assert.ok(
+      [n - 2, n - 1, 0, 1].includes(tile.x),
+      `${key(tile)} near the line`,
+    );
+  // A line of sight across the date line just north of the equator: the two
+  // tiles it crosses come first, then the two in the row below them.
+  const row = latToTileY(0.05, z);
+  const from = { lon: 179.99, lat: 0.05 };
+  const to = { lon: -179.99, lat: 0.05 };
+  for (const focus of [
+    { from, to },
+    { from: to, to: from },
+  ]) {
+    const ranked = tilesForBbox(bbox, z, { focus }).tiles;
+    assert.deepEqual(
+      keys(ranked.slice(0, 2)),
+      new Set([`${n - 1}/${row}`, `0/${row}`]),
+    );
+    assert.deepEqual(
+      keys(ranked.slice(2, 4)),
+      new Set([`${n - 1}/${row + 1}`, `0/${row + 1}`]),
+    );
+  }
+});
+
 test('a focus ranks tiles along the line of sight, not from the box centre (review IC8 P1)', () => {
   // A box that runs far north of the camera, as a tilted view's does: the
   // box centre is kilometres from both the camera and the screen centre.

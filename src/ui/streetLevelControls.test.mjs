@@ -19,6 +19,22 @@ import { fakeStreetLevelProvider } from '../testSupport/streetLevelFakes.mjs';
  */
 const mutations = { count: 0 };
 const REFLECTED = ['hidden', 'disabled', 'textContent', 'title', 'value'];
+/** The reflected properties a MutationObserver sees, as the record it gets. */
+const REFLECTED_RECORDS = {
+  hidden: { type: 'attributes', attributeName: 'hidden' },
+  disabled: { type: 'attributes', attributeName: 'disabled' },
+  title: { type: 'attributes', attributeName: 'title' },
+  textContent: { type: 'childList' },
+};
+
+/** The fake MutationObservers currently observing (see fakeMutationObserver). */
+const liveObservers = new Set();
+
+/** Queue a mutation record for every observer whose options cover it. */
+function recordMutation(target, { type, attributeName = null }) {
+  for (const observer of liveObservers)
+    observer.consider(target, type, attributeName);
+}
 
 class FakeNode {
   constructor(document, tag, { id = null, dataset = {}, classes = [] } = {}) {
@@ -42,18 +58,30 @@ class FakeNode {
         set: (value) => {
           mutations.count++;
           this.props[key] = value;
+          if (REFLECTED_RECORDS[key])
+            recordMutation(this, REFLECTED_RECORDS[key]);
         },
       });
     this.attributes = new Map();
     const names = new Set(classes);
+    // Every DOMTokenList write sets the class attribute, changed or not.
+    const classChanged = () =>
+      recordMutation(this, { type: 'attributes', attributeName: 'class' });
     this.classList = {
-      add: (name) => names.add(name),
-      remove: (name) => names.delete(name),
+      add: (name) => {
+        names.add(name);
+        classChanged();
+      },
+      remove: (name) => {
+        names.delete(name);
+        classChanged();
+      },
       contains: (name) => names.has(name),
       toggle: (name, force) => {
         const on = force ?? !names.has(name);
         if (on) names.add(name);
         else names.delete(name);
+        classChanged();
         return on;
       },
     };
@@ -73,32 +101,59 @@ class FakeNode {
         names.clear();
         for (const name of String(value).split(/\s+/).filter(Boolean))
           names.add(name);
+        classChanged();
       },
     });
   }
   get childElementCount() {
     return this.children.length;
   }
+  get parentNode() {
+    return this.parent;
+  }
+  get nextSibling() {
+    if (!this.parent) return null;
+    const siblings = this.parent.children;
+    return siblings[siblings.indexOf(this) + 1] || null;
+  }
+  /**
+   * As layout reports it: null when this node or an ancestor is hidden (no
+   * box), or when it is not in the document; else its parent.
+   */
+  get offsetParent() {
+    if (!this.isConnected) return null;
+    for (let node = this; node; node = node.parent)
+      if (node.hidden) return null;
+    return this.parent;
+  }
   setAttribute(key, value) {
     mutations.count++;
     this.attributes.set(key, String(value));
+    recordMutation(this, { type: 'attributes', attributeName: key });
   }
   getAttribute(key) {
     return this.attributes.get(key) ?? null;
   }
   removeAttribute(key) {
-    if (this.attributes.delete(key)) mutations.count++;
+    if (!this.attributes.delete(key)) return;
+    mutations.count++;
+    recordMutation(this, { type: 'attributes', attributeName: key });
   }
   appendChild(child) {
     return this.insertBefore(child, null);
   }
+  /** Like the DOM's: a reference that is not a child throws NotFoundError. */
   insertBefore(child, reference) {
+    if (reference != null && reference.parent !== this)
+      throw new DOMException('not a child of this node', 'NotFoundError');
+    if (reference === child) return child;
     child.remove();
     const index = reference
       ? this.children.indexOf(reference)
       : this.children.length;
-    this.children.splice(index < 0 ? this.children.length : index, 0, child);
+    this.children.splice(index, 0, child);
     child.parent = this;
+    recordMutation(this, { type: 'childList' });
     return child;
   }
   append(...nodes) {
@@ -109,9 +164,11 @@ class FakeNode {
     this.append(...nodes);
   }
   remove() {
-    if (!this.parent) return;
-    this.parent.children.splice(this.parent.children.indexOf(this), 1);
+    const parent = this.parent;
+    if (!parent) return;
+    parent.children.splice(parent.children.indexOf(this), 1);
     this.parent = null;
+    recordMutation(parent, { type: 'childList' });
   }
   contains(node) {
     for (let current = node; current; current = current.parent)
@@ -272,7 +329,7 @@ function panelDom() {
   globe.setAttribute('tabindex', '0');
   // A field in another panel (the location search).
   const search = add(document.body, 'input', { id: 'location-search' });
-  return { document, root, globe, search };
+  return { document, root, globe, search, main, wrap, settings };
 }
 
 /** Run `fn` with the fake document and an immediate animation frame. */
@@ -602,6 +659,11 @@ test('Esc shrinks the expanded viewer after focus left it, and the map keeps its
 test('Tab from outside the expanded viewer brings focus back into it', () =>
   withDom(async (dom) => {
     const { controls } = stubPanel(dom, uiState({ open: true }));
+    // A tool hidden in this state (no box, so not a tab stop) ends the bar.
+    const hiddenTool = dom.wrap.appendChild(
+      new FakeNode(dom.document, 'button', { id: 'sl-hidden-tool' }),
+    );
+    hiddenTool.hidden = true;
     controls.setViewerExpanded(true);
     dom.globe.focus();
     keydown(dom.globe, 'Tab');
@@ -614,7 +676,13 @@ test('Tab from outside the expanded viewer brings focus back into it', () =>
     assert.equal(
       dom.document.activeElement,
       wrap.querySelector('#sl-viewer-close'),
-      'Shift+Tab wraps to the last control',
+      'Shift+Tab wraps to the last control, past the hidden one',
+    );
+    keydown(dom.document.activeElement, 'Tab');
+    assert.equal(
+      dom.document.activeElement,
+      wrap.querySelector('#sl-viewer-expand'),
+      'Tab from the last shown control wraps to the first',
     );
     controls.destroy();
   }));
@@ -742,7 +810,12 @@ test('a hidden expanded viewer (Clean View, recording, cockpit) holds neither Es
     controls.destroy();
   }));
 
-/** A MutationObserver stand-in the test fires by hand. */
+/**
+ * A MutationObserver stand-in. Like the real one it queues only the records
+ * its `observe` options cover (childList, attributes / attributeFilter,
+ * subtree) and delivers them in a microtask, only when there are some;
+ * `fire()` delivers what is queued at once.
+ */
 function fakeMutationObserver() {
   const observers = [];
   class FakeMutationObserver {
@@ -750,19 +823,46 @@ function fakeMutationObserver() {
       this.callback = callback;
       this.target = null;
       this.options = null;
+      this.records = [];
       observers.push(this);
     }
-    observe(target, options) {
+    observe(target, options = {}) {
       this.target = target;
-      this.options = options;
+      this.options = {
+        ...options,
+        // Per the spec, an attribute filter implies `attributes`.
+        attributes: options.attributes ?? Boolean(options.attributeFilter),
+      };
+      liveObservers.add(this);
     }
     disconnect() {
       this.target = null;
+      this.records = [];
+      liveObservers.delete(this);
+    }
+    consider(node, type, attributeName) {
+      const { childList, attributes, attributeFilter, subtree } = this.options;
+      const inScope =
+        node === this.target ||
+        (subtree === true && this.target.contains(node));
+      if (!inScope) return;
+      if (type === 'childList' && childList !== true) return;
+      if (type === 'attributes') {
+        if (attributes !== true) return;
+        if (attributeFilter && !attributeFilter.includes(attributeName)) return;
+      }
+      this.records.push({ type, target: node, attributeName });
+      if (this.records.length === 1) queueMicrotask(() => this.deliver());
+    }
+    deliver() {
+      if (!this.target || !this.records.length) return;
+      const records = this.records;
+      this.records = [];
+      this.callback(records, this);
     }
   }
   const fire = () => {
-    for (const observer of observers)
-      if (observer.target) observer.callback([], observer);
+    for (const observer of observers) observer.deliver();
   };
   const watching = () => observers.some((observer) => observer.target);
   return { FakeMutationObserver, fire, watching };
@@ -776,6 +876,7 @@ async function withObserver(fn) {
   try {
     return await fn(fake);
   } finally {
+    liveObservers.clear();
     if (saved === undefined) delete globalThis.MutationObserver;
     else globalThis.MutationObserver = saved;
   }
@@ -970,3 +1071,82 @@ test('under KEY REQUIRED the provider chip stays live and explains the key inste
     assert.match(calls.toasts[0], /^Mapillary: Needs /);
     controls.destroy();
   }));
+
+/* ── The expanded viewer goes back where it came from ──────────────────── */
+
+/** A node by name, so a failed comparison prints a word, not the DOM. */
+const nameOf = (node) =>
+  node ? node.id || node.className || node.tagName.toLowerCase() : null;
+
+/** Where the viewer sits: its parent and the sibling it sits before. */
+const placeOf = (wrap) => [nameOf(wrap.parentNode), nameOf(wrap.nextSibling)];
+const PANEL_PLACE = ['sl-main', 'sl-settings'];
+
+test('shrinking returns the viewer into the panel at its own place', () =>
+  withDom(async (dom) => {
+    const { controls } = stubPanel(dom, uiState({ open: true }));
+    assert.deepEqual(placeOf(dom.wrap), PANEL_PLACE);
+    controls.setViewerExpanded(true);
+    assert.equal(nameOf(dom.wrap.parentNode), 'body', 'lifted out');
+    controls.setViewerExpanded(false);
+    assert.deepEqual(placeOf(dom.wrap), PANEL_PLACE, 'before the settings');
+    assert.equal(dom.main.children.indexOf(dom.wrap), 0);
+    assert.equal(dom.root.contains(dom.wrap), true);
+    // A second round trip lands in the same place.
+    controls.setViewerExpanded(true);
+    controls.setViewerExpanded(false);
+    assert.deepEqual(placeOf(dom.wrap), PANEL_PLACE);
+    controls.destroy();
+  }));
+
+test('an image closed while expanded returns the viewer into the panel', () =>
+  withDom(async (dom) => {
+    const { layer, controls } = stubPanel(dom, uiState({ open: true }));
+    controls.setViewerExpanded(true);
+    layer.publish(uiState({ open: false }));
+    assert.deepEqual(placeOf(dom.wrap), PANEL_PLACE);
+    assert.equal(dom.wrap.hidden, true, 'and hidden there');
+    controls.destroy();
+  }));
+
+test('destroying the panel while expanded returns the viewer into it', () =>
+  withDom(async (dom) => {
+    const { controls } = stubPanel(dom, uiState({ open: true }));
+    controls.setViewerExpanded(true);
+    controls.destroy();
+    assert.deepEqual(placeOf(dom.wrap), PANEL_PLACE);
+    assert.equal(
+      dom.document.body.children.includes(dom.wrap),
+      false,
+      'nothing left on <body>',
+    );
+  }));
+
+test('a <body> child added while the viewer is expanded goes inert with the rest', () =>
+  withObserver((observer) =>
+    withDom(async (dom) => {
+      const { controls } = stubPanel(dom, uiState({ open: true }));
+      controls.setViewerExpanded(true);
+      // A toast, a menu or another panel's popup, appended later.
+      const toast = dom.document.body.appendChild(
+        new FakeNode(dom.document, 'div', { id: 'toast' }),
+      );
+      assert.equal(toast.inert, undefined, 'not before the observer runs');
+      await settle(); // records are delivered in a microtask
+      assert.equal(toast.inert, true);
+      // Changes inside the app are not the modal's business: nothing runs.
+      let syncs = 0;
+      const sync = controls._syncModal.bind(controls);
+      controls._syncModal = () => {
+        syncs++;
+        return sync();
+      };
+      dom.root.querySelector('#sl-status').setAttribute('class', 'x');
+      dom.root.appendChild(new FakeNode(dom.document, 'div'));
+      await settle();
+      assert.equal(syncs, 0);
+      controls.destroy();
+      assert.equal(toast.inert, false, 'destroy releases it too');
+      assert.equal(observer.watching(), false);
+    }),
+  ));

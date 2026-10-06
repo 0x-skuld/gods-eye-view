@@ -26,6 +26,8 @@ import {
 import { LayerStateCoordinator } from './layerStateCoordinator.js';
 import radioLayer from './radio.js';
 import { stampInitialShareGesture } from '../navigationPolicy.js';
+import { MAX_SINCE_DAYS } from '../layers/streetLevel/policy.js';
+import { SINCE_STOPS } from '../ui/streetLevelPresentation.js';
 
 function deferred() {
   let resolve;
@@ -2640,5 +2642,65 @@ test('fire perimeters uses digit 2 without colliding with wind or recent imagery
   assert.deepEqual(
     decodeLayerStateParams(new URLSearchParams(encode(decoded))),
     decoded,
+  );
+});
+
+/** Street Level options decoded from a v2 link with these `lo` assignments. */
+function streetLevelOptions(lo) {
+  const params = new URLSearchParams([
+    ['v', '2'],
+    ['l', '0'],
+  ]);
+  if (lo) params.set('lo', lo);
+  return decodeLayerStateParams(params).options['street-level'];
+}
+
+test('Street Level: every option round-trips through a share link and stored state', () => {
+  const state = createDefaultLayerState();
+  state.enabledLayerIds = ['street-level'];
+  state.options['street-level'] = {
+    mapillary: false,
+    pano: 'flat',
+    sinceDays: MAX_SINCE_DAYS,
+  };
+  const decoded = decodeLayerStateParams(new URLSearchParams(encode(state)));
+  assert.deepEqual(decoded.options['street-level'], {
+    mapillary: false,
+    pano: 'flat',
+    sinceDays: MAX_SINCE_DAYS,
+  });
+  assert.deepEqual(
+    parseStoredLayerState(serializeStoredLayerState(state)).options[
+      'street-level'
+    ],
+    state.options['street-level'],
+  );
+});
+
+test('Street Level: the link codec accepts exactly the windows the filter keeps', () => {
+  // The codec's ceiling is the filter's MAX_SINCE_DAYS: a longer window is
+  // rejected (read as "any date"), the longest one is kept whole.
+  assert.equal(
+    streetLevelOptions(`0.s.${MAX_SINCE_DAYS}`).sinceDays,
+    MAX_SINCE_DAYS,
+  );
+  assert.equal(streetLevelOptions(`0.s.${MAX_SINCE_DAYS + 1}`).sinceDays, 0);
+  // Every SINCE slider stop survives, the LAST 10 YEARS one included.
+  for (const { days } of SINCE_STOPS)
+    assert.equal(streetLevelOptions(`0.s.${days}`).sinceDays, days);
+  assert.equal(streetLevelOptions('0.s.3652').sinceDays, 3652);
+});
+
+test('Street Level: a link without the provider switch keeps Mapillary on', () => {
+  assert.deepEqual(streetLevelOptions(''), {
+    mapillary: true,
+    pano: 'all',
+    sinceDays: 0,
+  });
+  assert.equal(streetLevelOptions('0.p.f').mapillary, true);
+  assert.equal(streetLevelOptions('0.m.0').mapillary, false);
+  assert.equal(
+    createDefaultLayerState().options['street-level'].mapillary,
+    true,
   );
 });

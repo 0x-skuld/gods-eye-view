@@ -36,8 +36,11 @@ export function createSelection({ state, parts }) {
    */
   function onKeyDown(event) {
     if (event.key !== 'Escape' || event.defaultPrevented) return;
+    // A text field keeps its Esc, rich-text editors (contenteditable) included.
+    const target = event.target;
     if (
-      event.target?.closest?.(
+      target?.isContentEditable === true ||
+      target?.closest?.(
         '.panel-collapsible, [role="dialog"], input, textarea, select',
       )
     )

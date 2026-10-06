@@ -30,6 +30,11 @@ registerHooks({
 const { createMapillaryViewer } =
   await import('./providers/mapillary/viewer.js');
 
+/**
+ * A viewer host over `adapter`. `marker` records where the position marker
+ * was put (null once cleared), `followed` counts camera-follow updates and
+ * `selected` every sequence the provider was asked to select.
+ */
 function harness(adapter) {
   const state = {
     enabled: true,
@@ -38,17 +43,44 @@ function harness(adapter) {
     street: { host: {}, renderMode: 'letterbox', follow: false },
   };
   const def = { id: 'mapillary', name: 'Mapillary', label: 'MAPILLARY' };
-  state.providers.set('mapillary', { def, instance: { viewer: adapter } });
+  const selected = [];
+  let selectedId = null;
+  const instance = {
+    viewer: adapter,
+    selectSequence(id) {
+      selected.push(id);
+      selectedId = id;
+    },
+    sequenceStats: () => ({ selectedId }),
+  };
+  state.providers.set('mapillary', { def, instance });
   const framing = { started: 0, cancelled: 0 };
+  const marker = [];
+  const followed = { count: 0 };
   const parts = {
-    marker: { set() {}, clear() {} },
+    marker: {
+      set: (position, bearing) =>
+        marker.push(position && { position, bearing }),
+      clear: () => marker.push(null),
+    },
     follow: {
-      followCamera() {},
+      followCamera: () => followed.count++,
       lookAtPosition: () => framing.started++,
       cancelFraming: () => framing.cancelled++,
     },
   };
-  return { state, framing, host: createViewerHost({ state, parts }) };
+  return {
+    state,
+    framing,
+    marker,
+    followed,
+    selected,
+    /** Esc on the map: the provider drops its selected sequence. */
+    clearSequence() {
+      selectedId = null;
+    },
+    host: createViewerHost({ state, parts }),
+  };
 }
 
 /**
@@ -56,7 +88,7 @@ function harness(adapter) {
  * construction (`gate` holds it open) and `unmount` destroys the viewer that
  * every later `open` needs.
  */
-function fakeAdapter({ failMounts = 0, gate = null } = {}) {
+function fakeAdapter({ failMounts = 0, gate = null, openGate = null } = {}) {
   const calls = { mount: 0, open: [], unmount: 0, listeners: 0 };
   let emit = null;
   let mounted = false;
@@ -70,7 +102,7 @@ function fakeAdapter({ failMounts = 0, gate = null } = {}) {
       mounted = true;
     },
     /** A pose event from the library, as MapillaryJS fires them. */
-    emitPose(id) {
+    emitPose(id, overrides = {}) {
       emit?.({
         providerId: 'mapillary',
         imageId: id,
@@ -79,12 +111,15 @@ function fakeAdapter({ failMounts = 0, gate = null } = {}) {
         bearing: 90,
         isPano: false,
         externalUrl: `https://example.test/${id}`,
+        ...overrides,
       });
     },
+    /** Like MapillaryJS: the image event comes first, then `moveTo` settles. */
     async open(id) {
       if (!mounted) throw new Error('viewer is not mounted');
       calls.open.push(id);
       this.emitPose(id);
+      await openGate?.promise;
     },
     close() {},
     unmount() {
@@ -220,10 +255,115 @@ test('switching the layer off and on during a cold first open keeps the shared v
   assert.equal(state.street.imageId, 'c');
 });
 
-/** MapillaryJS, counting live viewers (each holds a WebGL context). */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test('every pose the viewer reports moves the marker and the followed camera', async () => {
+  const adapter = fakeAdapter();
+  const { state, host, marker, followed } = harness(adapter);
+  await host.open('mapillary', 'a');
+  assert.deepEqual(marker, [{ position: { lon: 1, lat: 2 }, bearing: 90 }]);
+  assert.equal(followed.count, 1);
+  // The user walks on, with FOLLOW on: the globe camera goes along.
+  state.street.follow = true;
+  adapter.emitPose('b', { position: { lon: 3, lat: 4 }, bearing: 180 });
+  assert.deepEqual(marker.at(-1), {
+    position: { lon: 3, lat: 4 },
+    bearing: 180,
+  });
+  assert.equal(followed.count, 2);
+  // Looking around in place is a pose too.
+  adapter.emitPose('b', { position: { lon: 3, lat: 4 }, bearing: 270 });
+  assert.equal(marker.at(-1).bearing, 270);
+  assert.equal(followed.count, 3);
+});
+
+test('a pose on another sequence selects it, but not while the image still loads', async () => {
+  const openGate = deferred();
+  const adapter = fakeAdapter({ openGate });
+  const { state, host, selected, clearSequence } = harness(adapter);
+  const opening = host.open('mapillary', 'a');
+  await settle();
+  assert.equal(state.street.loading, true, 'the image is downloading');
+  assert.equal(state.street.sequenceId, 'seq-a', 'its pose is in');
+  assert.deepEqual(selected, [], 'no sequence lookup competes with it');
+  openGate.resolve();
+  assert.equal(await opening, true);
+  assert.deepEqual(selected, ['seq-a']);
+  // Stepping onto the next sequence (an arrow at a junction) selects it …
+  adapter.emitPose('b');
+  assert.deepEqual(selected, ['seq-a', 'seq-b']);
+  // … and walking along it does not ask again.
+  adapter.emitPose('c', { sequenceId: 'seq-b' });
+  assert.deepEqual(selected, ['seq-a', 'seq-b']);
+  // Once Esc cleared it, looking around on the same sequence leaves it so.
+  clearSequence();
+  adapter.emitPose('c', { sequenceId: 'seq-b', bearing: 10 });
+  assert.deepEqual(selected, ['seq-a', 'seq-b']);
+});
+
+test('closing the photo clears the marker', async () => {
+  const adapter = fakeAdapter();
+  const { host, marker } = harness(adapter);
+  await host.open('mapillary', 'a');
+  assert.notEqual(marker.at(-1), null);
+  host.close();
+  assert.equal(marker.at(-1), null);
+});
+
+test('an open still mounting when the photo is closed does nothing when the mount lands', async () => {
+  const gate = deferred();
+  const adapter = fakeAdapter({ gate });
+  const { state, host, framing, selected } = harness(adapter);
+  const opening = host.open('mapillary', 'a'); // MapillaryJS still loading
+  await settle();
+  host.close();
+  gate.resolve();
+  assert.equal(await opening, false);
+  assert.deepEqual(adapter.calls.open, [], 'the image is never opened');
+  assert.equal(framing.started, 0, 'the globe does not fly to it');
+  assert.deepEqual(selected, []);
+  assert.deepEqual(
+    [state.street.open, state.street.loading, state.street.imageId],
+    [false, false, null],
+  );
+  // The mounted viewer serves the next open.
+  assert.equal(await host.open('mapillary', 'b'), true);
+  assert.equal(state.street.imageId, 'b');
+});
+
+test('an image still opening when the photo is closed is neither framed nor selected', async () => {
+  const openGate = deferred();
+  const adapter = fakeAdapter({ openGate });
+  const { state, host, framing, selected } = harness(adapter);
+  const opening = host.open('mapillary', 'a');
+  await settle();
+  assert.deepEqual(adapter.calls.open, ['a'], 'the image is downloading');
+  host.close();
+  openGate.resolve();
+  assert.equal(await opening, false);
+  assert.equal(framing.started, 0, 'the globe does not fly to it');
+  assert.deepEqual(selected, []);
+  assert.deepEqual(
+    [state.street.open, state.street.loading, state.street.imageId],
+    [false, false, null],
+  );
+});
+
+/**
+ * MapillaryJS, counting live viewers (each holds a WebGL context). A test can
+ * hold `moveTo(id)` on `viewers.moveGates.get(id)` and every position read on
+ * `viewers.positionGate`, and fire a viewer's events through `handlers`.
+ */
 function fakeLibrary() {
   const gate = deferred();
-  const viewers = { created: 0, live: 0, instances: [] };
+  const viewers = {
+    created: 0,
+    live: 0,
+    instances: [],
+    moveGates: new Map(),
+    moves: [],
+    positionGate: null,
+  };
   class Viewer {
     constructor() {
       viewers.created++;
@@ -231,21 +371,27 @@ function fakeLibrary() {
       viewers.instances.push(this);
       this.removed = false;
       this.playback = { stops: 0 };
+      this.handlers = {};
     }
     /** The sequence component's play/stop API, as MapillaryJS 4 exposes it. */
     getComponent(name) {
       if (name !== 'sequence') return undefined;
       return { stop: () => this.playback.stops++ };
     }
-    on() {}
+    on(type, handler) {
+      this.handlers[type] = handler;
+    }
     async getPosition() {
+      await viewers.positionGate?.promise;
       return { lng: 1, lat: 2 };
     }
     async getPointOfView() {
       return { bearing: 10, tilt: 0 };
     }
     async moveTo(id) {
-      return { id, cameraType: 'perspective', sequenceId: 's' };
+      viewers.moves.push(id);
+      await viewers.moveGates.get(id)?.promise;
+      return { id, cameraType: 'perspective', sequenceId: `seq-${id}` };
     }
     remove() {
       if (this.removed) return;
@@ -336,4 +482,68 @@ test('closing the photo or switching the layer off stops its framing flight (rev
   assert.equal(framing.cancelled, 1, 'another provider leaves it alone');
   host.unmount();
   assert.equal(framing.cancelled, 2, 'layer off: likewise');
+});
+
+/** The real Mapillary adapter, mounted on a ready library, and its poses. */
+async function mountedMapillary() {
+  const library = fakeLibrary();
+  library.gate.resolve();
+  const adapter = createMapillaryViewer({ source: { token: 't' } });
+  const poses = [];
+  adapter.onPose((pose) => poses.push(pose));
+  await adapter.mount({});
+  return { ...library, adapter, poses };
+}
+
+test('a Mapillary pose still being read when the photo closes is never emitted (M57)', async () => {
+  const { viewers, adapter, poses } = await mountedMapillary();
+  await adapter.open('a');
+  assert.deepEqual(
+    poses.map((pose) => pose.imageId),
+    ['a'],
+  );
+  // The library steps to the next image; its position is still being read.
+  const [viewer] = viewers.instances;
+  viewers.positionGate = deferred();
+  viewer.handlers.image({
+    image: { id: 'b', cameraType: 'perspective', sequenceId: 'seq-b' },
+  });
+  adapter.close();
+  viewers.positionGate.resolve();
+  await settle();
+  assert.deepEqual(
+    poses.map((pose) => pose.imageId),
+    ['a'],
+    'the closed photo does not come back',
+  );
+});
+
+test('a Mapillary image overtaken by a newer open emits no pose when it lands (M58)', async () => {
+  const { viewers, adapter, poses } = await mountedMapillary();
+  const gateA = deferred();
+  const gateB = deferred();
+  viewers.moveGates.set('a', gateA);
+  viewers.moveGates.set('b', gateB);
+  const openA = adapter.open('a');
+  await settle(); // A's image is downloading …
+  const openB = adapter.open('b'); // … when the user picks another one
+  gateA.resolve();
+  await openA;
+  assert.deepEqual(poses, [], 'nothing for the image the user left');
+  gateB.resolve();
+  await openB;
+  assert.deepEqual(
+    poses.map((pose) => [pose.imageId, pose.sequenceId]),
+    [['b', 'seq-b']],
+  );
+});
+
+test('back-to-back Mapillary opens download only the newer image', async () => {
+  const { viewers, adapter, poses } = await mountedMapillary();
+  await Promise.all([adapter.open('a'), adapter.open('b')]);
+  assert.deepEqual(viewers.moves, ['b']);
+  assert.deepEqual(
+    poses.map((pose) => pose.imageId),
+    ['b'],
+  );
 });

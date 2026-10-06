@@ -3,6 +3,7 @@ import test from 'node:test';
 import * as Cesium from 'cesium';
 import {
   cameraHeightAboveGround,
+  createHorizonCull,
   metresBetween,
   viewCentre,
   viewFocus,
@@ -166,4 +167,101 @@ test('metresBetween measures the short way round the date line (review IC8 P2)',
       metresBetween({ lon: 10, lat: 0 }, { lon: 10.001, lat: 0 }) - 111.32,
     ) < 1e-9,
   );
+});
+
+/**
+ * A horizon cull over `items` for a camera the test moves, with the frame's
+ * pre-render listeners and a count of the points tested against the horizon.
+ */
+function cullHarness(t, items) {
+  const visible = t.mock.method(
+    Cesium.EllipsoidalOccluder.prototype,
+    'isPointVisible',
+  );
+  const preRender = new Set();
+  const camera = { positionWC: Cesium.Cartesian3.fromDegrees(0, 0, 1e7) };
+  const viewer = {
+    camera,
+    scene: {
+      preRender: {
+        addEventListener(listener) {
+          preRender.add(listener);
+          return () => preRender.delete(listener);
+        },
+      },
+    },
+  };
+  let changes = 0;
+  const cull = createHorizonCull({
+    getViewer: () => viewer,
+    items: () => items,
+    onChange: () => changes++,
+  });
+  return {
+    cull,
+    preRender,
+    tested: () => visible.mock.callCount(),
+    changes: () => changes,
+    frame: () => {
+      for (const listener of [...preRender]) listener();
+    },
+    // Moved in place, as Cesium updates positionWC.
+    moveTo: (lon, lat) =>
+      Cesium.Cartesian3.fromDegrees(
+        lon,
+        lat,
+        1e7,
+        undefined,
+        camera.positionWC,
+      ),
+  };
+}
+
+const point = (lon, lat) => ({
+  position: Cesium.Cartesian3.fromDegrees(lon, lat),
+  show: true,
+});
+
+test('the horizon cull does no work while the camera stands still', (t) => {
+  const near = point(0, 0);
+  const far = point(180, 0);
+  const h = cullHarness(t, [near, far]);
+  h.cull.update();
+  assert.equal(h.tested(), 2);
+  assert.deepEqual([near.show, far.show], [true, false]);
+  assert.equal(h.preRender.size, 1, 'listening for camera moves');
+  for (let i = 0; i < 5; i++) h.frame();
+  assert.equal(h.tested(), 2, 'a still camera re-culls nothing');
+  h.moveTo(180, 0);
+  h.frame();
+  assert.equal(h.tested(), 4, 'a moved camera re-culls everything once');
+  assert.deepEqual([near.show, far.show], [false, true]);
+  h.frame();
+  h.frame();
+  assert.equal(h.tested(), 4, 'and then rests again');
+  h.cull.stop();
+  assert.equal(h.preRender.size, 0);
+});
+
+test('the horizon cull stops listening once nothing is left, and starts again for new items', (t) => {
+  const items = [point(0, 0)];
+  const h = cullHarness(t, items);
+  h.cull.update();
+  assert.equal(h.preRender.size, 1);
+  // Every item goes (the tiles are dropped); the next camera move finds none.
+  items.length = 0;
+  h.moveTo(10, 0);
+  h.frame();
+  assert.equal(h.preRender.size, 0, 'the listener is removed');
+  // New items arrive: they are culled now, and camera moves are watched again.
+  const far = point(-170, 0);
+  items.push(far);
+  h.cull.update([far]);
+  assert.equal(far.show, false, 'culled on arrival');
+  assert.equal(h.preRender.size, 1, 'the listener is back');
+  h.moveTo(-170, 0);
+  h.frame();
+  assert.equal(far.show, true, 're-culled when the camera moves');
+  assert.equal(h.changes(), 2, 'a redraw for each change');
+  h.cull.stop();
 });
