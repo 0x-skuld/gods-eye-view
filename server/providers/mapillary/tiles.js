@@ -20,7 +20,7 @@ import {
   mapillaryToken,
 } from './constants.js';
 
-/** Log a background failure without its stack (never the token: none is in scope). */
+/** Log without the stack; the token is never in scope here. */
 function warn(what, error) {
   console.warn(`[Mapillary Proxy] ${what}:`, error?.message || error);
 }
@@ -34,10 +34,7 @@ export class TileRequestError extends Error {
   }
 }
 
-/**
- * Thrown when Mapillary answered with an error status. A 401/403 means the
- * token was rejected (`keyRejected`); a 429 carries how long to wait.
- */
+/** Mapillary answered with an error status; 401/403 set `keyRejected`. */
 export class TileUpstreamError extends Error {
   constructor(status, message, { retryAfterSec = null } = {}) {
     super(message || `Mapillary tiles HTTP ${status}`);
@@ -49,9 +46,8 @@ export class TileUpstreamError extends Error {
 }
 
 /**
- * The last refusal from Mapillary that every tile miss shares: a rejected
- * token (until the token changes or the hold ends) or a rate limit (until its
- * Retry-After). Cached tiles are still served meanwhile.
+ * A rejected token or rate limit that answers every tile miss until it expires
+ * (or the token changes). Cached tiles are still served meanwhile.
  * @type {{status: number, until: number, token: string}|null}
  */
 let _upstreamHold = null;
@@ -66,7 +62,6 @@ function retryAfterMs(header, now = Date.now()) {
   return Math.min(ms, TILE_RATE_LIMIT_MAX_HOLD_MS);
 }
 
-/** The refusal to answer a miss with, while one holds for this token. */
 function heldRefusal(token) {
   const hold = _upstreamHold;
   if (!hold) return null;
@@ -81,8 +76,7 @@ function heldRefusal(token) {
 }
 
 /**
- * Validate and normalize a tile address. Layer names are the proxy's public
- * ids (coverage only); zoom must be inside one of the layer's zoom ranges.
+ * Validate a tile address against the layer's zoom ranges.
  * @returns {{layer:string, upstream:string, z:number, x:number, y:number, key:string}}
  */
 export function normalizeTileAddress({ layer, z, x, y }) {
@@ -116,13 +110,11 @@ export function normalizeTileAddress({ layer, z, x, y }) {
 
 /** @type {Map<string, {bytes: Buffer, at: number}>} insertion-ordered LRU */
 const _memory = new Map();
-/** Charged bytes: every entry's size plus a fixed overhead (empty tiles too). */
 let _memoryBytes = 0;
 const memoryCost = (bytes) => bytes.length + TILE_MEMORY_ENTRY_OVERHEAD_BYTES;
 /**
- * Upstream fetches in progress, shared by every request for the same tile.
- * A flight owns its controller; callers only count as waiters, and the last
- * waiter to leave cancels it (see `joinFlight`).
+ * Upstream fetches shared by every request for the same tile; the last waiter
+ * to leave cancels it (see `joinFlight`).
  * @type {Map<string, {controller: AbortController, promise: Promise<Buffer>, waiters: number}>}
  */
 const _inFlight = new Map();
@@ -130,14 +122,13 @@ const _inFlight = new Map();
 function memoryGet(key) {
   const hit = _memory.get(key);
   if (!hit) return null;
-  // Same 24 h life as the disk copy: a long-running server must not keep
-  // serving stale (or empty) coverage until eviction.
+  // Same life as the disk copy, so a long-running server never serves stale
+  // coverage.
   if (Date.now() - hit.at > TILE_DISK_TTL_MS) {
     _memory.delete(key);
     _memoryBytes -= memoryCost(hit.bytes);
     return null;
   }
-  // Re-insert to mark as most recently used.
   _memory.delete(key);
   _memory.set(key, hit);
   return hit.bytes;
@@ -164,7 +155,6 @@ function diskPath({ layer, z, x, y }, root = _diskDir) {
   return path.join(root, layer, String(z), `${x}-${y}.pbf`);
 }
 
-/** Disk-cache read; the tile's age comes from the file's mtime. */
 async function readDisk(address) {
   const file = diskPath(address);
   try {
@@ -176,14 +166,9 @@ async function readDisk(address) {
   }
 }
 
-/**
- * Background disk work (tile writes and sweeps) not yet settled. Requests
- * never wait on it; tests settle it before removing a cache directory.
- * @type {Set<Promise<void>>}
- */
+/** Unsettled background writes and sweeps; requests never wait on them. */
 const _background = new Set();
 
-/** Track a background task until it settles; it never rejects. */
 function track(task) {
   const settled = task
     .catch(() => {})
@@ -192,26 +177,20 @@ function track(task) {
   return settled;
 }
 
-/**
- * Disk writes in progress, by cache file: the sequence number of the newest.
- * @type {Map<string, number>}
- */
+/** @type {Map<string, number>} cache file to its newest write's sequence */
 const _diskWrites = new Map();
 let _diskWriteSeq = 0;
 
-/** Whether a write of this tile's cache file is still in progress. */
 function diskWritePending(address) {
   return _diskWrites.has(diskPath(address));
 }
 
 /**
- * Write a tile in the background. `at` dates a rewrite of an existing tile
- * with its original fetch time, so the rewrite does not extend its life.
- * Each write has its own temporary file, and a write that a newer one of the
- * same tile overtook steps aside instead of renaming over it.
+ * Write a tile in the background. `at` keeps a rewrite's original fetch time
+ * so it does not extend the tile's life. An overtaken write steps aside.
  */
 function writeDisk(address, bytes, at = null) {
-  // The sweep after it covers this write's cache root, even if it has moved.
+  // Sweep this write's root even if the cache dir has moved since.
   const root = _diskDir;
   const file = diskPath(address, root);
   const seq = ++_diskWriteSeq;
@@ -241,7 +220,6 @@ let _lastSweepAt = 0;
 let _sweeping = null;
 let _sweepWarned = false;
 
-/** Start a background sweep of `root` unless one ran within the interval. */
 function scheduleSweep(root) {
   if (_sweeping || Date.now() - _lastSweepAt < TILE_DISK_SWEEP_INTERVAL_MS)
     return;
@@ -259,7 +237,7 @@ function scheduleSweep(root) {
   _sweeping = tracked;
 }
 
-/** Every file under `dir` with its size and mtime; a missing dir is empty. */
+/** Every file under `dir` with size and mtime; a missing dir is empty. */
 async function listCacheFiles(dir) {
   let entries;
   try {
@@ -273,7 +251,6 @@ async function listCacheFiles(dir) {
     const file = path.join(dir, entry.name);
     if (entry.isDirectory()) files.push(...(await listCacheFiles(file)));
     else if (entry.isFile()) {
-      // A file renamed or swept away meanwhile is simply skipped.
       const stat = await fsp.stat(file).catch(() => null);
       if (stat) files.push({ file, size: stat.size, at: stat.mtimeMs });
     }
@@ -282,10 +259,7 @@ async function listCacheFiles(dir) {
 }
 
 /**
- * Bound the disk cache: delete tiles past TILE_DISK_TTL_MS, then the oldest
- * until the rest fit in `maxBytes`. Each file is charged its size plus
- * TILE_DISK_FILE_OVERHEAD_BYTES, so empty tiles count toward the cap.
- * Runs in the background after tile writes.
+ * Delete expired tiles, then the oldest until the rest fit in `maxBytes`.
  * @returns {Promise<{removed: number, bytes: number}>} files deleted, charged bytes kept
  */
 export async function sweepTileDisk({
@@ -308,15 +282,12 @@ export async function sweepTileDisk({
 
 /** The one origin the tile token may be sent to, at every redirect hop. */
 const TILE_ORIGIN = new URL(MAPILLARY_TILE_HOST).origin;
-/** Redirect hops followed before the upstream counts as broken. */
 export const TILE_MAX_REDIRECTS = 3;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /**
- * Fetch a tile URL, following redirects by hand: each hop must stay HTTPS on
- * the Mapillary tile origin (no credentials in the URL), so the access token
- * in the query is never sent to another host. A refused or endless redirect
- * is an upstream fault (502).
+ * Follow redirects by hand so every hop stays HTTPS on the tile origin and the
+ * token in the query never reaches another host. A bad redirect is a 502.
  */
 async function fetchPinned(url, init) {
   let next = url;
@@ -354,7 +325,6 @@ async function fetchUpstream(address, signal) {
   if (held) throw held;
   const url = `${MAPILLARY_TILE_HOST}/${address.upstream}/2/${address.z}/${address.x}/${address.y}?access_token=${encodeURIComponent(token)}`;
   const timeout = AbortSignal.timeout(TILE_FETCH_TIMEOUT_MS);
-  // Aborts the request itself once its body runs past the size cap.
   const oversize = new AbortController();
   const response = await fetchPinned(url, {
     signal: AbortSignal.any([signal, timeout, oversize.signal].filter(Boolean)),
@@ -389,9 +359,8 @@ async function fetchUpstream(address, signal) {
 }
 
 /**
- * Read a tile body, counting as it arrives: a chunked or compressed response
- * has no Content-Length to check first, so the request is aborted as soon as
- * the running total passes TILE_MAX_BYTES rather than after buffering it all.
+ * Read a body, aborting once it passes TILE_MAX_BYTES: chunked or compressed
+ * responses have no Content-Length to check first.
  */
 async function readCapped(response, abortRequest) {
   if (!response.body) return Buffer.alloc(0);
@@ -412,17 +381,12 @@ async function readCapped(response, abortRequest) {
   return Buffer.concat(chunks, total);
 }
 
-/**
- * Upstream fetch slots: at most TILE_UPSTREAM_CONCURRENCY run at once, and
- * further flights wait in order. Replaced whole by the test reset.
- * @type {{active: number, queue: Array<() => void>}}
- */
+/** @type {{active: number, queue: Array<() => void>}} upstream slots */
 let _slots = { active: 0, queue: [] };
 
 /**
- * Wait for an upstream fetch slot. Resolves with its release function. A
- * flight aborted while it waits leaves the queue and never fetches.
- * @param {AbortSignal} signal
+ * Resolve with a release function once a slot is free. An abort while
+ * queued leaves the queue.
  * @returns {Promise<() => void>}
  */
 function acquireUpstreamSlot(signal) {
@@ -451,7 +415,6 @@ function acquireUpstreamSlot(signal) {
   });
 }
 
-/** Strip the layers this proxy never serves for the address's layer spec. */
 function trim(address, bytes) {
   if (!address.dropLayers.length || !bytes.length) return bytes;
   try {
@@ -463,8 +426,8 @@ function trim(address, bytes) {
 }
 
 /**
- * Fetch one tile through memory, disk and in-flight coalescing, then
- * Mapillary. Returns the raw protobuf bytes (empty for a tile with no data).
+ * Fetch one tile from memory, disk, a shared flight, then Mapillary. Empty
+ * bytes mean no coverage.
  * @param {{layer:string,z:number|string,x:number|string,y:number|string}} request
  * @param {{signal?: AbortSignal}} [options]
  * @returns {Promise<{bytes: Buffer, source: 'memory'|'disk'|'inflight'|'upstream', address: object}>}
@@ -475,9 +438,7 @@ export async function fetchTile(request, { signal } = {}) {
   if (memory) return { bytes: memory, source: 'memory', address };
   const disk = await readDisk(address);
   if (disk) {
-    // Older cache files may still hold the untrimmed tile: trim and replace,
-    // keeping the original fetch time so the tile still expires on schedule.
-    // Concurrent hits on one such tile rewrite it once.
+    // Older cache files may be untrimmed: rewrite once, keeping the fetch time.
     const bytes = trim(address, disk.bytes);
     if (bytes !== disk.bytes && !diskWritePending(address))
       writeDisk(address, bytes, disk.at);
@@ -493,10 +454,7 @@ export async function fetchTile(request, { signal } = {}) {
   return { bytes, source: joined ? 'inflight' : 'upstream', address };
 }
 
-/**
- * Start the one upstream fetch for a tile, owned by the flight itself. It
- * waits for an upstream slot first; the slot is held until the body is read.
- */
+/** Start the shared upstream fetch; it holds a slot until the body is read. */
 function startFlight(address) {
   const controller = new AbortController();
   const flight = { controller, waiters: 0, promise: null };
@@ -520,12 +478,8 @@ function startFlight(address) {
 }
 
 /**
- * Wait on a shared flight as one caller. The caller's own abort rejects it at
- * once without disturbing the others; the upstream fetch is cancelled only
- * when the last waiter leaves.
- * @param {{controller: AbortController, promise: Promise<Buffer>, waiters: number}} flight
- * @param {AbortSignal} [signal]
- * @returns {Promise<Buffer>}
+ * Wait on a shared flight. A caller's abort rejects only that caller; the
+ * fetch is cancelled when the last waiter leaves.
  */
 function joinFlight(flight, signal) {
   signal?.throwIfAborted();
@@ -566,10 +520,7 @@ export function _tileMemoryForTest() {
   return { entries: _memory.size, bytes: _memoryBytes };
 }
 
-/**
- * Test seam: wait until every background tile write and sweep has settled,
- * including sweeps those writes start, so a test may remove its cache dir.
- */
+/** Test seam: wait for every background write and the sweeps they start. */
 export async function _settleTileWritesForTest() {
   while (_background.size) await Promise.allSettled([..._background]);
 }

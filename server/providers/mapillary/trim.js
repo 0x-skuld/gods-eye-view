@@ -17,10 +17,8 @@ function layerName(layerBytes) {
 }
 
 /**
- * Drop whole layers from a vector tile at the protobuf level. Nothing inside
- * a kept layer is decoded or re-encoded, so a 12 MB tile whose bulk is an
- * unused layer trims in a few milliseconds. Returns the input when nothing
- * was dropped.
+ * Drop whole layers from a vector tile without decoding kept layers, so a
+ * 12 MB tile trims in milliseconds. Returns the input when nothing was dropped.
  * @param {Buffer|Uint8Array} bytes
  * @param {Iterable<string>} dropNames
  */
@@ -31,7 +29,7 @@ export function stripTileLayers(bytes, dropNames) {
   const writer = new PbfWriter();
   let dropped = false;
   reader.readFields((tag, _result, pbf) => {
-    if (tag !== TILE_LAYER_FIELD) return; // pbf skips what we leave alone
+    if (tag !== TILE_LAYER_FIELD) return;
     const end = pbf.readVarint() + pbf.pos;
     const layerBytes = bytes.subarray(pbf.pos, end);
     pbf.pos = end;

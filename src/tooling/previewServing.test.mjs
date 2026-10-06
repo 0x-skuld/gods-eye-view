@@ -110,7 +110,7 @@ test('real dev and built-preview servers serve provider JSON and terminate unkno
         ['/api/gbfs/', 400],
         ['/api/tomtom/status', 200],
         // The Street Level QA gate intercepts these in the browser; this is
-        // the check that the real servers register them (review IC8 P2).
+        // the check that the real servers register them.
         ['/api/mapillary/status', 200],
         ['/api/mapillary/tiles/coverage/14/1/2', 503],
         ['/api/radio/unknown', 404],

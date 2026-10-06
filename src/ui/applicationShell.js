@@ -954,8 +954,7 @@ export class StyleManager extends ShellFacade {
           this.setPanelCollapsed('street-level-panel', collapsed, options),
         dockPanel: () => this._panelChrome.dockPanel('street-level-panel'),
         showToast: (message) => this._showToast(message),
-        // Who asked for Street Level to switch on: only a user, voice or tool
-        // request opens the panel, never a saved-state restore.
+        // Lets the panel open for a user, voice or tool switch-on, not a restore.
         subscribeEnableRequests: (listener) =>
           this._dataManager?.subscribeVisibilityRequests?.((change) => {
             if (change?.layerId === 'street-level' && change.enabled)
@@ -1509,12 +1508,7 @@ export class StyleManager extends ShellFacade {
     this._initCockpitDisplayPortal();
   }
 
-  /**
-   * A portable panel finished a resize or snapped back to its rail. A panel
-   * with a viewport of its own refits here.
-   * @param {string} panelId
-   * @returns {void}
-   */
+  /** A portable panel was resized or docked: refit any viewport inside it. */
   _onPanelResized(panelId) {
     if (panelId === 'cctv-panel') this._syncCctvPanelViewport();
     if (panelId === 'street-level-panel')

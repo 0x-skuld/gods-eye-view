@@ -171,7 +171,7 @@ function frame(listeners) {
   for (const listener of [...listeners]) listener();
 }
 
-test('a superseded tile request cannot strand lines on the globe (review P0 #2)', async () => {
+test('a superseded tile request cannot strand lines on the globe', async () => {
   const { viewer, source, state, coverage, bytes, tileKey, onGlobe } = setup();
   const forTile = () => source.calls.filter((call) => call.key === tileKey);
 
@@ -304,7 +304,7 @@ test('zoom 0 is a zoom: the whole-earth view still shows coverage', () => {
   coverage.clear();
 });
 
-test('a rejected key stops coverage requests until the layer goes off (review IC8 P2)', async () => {
+test('a rejected key stops coverage requests until the layer goes off', async () => {
   const { viewer, source, state, coverage } = setup();
   coverage.refresh();
   const rejected = Object.assign(
@@ -330,7 +330,7 @@ test('a rejected key stops coverage requests until the layer goes off (review IC
   coverage.clear();
 });
 
-test('a rate limit keeps the drawn tiles and asks again once the wait is over (review IC8 P2)', async (t) => {
+test('a rate limit keeps the drawn tiles and asks again once the wait is over', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const { viewer, source, state, coverage } = setup();
   coverage.refresh();
@@ -566,7 +566,7 @@ test('a selection made or cleared while a tile builds is applied once it is read
   assert.equal(viewer.postRender.size, 0, 'the selection watch is gone');
 });
 
-test('a sequence that crosses a tile edge is counted once (review P3)', async () => {
+test('a sequence that crosses a tile edge is counted once', async () => {
   const { viewer, source, coverage, centre } = setup();
   // Look straight down on the edge between this tile and its east neighbour.
   const { east } = tileBounds(centre.tile.x, centre.tile.y, 14);
@@ -598,10 +598,7 @@ test('a sequence that crosses a tile edge is counted once (review P3)', async ()
   coverage.clear();
 });
 
-/**
- * In terrain mode with a cast tile mid-swap: the draped lines and the cast
- * primitive whose readiness the test controls.
- */
+/** A terrain-mode tile mid-swap, with a cast primitive the test readies. */
 async function midSwap() {
   // Drawn draped first; castLine only answers once the heights are in.
   let heightsReady = false;
@@ -665,9 +662,8 @@ function tiltedCamera({ lon, lat, height, heading, pitch }) {
 }
 
 /**
- * Denver, 300 m above a street 1,600 m above the ellipsoid, at the centre of
- * a z14 tile and looking east with the screen centre `aheadM` metres out.
- * Google 3D hides the globe, so only the bare-earth caster knows the ground.
+ * Denver: 300 m above a street 1,600 m up, at a z14 tile centre, looking east
+ * at ground `aheadM` metres out. Only the bare-earth caster knows the ground.
  */
 function denverStreetView(aheadM) {
   const z = 14;
@@ -735,7 +731,7 @@ test('a street view toward the horizon ranks only the ground within range', () =
   coverage.clear();
 });
 
-test('a selection cleared while the old zoom is still shown uncolours its lines (review IC8 P2)', async () => {
+test('a selection cleared while the old zoom is still shown uncolours its lines', async () => {
   const { viewer, source, state, coverage, bytes } = setup();
   coverage.refresh();
   source.calls[0].resolve(bytes);
@@ -760,7 +756,7 @@ test('a selection cleared while the old zoom is still shown uncolours its lines 
   coverage.clear();
 });
 
-test('a selection made while the old zoom is still building is applied once it is ready (review IC8 P2)', async () => {
+test('a selection made while the old zoom is still building is applied once it is ready', async () => {
   const { viewer, source, state, coverage, bytes } = setup();
   coverage.refresh();
   source.calls[0].resolve(bytes);
@@ -784,7 +780,7 @@ test('a selection made while the old zoom is still building is applied once it i
   assert.equal(viewer.postRender.size, 0, 'the selection watch is gone');
 });
 
-test('only lines within the mesh sampler range of the camera are asked for (review IC8 P2)', async () => {
+test('only lines within the mesh sampler range of the camera are asked for', async () => {
   let heightsReady = false;
   const groundCaster = {
     prepareLines: async () => (heightsReady = true),
@@ -874,7 +870,7 @@ test('the old zoom goes as soon as the new zoom has loaded, not after the stale 
   coverage.clear();
 });
 
-test('a rate limit holds every refresh inside its wait, not only the first (review IC8 P2)', async (t) => {
+test('a rate limit holds every refresh inside its wait, not only the first', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const { viewer, source, coverage } = setup();
   coverage.refresh();
@@ -898,7 +894,7 @@ test('a rate limit holds every refresh inside its wait, not only the first (revi
   coverage.resetErrors();
 });
 
-test('a line across the date line from the camera is in mesh range (gekh P3)', () => {
+test('a line across the date line from the camera is in mesh range', () => {
   // A z14 tile's width of lines just past -180, the camera 111 m short of it.
   const camera = { lon: 179.999, lat: 0 };
   const east = { west: -180, east: -179.978, south: -0.001, north: 0.001 };

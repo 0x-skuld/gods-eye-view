@@ -1,9 +1,8 @@
 import { freshStreet } from './state.js';
 
 /**
- * Own the one viewer element in the panel and whichever provider's viewer
- * adapter is mounted in it. Poses the adapter emits become `state.street`,
- * move the marker and (optionally) the globe camera.
+ * Owns the panel's viewer element and the provider adapter mounted in it.
+ * Adapter poses update `state.street`, the marker and the follow camera.
  */
 export function createViewerHost({ state, parts }) {
   /** @type {{id: string, adapter: object, unsubscribe: () => void}|null} */
@@ -11,11 +10,7 @@ export function createViewerHost({ state, parts }) {
   /** @type {{id: string, promise: Promise<object>}|null} */
   let mounting = null;
   let openSeq = 0;
-  /**
-   * Adapters stood up by `prewarm` that are not the active one: each holds a
-   * live viewer (a WebGL context for MapillaryJS) until `unmount` releases it.
-   * @type {Map<string, object>}
-   */
+  /** Prewarmed, inactive adapters; each holds a live viewer (WebGL context) until `unmount`. */
   const warmed = new Map();
 
   function notify() {
@@ -44,9 +39,8 @@ export function createViewerHost({ state, parts }) {
     });
     parts.marker.set(state.street.position, state.street.bearing);
     parts.follow.followCamera();
-    // Providers highlight the selected image's sequence on the map; mirror
-    // that once the image itself is on screen, so the sequence lookup never
-    // competes with the image download.
+    // Select the sequence only once the image is on screen, so its lookup
+    // never competes with the image download.
     if (!state.street.loading && state.street.sequenceId !== previousSequence)
       selectCurrentSequence();
     notify();
@@ -62,10 +56,8 @@ export function createViewerHost({ state, parts }) {
   }
 
   /**
-   * Mount a provider's viewer adapter in the host. The adapter becomes
-   * `active` only once its mount succeeded, so a failed mount (a library
-   * that did not load) is retried on the next open; concurrent opens for the
-   * same provider share one mount.
+   * Mount a provider's adapter. It becomes `active` only on success, so a
+   * failed mount is retried on the next open; concurrent opens share one.
    */
   function mount(entry) {
     if (active?.id === entry.def.id) return Promise.resolve(active.adapter);
@@ -108,12 +100,7 @@ export function createViewerHost({ state, parts }) {
     return promise;
   }
 
-  /**
-   * Open an image from one provider. Resolves once the first pose is in
-   * (true) or the open failed or was overtaken (false); later poses stream
-   * through `state.street` as the user navigates.
-   * @returns {Promise<boolean>}
-   */
+  /** Open an image: true once its first pose is in, false if it failed or was overtaken. */
   async function open(providerId, imageId, { frame = true } = {}) {
     const entry = providerEntry(providerId);
     if (!entry || !imageId) return false;
@@ -153,10 +140,7 @@ export function createViewerHost({ state, parts }) {
     return true;
   }
 
-  /**
-   * Close the image; the mounted adapter stays warm for the next open. The
-   * globe stops flying toward it too (unmount closes, so layer off does).
-   */
+  /** Close the image and stop any framing flight; the adapter stays warm. */
   function close() {
     openSeq++;
     parts.follow.cancelFraming();
@@ -208,11 +192,7 @@ export function createViewerHost({ state, parts }) {
     }
   }
 
-  /**
-   * Tear viewers down: every one (layer disabled or destroyed), or only the
-   * given provider's, active or prewarmed (that provider switched off).
-   * @param {string} [providerId]
-   */
+  /** Tear down every viewer, or only `providerId`'s (active or prewarmed). */
   function unmount(providerId) {
     if (
       !providerId ||

@@ -377,10 +377,9 @@ test('a header press that travels under the drag threshold is a click, not a lif
 });
 
 /**
- * Both portable panels wired through _initPanelDrag. Each box follows its
- * inline left/top/width/height like a fixed window (`box` holds the natural
- * size), its header is the top 36 px, and `obstacles` stand in for the
- * command dock and voice pill. ResizeObserver callbacks run on `observe()`.
+ * Both portable panels wired through _initPanelDrag. Headers are the top
+ * 36 px; `obstacles` stand in for the command dock and voice pill.
+ * ResizeObserver callbacks run on `observe()`.
  */
 function portableShell(f, { stored = {}, box = {}, obstacles = {} } = {}) {
   const observers = [];

@@ -52,7 +52,7 @@ function setup({ parts = {}, surface = 'draped' } = {}) {
   return { state, view, preRender, marker, frame };
 }
 
-test('the photo marker is hidden behind the globe, and shows from its side (review IC8 P2)', () => {
+test('the photo marker is hidden behind the globe, and shows from its side', () => {
   const { state, view, preRender, marker, frame } = setup();
   // Placed on the far side of the Earth from the camera.
   marker.set({ lon: 58.51, lat: -38.58 }, 90);

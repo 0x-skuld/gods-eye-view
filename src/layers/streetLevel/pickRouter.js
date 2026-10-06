@@ -1,7 +1,6 @@
 /**
- * Route picked primitive ids to the provider whose prefix they carry. The
- * registry guarantees prefixes never overlap, so the first match is the only
- * match.
+ * Route picked ids to the provider whose prefix they carry; the registry
+ * guarantees prefixes never overlap.
  * @param {() => Iterable<{def: {id: string, pickPrefix: string}, instance: object}>} getProviders
  * @param {{positionId?: string}} [options]  Id of the core-owned position marker.
  */

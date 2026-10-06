@@ -9,10 +9,8 @@ const heightOf = (cartesian) =>
   Cesium.Cartographic.fromCartesian(cartesian).height;
 
 /**
- * A camera with Cesium's flight bookkeeping: starting a flight cancels the
- * current one (calling its `cancel`), `cancelFlight` cancels whichever flight
- * is current, whoever started it, and `land()` completes it. `cancelled`
- * counts the flights `cancelFlight` stopped.
+ * A camera with Cesium's flight bookkeeping: a new flight or `cancelFlight`
+ * cancels the current one, `land()` completes it, `cancelled` counts stops.
  */
 function flightCamera(flights, views) {
   let current = null;
@@ -43,8 +41,8 @@ function flightCamera(flights, views) {
 }
 
 /**
- * A viewer whose scene sample is `sampled` (the Austin case: −14,886 m before
- * the tiles under the photo had loaded) and whose bare earth is `dem`.
+ * A viewer whose scene sample is `sampled` (e.g. −14,886 m before the tiles
+ * under the photo load) and whose bare earth is `dem`.
  */
 function setup({ sampled, dem = null, globe = null, altitude = 149 }) {
   const flights = [];
@@ -118,7 +116,7 @@ test('following stands the camera at eye height above the checked ground', () =>
   );
 });
 
-test('cancelFraming stops the framing flight while it is still ours (review IC8 P1)', () => {
+test('cancelFraming stops the framing flight while it is still ours', () => {
   const { follow, state } = setup({ sampled: 121, dem: 117 });
   const { camera } = state.viewer;
   follow.lookAtPosition();
@@ -134,7 +132,7 @@ test('cancelFraming stops the framing flight while it is still ours (review IC8 
   assert.equal(camera.cancelled, 2);
 });
 
-test('cancelFraming leaves a landed flight and a newer navigation flight alone (review IC8 P1)', () => {
+test('cancelFraming leaves a landed flight and a newer navigation flight alone', () => {
   const { follow, state, flights } = setup({ sampled: 121, dem: 117 });
   const { camera } = state.viewer;
   follow.lookAtPosition();

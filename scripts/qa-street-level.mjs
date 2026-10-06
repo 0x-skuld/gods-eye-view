@@ -1,30 +1,16 @@
 #!/usr/bin/env node
 /**
- * Browser QA for the Street Level layer against a running server: the
- * panel's place in the right rail, the provider chips (which switch the
- * layer), the keyless gate, coverage and its credit, the imagery filter and
- * SINCE slider, a click on the globe that selects a sequence, the viewer
- * (opened, stepped, expanded as a modal dialog, closed), the framing flight,
- * the panel as a floating, resizable window, a reload that keeps the panel
- * collapsed, and a phone layout. Run with
+ * Browser QA for the Street Level layer against a running server. Run with
  * `npm run qa:street-level -- --url http://localhost:4173`.
  *
- * `--fixtures` makes the run hermetic for Mapillary (the CI mode): coverage
- * tiles, the Graph API, the image CDN and every other *.mapillary.com
- * request the page makes are answered from fixtures (fixtureTile and
- * scripts/fixtures/street-level/mapillaryGraph.mjs), and nothing reaches
- * Mapillary. The server still needs a token, because the browser bundle
- * carries it; CI gives it a dummy, non-secret one, which never leaves the
- * browser. Fixture runs add what a live run cannot stage: a key Mapillary
- * rejects, and a second page whose server has no key. Every run first asks
- * the server's real status route from Node, before the browser intercepts
- * anything, so a server without the Mapillary routes fails.
+ * `--fixtures` (the CI mode) answers every *.mapillary.com request from
+ * fixtures, so nothing reaches Mapillary. The server still needs a token
+ * because the bundle carries it; CI uses a dummy one. Fixture runs also stage
+ * a rejected key and a keyless second server.
  *
- * Steps print `ok N …`, or `skip (reason) N …` when they cannot run here or
- * only part of them could. `--strict` fails on any skip whose reason is not
- * in STRICT_ALLOWED_SKIPS. A failed run saves screenshots, the Street Level
- * UI state, console and failed requests under qa-artifacts/street-level/.
- * `--fail-on-retry` (or QA_FAIL_ON_RETRY=1) fails on any header-press retry.
+ * `--strict` fails on any skip not in STRICT_ALLOWED_SKIPS. `--fail-on-retry`
+ * (or QA_FAIL_ON_RETRY=1) fails on any header-press retry. A failed run saves
+ * evidence under qa-artifacts/street-level/.
  */
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
@@ -56,37 +42,28 @@ const PANEL_ID = 'street-level-panel';
 /** Where a failed run leaves its screenshots and logs. */
 export const ARTIFACT_DIR = 'qa-artifacts/street-level';
 
-/** Viewports every layout assertion runs at. */
 export const VIEWPORTS = Object.freeze([
   { width: 1440, height: 900 },
   { width: 1280, height: 800 },
 ]);
 
-/** Provider chips the panel must show, in order (one per registered provider). */
+/** Provider chips the panel must show, in order. */
 export const EXPECTED_PROVIDERS = Object.freeze(['mapillary']);
 
 /**
- * Skip reasons `--strict` accepts, because no setup of this gate can avoid
- * them:
- * - `no Google 3D`: the map stack needs a Google key (CI forks have none);
- *   the steps still run their non-Google half.
- * - `fixtures only`: staging a rejected key or a keyless second server needs
- *   the fixture interception; a live run cannot.
- * Not accepted: `no Mapillary key`. CI starts the server with a dummy token
- * so the whole keyed flow runs hermetically; a keyless strict run means that
- * wiring broke and the photo flow silently did not run.
+ * Skips no setup can avoid: CI forks have no Google key, and live runs cannot
+ * stage fixture-only cases. `no Mapillary key` is not accepted: CI's dummy
+ * token runs the keyed flow, so a keyless strict run means that wiring broke.
  */
 export const STRICT_ALLOWED_SKIPS = Object.freeze([
   'no Google 3D',
   'fixtures only',
 ]);
 
-/** Skips `--strict` rejects. */
 export function strictViolations(skips) {
   return skips.filter((skip) => !STRICT_ALLOWED_SKIPS.includes(skip.reason));
 }
 
-/** Street Level's share-link token, as the ledger assigned it. */
 const STREET_LEVEL_TOKEN = LAYER_STATE_REGISTRY.find(
   (entry) => entry.id === 'street-level',
 ).token;
@@ -94,7 +71,7 @@ const STREET_LEVEL_TOKEN = LAYER_STATE_REGISTRY.find(
 /** The Street Level panel's token in the share link's `ui` panel state. */
 export const PANEL_UI_TOKEN = 't';
 
-/** Expected right-rail order once the layout controller has run. */
+/** Right-rail order once the layout controller has run. */
 export const RAIL_ORDER = Object.freeze([
   'pp-toggles',
   'cctv-panel',
@@ -104,7 +81,7 @@ export const RAIL_ORDER = Object.freeze([
   'global-context-panel',
 ]);
 
-/** The parked camera: over downtown Sacramento, looking north and down. */
+/** Over downtown Sacramento, looking north and down. */
 export const PARK = Object.freeze({
   lon: -121.4944,
   lat: 38.5816,
@@ -121,11 +98,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const DAY_MS = 86_400_000;
 
 /**
- * Synthetic coverage for any tile, so fixture runs are deterministic: at
- * street zooms a grid of four east-west and four north-south sequences (half
- * 360°, half captured three years ago) plus, in the tiles it crosses, the
- * photo sequence whose images the Graph fixtures serve (PHOTO_LINE, under
- * the parked camera); at overview zooms a few points.
+ * Deterministic coverage for any tile: a grid of mixed 360°/flat, new/old
+ * sequences plus the photo sequence (PHOTO_LINE), or a few overview points.
  * @returns {Uint8Array} empty for zooms that carry nothing
  */
 export function fixtureTile(z, x, y, now = Date.now()) {
@@ -193,12 +167,9 @@ export function fixtureTile(z, x, y, now = Date.now()) {
 }
 
 /**
- * Ask the server's real Mapillary status route, outside the browser's
- * interception, and require its JSON shape. Fixture runs answer the route in
- * the page, so without this a server that never registered it would pass.
- * Node sends no Origin or Sec-Fetch-Site, so the same-site gate admits it.
- * @param {string} url the application's base URL
- * @param {typeof fetch} [fetchImpl]
+ * Ask the real status route from Node, outside the page's interception, so a
+ * server that never registered it fails even in fixture runs. Node sends no
+ * Origin, so the same-site gate admits it.
  * @returns {Promise<{configured: boolean}>}
  */
 export async function assertRealStatusRoute(url, fetchImpl = fetch) {
@@ -236,21 +207,13 @@ export async function assertRealStatusRoute(url, fetchImpl = fetch) {
 }
 
 /**
- * Answer the page's Mapillary requests from fixtures (CDP Fetch on just the
- * Mapillary URLs); nothing reaches Mapillary. `fixture` is live:
- * - `configured`: what the status route says in the page; undefined lets the
- *   server's real route answer (the main page: CI's dummy token is real).
- * - `tiles: 'rejected'` answers tiles as the proxy does when Mapillary
- *   refuses the token; `tileRequests` counts tile requests.
- * - `calls` collects the Graph/CDN calls answered (parameter names only, no
- *   token); `unknown` the ones no fixture covers (answered 404).
- * @param {object} page
+ * Answer the page's Mapillary requests from `fixture`, which steps may change
+ * mid-run. `configured: undefined` lets the server's real status route answer.
  * @param {{configured?: boolean, tiles: 'ok'|'rejected', tileRequests: number, images: Array<object>, calls: Set<string>, unknown: Array<string>}} fixture
  */
 export async function serveFixtures(page, fixture) {
-  // Only these URLs pause. Puppeteer's page-wide interception would pause
-  // Cesium's worker scripts too, and under it they stall: no terrain, no
-  // ground polylines, nothing to click.
+  // CDP Fetch on just these URLs: Puppeteer's page-wide interception stalls
+  // Cesium's worker scripts, leaving nothing to click.
   const cdp = await page.createCDPSession();
   await cdp.send('Fetch.enable', {
     patterns: [
@@ -351,7 +314,6 @@ async function settle(page, fn, arg, { timeout = 10_000 } = {}) {
   }
 }
 
-/** Clear the first-run dialog once the app is up. */
 async function clearFirstRun(page) {
   await page.waitForFunction(() => Boolean(window.__godsEyeView?.dataManager), {
     timeout: 150_000,
@@ -382,7 +344,6 @@ export async function boot(page, url) {
   await clearFirstRun(page);
 }
 
-/** Panel geometry and the bits of state the steps assert on. */
 function readPanel(page) {
   return page.evaluate(() => {
     const el = document.getElementById('street-level-panel');
@@ -417,7 +378,6 @@ function waitForCoverage(page, { timeout = 90_000 } = {}) {
   );
 }
 
-/** Without a key on the server the panel gates its controls and says why. */
 async function assertKeylessGate(page) {
   await page.evaluate(() =>
     window.__godsEyeView.dataManager.setEnabled('street-level', true, {
@@ -443,13 +403,9 @@ async function assertKeylessGate(page) {
 }
 
 /**
- * Find a canvas point where a real click picks the wanted Street Level item:
- * `prefix` + `id` (or any id with the prefix when `id` is null), searched
- * around projected `points` ([lon, lat] at the ground) or, without points,
- * on a grid over the middle of the screen. `billboardIds` aims at those
- * billboards; `billboardPrefix` at every shown billboard whose id starts with
- * it (a live run's cones, whose positions the gate does not know). Only points where the Cesium
- * canvas is the topmost element count. Runs in the page.
+ * Runs in the page. Find a point where a real click picks `prefix` + `id` (any
+ * id when null), searched around `points` ([lon, lat]), the aimed billboards,
+ * or else a grid mid-screen. Only points where the canvas is topmost count.
  * @returns {{x: number, y: number, id: string}|null} client coordinates
  */
 export function findPickPoint({
@@ -464,7 +420,6 @@ export function findPickPoint({
   const canvas = scene.canvas;
   const rect = canvas.getBoundingClientRect();
   const Cartographic = viewer.camera.positionCartographic.constructor;
-  // scene.pick reads x and y; a Cartesian2 when one is at hand.
   let Cartesian2 = null;
   const windowPoint = (x, y) => (Cartesian2 ? new Cartesian2(x, y) : { x, y });
   const wanted = (picked) => {
@@ -553,10 +508,7 @@ async function main() {
   });
   let count = 0;
   const skips = [];
-  /**
-   * Run one step. `fn` gets `skip(reason)`: the step still runs whatever it
-   * can, but prints (and records) as a skip instead of `ok`.
-   */
+  /** `fn` gets `skip(reason)`: the step runs what it can but reports a skip. */
   const step = async (label, fn) => {
     let skipped = null;
     const result = await fn({
@@ -575,7 +527,7 @@ async function main() {
   const skipStep = (reason, label) => step(label, ({ skip }) => skip(reason));
   const errors = [];
   const monitors = [];
-  /** Collect page errors, render-loop errors and the listener exceptions the layer only warns about. */
+  /** The layer only warns on listener exceptions, so count those as errors. */
   const watch = async (page, name) => {
     monitors.push(
       watchPage(page, {
@@ -588,7 +540,6 @@ async function main() {
   };
   const renderErrorsSeen = [];
   try {
-    // Before any interception: fixture runs answer Mapillary in the page.
     await step(
       'the server registers the real Mapillary status route',
       async () => {
@@ -712,9 +663,8 @@ async function main() {
     );
 
     async function keyedSteps() {
-      // The startup flight can still be running: cancel it, park the camera
-      // over downtown Sacramento and confirm it stays put. A stability window,
-      // not a state: a late startup flight can only show itself by moving.
+      // A late startup flight only shows itself by moving the camera, so park
+      // and check it stays put rather than reading a state.
       const park = async () => {
         for (let attempt = 0; attempt < 6; attempt++) {
           await page.evaluate((at) => {
@@ -765,10 +715,7 @@ async function main() {
             .get('street-level')
             .module.getUIState(),
         );
-      /**
-       * Wait until the UI state satisfies `test(u, arg)`, a self-contained
-       * function run in the page; false when it never does.
-       */
+      /** `test(u, arg)` runs in the page, so it must be self-contained. */
       const uiUntil = (test, arg = null, options) =>
         settle(
           page,
@@ -954,8 +901,7 @@ async function main() {
       await step(
         'the MapillaryJS viewer loads ahead of the first photo',
         async () => {
-          // Prewarm stands the lazily imported viewer up in the panel's host; a
-          // broken dynamic import would otherwise only show at the first click.
+          // Catches a broken dynamic import before the first click would.
           await page.waitForSelector(
             '#sl-viewer.mapillary-viewer .mapillary-dom',
             { timeout: 60_000 },
@@ -969,7 +915,6 @@ async function main() {
           { timeout: 30_000 },
           text,
         );
-      /** Point the camera somewhere new and refresh coverage there now. */
       const panTo = (lon, lat) =>
         page.evaluate(
           (at) => {
@@ -987,10 +932,7 @@ async function main() {
           },
           { lon, lat },
         );
-      /**
-       * Wait until no tile request has arrived for `quietMs` (longer than the
-       * camera-move debounce, so a refresh the pan scheduled has had its turn).
-       */
+      /** Wait until no tile request has arrived for `quietMs`. */
       const tileRequestsQuiet = async (quietMs, timeout = 30_000) => {
         const start = Date.now();
         let last = fixture.tileRequests;
@@ -1547,10 +1489,8 @@ async function main() {
           const r = node.getBoundingClientRect();
           return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
         });
-      // Lifting and docking re-resolve the header and retry only a press that
-      // provably missed it: right after a dock the rail is still animating, and
-      // a title point read once can be under another panel (scripts/
-      // qa-panelDrag.mjs, shared with the panel-resize gate).
+      // Right after a dock the rail is still animating, so the shared helpers
+      // re-resolve the header and retry only a press that provably missed it.
       const floatPanel = async () => {
         const attempt = await liftPanelByHeader(page, PANEL_ID, {
           dx: -400,
@@ -1649,7 +1589,6 @@ async function main() {
       );
       await step('a header double-click docks a floating window', async () => {
         await floatPanel();
-        // Waits on the docked state itself, not a fixed sleep.
         const attempt = await dockPanelByDoubleClick(page, PANEL_ID);
         assert.equal(
           attempt.done,
@@ -1751,9 +1690,8 @@ async function main() {
               .get('street-level')
               .module.closeViewer(),
           );
-          // The button is what the user presses; a toast over it must not make
-          // this step about pointer aim, so press it through the DOM and wait
-          // for the panel to say it is collapsed.
+          // Press through the DOM: a toast over the button must not make this
+          // step about pointer aim.
           await page.$eval(
             '.panel-collapse-btn[data-collapse-target="street-level-panel"]',
             (button) => {

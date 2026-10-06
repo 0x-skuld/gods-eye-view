@@ -1,17 +1,14 @@
 import * as Cesium from 'cesium';
 import { FOLLOW_EYE_HEIGHT_M } from './policy.js';
 
-/** Ellipsoidal heights a land surface can have (Dead Sea shore to Everest, with geoid slack). */
+/** Plausible ellipsoidal land heights: Dead Sea to Everest, with geoid slack. */
 const SURFACE_MIN_M = -500;
 const SURFACE_MAX_M = 9000;
 /** Rendered mesh window around the bare earth: roofs and bridges, not whole towers. */
 const MESH_BELOW_DEM_M = 15;
 const MESH_ABOVE_DEM_M = 80;
 
-/**
- * Drive the globe camera from the street-level pose: either continuously
- * ("camera follows view") or once, framing the image from behind.
- */
+/** Drive the globe camera from the street-level pose: continuously (follow) or once (framing). */
 export function createCameraFollow({ state, parts }) {
   const { render } = state.services;
 
@@ -20,11 +17,9 @@ export function createCameraFollow({ state, parts }) {
   }
 
   /**
-   * Ground under a photo for framing and following. The rendered surface is
-   * sampled first, but `sampleHeight` can return nonsense before the tiles
-   * under the point have loaded (kilometres below the ellipsoid), so a sample
-   * counts only when it is a plausible surface height and, once the bare-earth
-   * height is known, lies within the mesh window around it.
+   * Ground under a photo. `sampleHeight` can return kilometres below the
+   * ellipsoid before tiles load, so a sample counts only when plausible and
+   * within the mesh window around bare earth (once that is known).
    */
   function groundHeightAt(lon, lat, fallback) {
     const scene = state.viewer?.scene;
@@ -70,12 +65,7 @@ export function createCameraFollow({ state, parts }) {
     requestRender();
   }
 
-  /**
-   * The framing flight this module started, while it is still the camera's
-   * current flight. Cesium cancels it (calling `cancel`) when any other
-   * flight starts, so a stale token never cancels someone else's flight.
-   * @type {object|null}
-   */
+  /** Our framing flight while it is current; Cesium calls `cancel` when another flight starts. */
   let framing = null;
 
   /** Frame the current image from a short distance behind it. */
@@ -108,10 +98,7 @@ export function createCameraFollow({ state, parts }) {
     );
   }
 
-  /**
-   * Stop the framing flight if it is still in the air (the image closed or
-   * the layer went off). A flight another feature started since is left be.
-   */
+  /** Stop our framing flight if it is still in the air; another feature's flight is left alone. */
   function cancelFraming() {
     if (!framing) return;
     // Give up ownership first: cancelFlight delivers `cancel` synchronously.

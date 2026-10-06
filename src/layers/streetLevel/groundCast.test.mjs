@@ -83,7 +83,7 @@ test('densifyLine splits long segments and keeps the vertices', () => {
   assert.deepEqual(densifyLine([[10, 50]]), [[10, 50]]);
 });
 
-test('densifyLine crosses the date line the short way and wraps what it adds (review IC8 P2)', () => {
+test('densifyLine crosses the date line the short way and wraps what it adds', () => {
   // 0.0002° apart: short enough to stay one segment, not 65 points via 0°.
   const short = [
     [179.9999, 0],
@@ -257,8 +257,8 @@ test('a full cache is cleared before a request counts its corners, so the reques
   });
   // One cell's four corners are cached...
   assert.equal(await caster.prepare([[10.0005, 50.0005]]), true);
-  // ...then a line over that cell and the next needs two more. Clearing after
-  // counting would have kept only the two new corners and lost the first cell.
+  // ...then a line over that cell and the next needs two more, and the first
+  // cell must survive the eviction.
   const line = [
     [10.0002, 50.0005],
     [10.0018, 50.0005],
@@ -304,10 +304,9 @@ test('cancelling a prepare cancels its terrain request', async () => {
   assert.equal(seen[0], controller.signal, 'the tile signal reaches the proxy');
 });
 
-test('prepared lines always cast with the mesh, however their segments cross the grid (review IC8 P1)', async () => {
-  // Seeded walks with 50–300 m segments: the finer mesh densifying used to
-  // land in grid cells the coarse points skipped, so most of them came back
-  // null and stayed draped over roofs.
+test('prepared lines always cast with the mesh, however their segments cross the grid', async () => {
+  // Seeded walks with 50–300 m segments: the finer mesh points can land in
+  // grid cells the coarse points skip.
   let seed = 7;
   const random = () => {
     seed = (seed * 16807) % 2147483647;
@@ -332,7 +331,7 @@ test('prepared lines always cast with the mesh, however their segments cross the
   assert.equal(failures, 0);
 });
 
-test('a line across the date line casts along the date line (review IC8 P2)', async () => {
+test('a line across the date line casts along the date line', async () => {
   // Ground that rises northward only, so both sides of ±180° agree.
   const calls = [];
   const terrain = {

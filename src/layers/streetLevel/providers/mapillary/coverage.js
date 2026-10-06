@@ -41,11 +41,7 @@ const REMESH_INTERVAL_MS = 1500;
 const REMESH_STAGGER_MS = 120;
 /** Old-zoom tiles are kept at most this long after a zoom change. */
 const STALE_TILE_MAX_MS = 6000;
-/**
- * Sequences per ground primitive. Ground polyline geometry is built on a
- * worker in proportion to the instance count, so smaller batches put the
- * first lines on screen sooner instead of one big batch arriving late.
- */
+/** Sequences per primitive: smaller batches build, and show, sooner. */
 const SEQUENCE_PRIMITIVE_BATCH = 120;
 
 const PER_TILE_SEQUENCE_CAP = Math.floor(
@@ -71,12 +67,7 @@ function partIds(sequence) {
   );
 }
 
-/**
- * Sequence id for a picked line, whichever part was hit: `mly:seq:<id>` and
- * `mly:seq:<id>~<part>` both give `<id>`; null for any other pick.
- * @param {string} pickId
- * @returns {string|null}
- */
+/** Sequence id for any part's pick id (`mly:seq:<id>[~<part>]`), else null. */
 export function sequenceIdFromPick(pickId) {
   if (typeof pickId !== 'string' || !pickId.startsWith(PICK_PREFIX.sequence))
     return null;
@@ -86,22 +77,11 @@ export function sequenceIdFromPick(pickId) {
 }
 
 /**
- * Camera-driven coverage: z0–5 `overview` points from orbit down to 60 km,
- * then z11–14 sequence polylines clamped to terrain and 3D tiles. Decoded
- * tiles are kept so the imagery filter can rebuild without refetching.
- *
- * In the core's terrain surface mode (Google 3D at street zoom) a tile's
- * lines are cast to the bare earth instead: draped lines would land on roofs
- * and tree tops. A tile is drawn draped first and swapped for its cast lines
- * once the terrain heights are in, so coverage never waits on the terrain.
- */
-/**
- * Whether any point of a line's bounding `box` is within the mesh sampler's
- * range of the camera ground point `centre`, measured the short way round
- * the date line.
+ * Whether any point of `box` ({west, south, east, north}) is within the mesh
+ * sampler's range of `centre`, the ground point under the camera.
  */
 export function meshBoxInRange(box, centre) {
-  // Take the camera's longitude to the box's side of the date line first:
+  // Move the camera's longitude to the box's side of the date line first:
   // clamping 179.999 into a box at -179.99 would pick its far edge.
   const lon =
     centre.lon +
@@ -113,6 +93,12 @@ export function meshBoxInRange(box, centre) {
   return metresBetween(centre, nearest) <= MESH_SAMPLE_RADIUS_M;
 }
 
+/**
+ * Camera-driven coverage: overview points (z0–5) from orbit, sequence lines
+ * (z11–14) near the ground. In terrain surface mode a tile is drawn draped
+ * first, then swapped for lines cast to the bare earth (draped lines would
+ * land on roofs), so coverage never waits on terrain heights.
+ */
 export function createCoverage({ state, source }) {
   const { render } = state.services;
 
@@ -142,9 +128,8 @@ export function createCoverage({ state, source }) {
   }
 
   /**
-   * The sequences a tile draws: newest first, past the imagery filter, then
-   * capped. Capping before the filter could leave a dense tile of newer flat
-   * captures with no 360° lines at all.
+   * A tile's sequences, filtered then capped: capping first could leave a
+   * dense tile of newer flat captures with no 360° lines at all.
    */
   function drawnSequences(entry) {
     const drawn = [];
@@ -157,11 +142,9 @@ export function createCoverage({ state, source }) {
   }
 
   /**
-   * Primitives for a tile's sequences, in draw batches: ground primitives
-   * draped on the globe, plus (in terrain mode) plain polylines at the cast
-   * heights for every part whose heights are cached. Each part of a sequence
-   * with a capture gap is its own line. Each batch remembers the selection
-   * its colours were built with.
+   * Batched primitives for a tile's sequence parts: cast polylines where
+   * terrain heights are cached, draped ground lines otherwise. Each batch
+   * records the selection its colours were built with.
    */
   function buildSequencePrimitives(sequences) {
     const ground = terrainMode() ? state.context.groundCaster : null;
@@ -233,13 +216,11 @@ export function createCoverage({ state, source }) {
   }
 
   /**
-   * Fetch the terrain heights a tile's lines need, then redraw the tile cast.
-   * `castRequested` holds while the tile's castable lines are cast; a cast
-   * that resolves nothing (terrain proxy down, tile too big) clears it, so
-   * the next refresh tries again rather than this retrying in a loop.
+   * Fetch the terrain heights a tile's lines need, then redraw it cast. A
+   * cast that resolves nothing clears `castRequested`, so the next refresh
+   * retries instead of this looping.
    */
   function castTile(entry) {
-    // `castAbort` is set while a cast is in flight.
     if (entry.castRequested || entry.castAbort || !terrainMode()) return;
     entry.castRequested = true;
     entry.castAbort = new AbortController();
@@ -264,10 +245,7 @@ export function createCoverage({ state, source }) {
     });
   }
 
-  /**
-   * Rebuild a tile's lines (cast, or with new mesh heights), keeping the old
-   * ones on screen until the new ones are built, so nothing blinks.
-   */
+  /** Rebuild a tile's lines; the old ones stay up until the new are ready. */
   function redrawTile(entry) {
     const previous = entry.primitives;
     entry.primitives = [];
@@ -275,7 +253,7 @@ export function createCoverage({ state, source }) {
     removeWhenReady(entry, previous);
   }
 
-  /** The point under the camera: where the mesh sampler measures its range from. */
+  /** Lon/lat under the camera, where mesh range is measured from. */
   function meshCentre() {
     const carto = state.viewer?.camera?.positionCartographic;
     if (!carto) return null;
@@ -285,11 +263,9 @@ export function createCoverage({ state, source }) {
     };
   }
 
-  /** Whether any of a {west, south, east, north} box is within the sampler's range. */
-
   /**
-   * A tile's drawn lines with their bounding boxes, built once per filter;
-   * each line's mesh points are densified the first time it is in range.
+   * A tile's drawn lines with bounding boxes, built once per filter; mesh
+   * points are densified the first time a line is in range.
    */
   function meshParts(entry) {
     if (entry.meshParts) return entry.meshParts;
@@ -332,10 +308,7 @@ export function createCoverage({ state, source }) {
     if (points.length) sampler.request(points);
   }
 
-  /**
-   * New mesh samples landed: redraw the tiles they fall in, throttled, with
-   * the same no-blink swap as the bare-earth cast.
-   */
+  /** Redraw the tiles new mesh samples fall in, throttled. */
   function onMeshSampled(batch) {
     if (!terrainMode() || !state.context.isActive()) return;
     for (const entry of state.coverage.tiles.values()) {
@@ -543,9 +516,8 @@ export function createCoverage({ state, source }) {
       });
       if (kind === 'sequence') await ensureTerrainReady();
       const bytes = await fetching;
-      // A refresh that still wants this tile must not throw the bytes away;
-      // only an abort (tile no longer wanted, or zoom changed) does.
-      // A retire, clear or newer request for this tile owns it now.
+      // Only an abort, a retire, a clear or a newer request for this tile
+      // discards the bytes; a refresh that still wants the tile keeps them.
       const current = () =>
         state.coverage.pending.get(key) === controller &&
         !state.coverage.tiles.has(key);
@@ -644,10 +616,7 @@ export function createCoverage({ state, source }) {
     requestRender();
   }
 
-  /**
-   * Move every loaded tile to the stale set instead of removing it, so the
-   * old zoom stays visible while the new zoom streams in (no blank globe).
-   */
+  /** Move tiles to the stale set: the old zoom shows until the new one loads. */
   function retire() {
     for (const controller of state.coverage.pending.values())
       controller.abort();
@@ -812,9 +781,8 @@ export function createCoverage({ state, source }) {
   }
 
   /**
-   * Redraw loaded tiles draped or cast after the core's surface mode changes,
-   * then re-pick the zoom: the bare-earth height under the camera that the
-   * change brings in can move it (a high city reads much closer to the street).
+   * Redraw tiles draped or cast for the new surface mode, then re-pick the
+   * zoom, since the ground height under the camera may have changed.
    */
   function setSurface() {
     if (!state.context.isActive()) return;
@@ -839,10 +807,7 @@ export function createCoverage({ state, source }) {
     }
   }
 
-  /**
-   * Every tile drawn on the globe: the current zoom's, and the old zoom's
-   * kept visible until the new one is in (see retire).
-   */
+  /** Every tile on the globe: the current zoom's and the stale zoom's. */
   function drawnEntries() {
     return [...state.coverage.tiles.values(), ...state.coverage.stale.values()];
   }
@@ -886,10 +851,8 @@ export function createCoverage({ state, source }) {
   }
 
   /**
-   * Colours are baked in when a tile's lines are built, and a primitive
-   * cannot be recoloured until it is ready. Cast swaps and remeshes rebuild
-   * tiles all the time, so while any primitive is building, catch each one
-   * up with the selection made or cleared meanwhile as it becomes ready.
+   * A primitive cannot be recoloured until it is ready, so while any is
+   * building, catch each one up with the selection as it becomes ready.
    */
   function watchSelection() {
     const scene = state.viewer?.scene;

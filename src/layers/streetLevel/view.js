@@ -1,11 +1,7 @@
 import * as Cesium from 'cesium';
 import { wrapLon } from './tileMath.js';
 
-/**
- * Approximate metres between two {lon, lat} points: equirectangular, good
- * for the street-scale distances the layer measures. Measured the short way
- * round, so neighbours either side of ±180° are metres apart, not a world.
- */
+/** Equirectangular metres between {lon, lat} points, the short way round ±180°; street scale. */
 export function metresBetween(a, b) {
   const lat = (((a.lat + b.lat) / 2) * Math.PI) / 180;
   return Math.hypot(
@@ -15,11 +11,8 @@ export function metresBetween(a, b) {
 }
 
 /**
- * Run low-priority work when the browser is idle, within `timeout` ms; a
- * browser without idle callbacks (and Node) runs it a frame later. The task
- * gets the idle deadline, or null.
- * @param {(deadline: IdleDeadline|null) => void} task
- * @param {number} timeout
+ * Run `task(deadline)` when idle, within `timeout` ms; without idle callbacks
+ * (Node) it runs a frame later with a null deadline.
  */
 export function whenIdle(task, timeout) {
   if (typeof globalThis.requestIdleCallback === 'function')
@@ -28,10 +21,8 @@ export function whenIdle(task, timeout) {
 }
 
 /**
- * Height of the surface under the camera above the ellipsoid, in metres. The
- * globe's terrain answers when the globe is shown; Google 3D hides the globe,
- * so there the bare-earth height from `groundAt(lon, lat)` answers instead.
- * Null when neither has a sample yet.
+ * Ellipsoidal height (m) of the surface under the camera: globe terrain, or
+ * `groundAt` where Google 3D hides the globe; null without a sample.
  * @param {object} viewer
  * @param {{groundAt?: (lon: number, lat: number) => number|null}} [options]
  */
@@ -48,13 +39,7 @@ export function groundUnderCamera(viewer, { groundAt } = {}) {
   return Number.isFinite(ground) ? ground : null;
 }
 
-/**
- * Camera height above the surface under the camera, in metres (without a
- * ground sample a camera over a city 1,600 m up would read 1,600 m too
- * high). Falls back to the ellipsoidal height when nothing has a sample yet.
- * @param {object} viewer
- * @param {{groundAt?: (lon: number, lat: number) => number|null}} [options]
- */
+/** Camera height (m) above the ground under it (options as `groundUnderCamera`). */
 export function cameraHeightAboveGround(viewer, options = {}) {
   const carto = viewer?.camera?.positionCartographic;
   if (!carto) return null;
@@ -90,18 +75,11 @@ function groundHit(camera, point, ellipsoid, maxRange) {
 }
 
 /**
- * Visible bbox as [west, south, east, north] degrees, or null when the camera
- * does not see the ground. A grid of screen rays is cast onto the ellipsoid
- * and only the rays that hit count, so a view that includes the horizon (or a
- * canvas whose frustum is stale) cannot inflate the box to the whole world;
- * `computeViewRectangle` is the fallback when too few rays land.
- *
- * `groundHeight` raises the ellipsoid to the ground under the camera: Google
- * 3D hides the globe, and a city 1,600 m up otherwise puts every hit
- * kilometres ahead of where the rays really meet the streets. `maxRange`
- * (metres) drops hits near the horizon, which a street-level view would
- * otherwise stretch into a box far bigger than anything it can show.
- * `nearRange` (metres) always includes the ground that far around the camera.
+ * Visible [west, south, east, north] degrees, or null. Only screen rays that
+ * hit count, so a horizon cannot inflate the box to the world.
+ * `groundHeight` raises the ellipsoid to the ground (Google 3D hides the
+ * globe), `maxRange` (m) drops near-horizon hits, and `nearRange` (m) always
+ * includes the ground around the camera.
  */
 export function visibleBbox(
   viewer,
@@ -129,8 +107,7 @@ export function visibleBbox(
     }
   }
   // The ground around the camera always counts: a street-level view's screen
-  // rows skip from the horizon to the first few metres, and turning the
-  // camera should not wait for a reload.
+  // rows skip from the horizon to the first few metres.
   const nadir = camera.positionCartographic;
   if (Number.isFinite(nearRange) && nearRange > 0 && nadir) {
     const dLat = nearRange / 111_320;
@@ -212,10 +189,8 @@ export function viewCentre(viewer) {
 }
 
 /**
- * The ground the camera is looking at, for ranking coverage tiles: the point
- * under the camera (`nadir`) and the ground hit at the centre of the screen
- * (`ahead`, null when the centre ray misses or is out of `maxRange`).
- * @returns {{nadir: {lon: number, lat: number}, ahead: {lon: number, lat: number}|null}|null}
+ * Ground the camera looks at, for ranking tiles: `nadir` under the camera and
+ * `ahead` at the screen centre (null on a miss or beyond `maxRange`).
  */
 export function viewFocus(
   viewer,
@@ -251,7 +226,10 @@ export function viewFocus(
   return { nadir, ahead };
 }
 
-/** How far below WGS84 the horizon cull's occluder sits, in metres. */
+/**
+ * Horizon occluder depth below WGS84 (m): ground can lie below the ellipsoid
+ * (NYC −22 m), and an occluder at 0 m would hide the cones around it.
+ */
 export const HORIZON_CULL_DEPTH_M = 1000;
 const HORIZON_CULL_ELLIPSOID = new Cesium.Ellipsoid(
   Cesium.Ellipsoid.WGS84.radii.x - HORIZON_CULL_DEPTH_M,
@@ -260,18 +238,9 @@ const HORIZON_CULL_ELLIPSOID = new Cesium.Ellipsoid(
 );
 
 /**
- * Hide billboards and points behind the horizon, as the cyclones layer does.
- * Street Level's skip the depth test, so Google 3D and clouds never hide the
- * near side's; nothing else then stops the far hemisphere's drawing through
- * the globe, and a finite skip distance cannot, as the horizon's distance
- * moves with the camera. Re-culls on pre-render only once the camera moved,
- * and stops listening when there is nothing left to cull.
- *
- * The occluder is the WGS84 ellipsoid shrunk by HORIZON_CULL_DEPTH_M, below
- * any real surface: on the ellipsoid itself a camera standing on ground that
- * lies below it (NYC −22 m, Colombo −95 m) would see every lower point as
- * behind the horizon and hide the cones around it. A kilometre changes
- * nothing for the far side of the Earth seen from orbit.
+ * Hide billboards and points behind the horizon: they skip the depth test, so
+ * nothing else stops the far side drawing through the globe. Re-culls on
+ * pre-render after the camera moves; stops when nothing is left to cull.
  * @param {{getViewer: () => object|null, items: () => Iterable<{position: object, show: boolean}>, onChange?: () => void}} options
  */
 export function createHorizonCull({ getViewer, items, onChange }) {
@@ -308,10 +277,7 @@ export function createHorizonCull({ getViewer, items, onChange }) {
     if (!cullAll(position)) stop();
   }
 
-  /**
-   * Cull `added` (new or moved items), or everything, now; then everything
-   * again whenever the camera moves.
-   */
+  /** Cull `added` items (or all) now, then all again whenever the camera moves. */
   function update(added) {
     const viewer = getViewer();
     const position = viewer?.camera?.positionWC;

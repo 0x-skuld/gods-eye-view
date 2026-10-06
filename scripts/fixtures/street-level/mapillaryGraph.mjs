@@ -1,32 +1,14 @@
 import { readFileSync } from 'node:fs';
 
 /**
- * Mapillary Graph API and image CDN, answered from fixtures, so the Street
- * Level gate's photo flow runs with no network and no real token (the CI
- * mode). It covers every request the app's provider and the embedded
- * MapillaryJS 4 viewer make while opening, stepping and closing a photo:
+ * Mapillary Graph API and image CDN answered from fixtures, covering every
+ * request the provider and MapillaryJS make while opening, stepping and
+ * closing a photo, so the gate needs no network and no real token.
  *
- *   provider (src/layers/streetLevel/providers/mapillary/source.js)
- *     GET graph /images?lat&lng&radius&limit&fields       nearest lookup
- *     GET graph /images?sequence_ids&fields&limit         a sequence's cones
- *   MapillaryJS GraphDataProvider (node_modules/mapillary-js)
- *     GET graph /images?image_ids&fields                  image ents (core + spatial)
- *     GET graph /images?s2&fields                         core images of an S2 cell
- *     GET graph /image_ids?sequence_id                    a sequence's image ids
- *     GET graph /{imageId}/tiles?z&fields                 image tiles (imageTiling)
- *     GET thumb_1024_url / thumb_2048_url                 the photo itself
- *   and the CORS preflight of each Graph call (MapillaryJS sends an
- *   Authorization header).
- *
- * MapillaryJS never asks for a mesh or an SfM cluster here: the fixtures have
- * no `merge_cc` (an unmerged image gets an empty mesh without a request) and
- * no `sfm_cluster` url, and the spatial component that reads clusters is off.
- * S2 cells answer empty: the viewer then builds no spatial edges, which the
- * gate does not use (it steps along the sequence through the cones).
- *
- * The photo (street-640x320.jpg) is generated for this repository (a sky and
- * ground gradient with posts; scripts/fixtures/street-level), so it carries
- * no third-party licence.
+ * No `merge_cc` or `sfm_cluster` means MapillaryJS never asks for a mesh or
+ * cluster, and empty S2 cells mean no spatial edges, which the gate does not
+ * use. The photo is generated for this repository, so it has no third-party
+ * licence.
  */
 
 const DAY_MS = 86_400_000;
@@ -40,12 +22,12 @@ export const PHOTO_LINE = Object.freeze({
 });
 /** Metres between consecutive photos on the line (≥ the 3 m cone thinning). */
 export const PHOTO_SPACING_M = 30;
-/** Host the fixture thumbnails are served from (answered, never reached). */
+/** Fixture thumbnail host (answered, never reached). */
 export const THUMB_HOST = 'qa-fixture.mapillary.com';
 
 const METRES_PER_DEG_LAT = 110_540;
 
-/** Approximate ground distance in metres, as the app's metresBetween. */
+/** Ground distance in metres, as the app's metresBetween. */
 export function metresApart(a, b) {
   const lat = (((a.lat + b.lat) / 2) * Math.PI) / 180;
   return Math.hypot(
@@ -55,8 +37,7 @@ export function metresApart(a, b) {
 }
 
 /**
- * The fixture photos along PHOTO_LINE, south to north: every third one a
- * 360° panorama, the rest flat, all captured a month before `now`.
+ * Photos along PHOTO_LINE, south to north; every third one is a panorama.
  * @returns {Array<{id: string, lon: number, lat: number, isPano: boolean, capturedAt: number, compassAngle: number}>}
  */
 export function photoImages(now = Date.now()) {
@@ -112,7 +93,7 @@ function imageRecord(image) {
   };
 }
 
-/** Pick the requested fields (plus id), as the Graph API answers. */
+/** The requested fields plus id, as the Graph API answers. */
 function withFields(record, fields) {
   if (!fields) return record;
   const out = { id: record.id };
@@ -136,16 +117,12 @@ const json = (status, body) => ({
 });
 
 let photoBytes = null;
-/** The checked-in fixture photo, read once. */
 export function photoJpeg() {
   photoBytes ??= readFileSync(new URL('./street-640x320.jpg', import.meta.url));
   return photoBytes;
 }
 
-/**
- * The query parameters that name a Graph call (not their values), so a run
- * can report which calls it answered without echoing the access token.
- */
+/** Name a call by its parameter names only, so the token is never echoed. */
 export function describeCall(method, url) {
   const keys = [...url.searchParams.keys()]
     .filter((key) => key !== 'access_token')
@@ -157,11 +134,10 @@ export function describeCall(method, url) {
 }
 
 /**
- * Answer one Mapillary request from fixtures.
+ * Answer one Mapillary request. `known` is false for a request no fixture
+ * covers, so the gate fails on a new MapillaryJS call instead of missing it.
  * @param {{method: string, url: string, images?: ReturnType<typeof photoImages>}} request
  * @returns {{status: number, contentType?: string, headers?: object, body: string|Buffer, known: boolean}}
- *   `known` is false for a request no fixture covers (answered 404); the gate
- *   fails on those so a new MapillaryJS call cannot pass unnoticed.
  */
 export function answerMapillaryRequest({ method, url, images }) {
   const address = new URL(url);

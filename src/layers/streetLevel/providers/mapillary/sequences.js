@@ -58,12 +58,8 @@ export function createSequences({ state, source, parts }) {
     state.context.notify();
   }
 
-  /**
-   * The cones on the globe: each drawn image's index, billboard and height
-   * (null while clamped), and the mesh cells under them, so a mesh sample
-   * moves only the cones it can affect.
-   */
   const nothingDrawn = () => ({ images: [], cones: [], cells: new Set() });
+  /** Drawn cones, plus the mesh cells under them, so a sample moves only those. */
   let drawn = nothingDrawn();
 
   // The cones skip the depth test: hide the ones behind the globe.
@@ -105,11 +101,8 @@ export function createSequences({ state, source, parts }) {
   }
 
   /**
-   * Heights for the cones in terrain mode (Google 3D at street zoom), so they
-   * stand on the street rather than on roofs and tree tops: bare earth,
-   * refined along the sequence by the sampled Google 3D surface. Null when
-   * draped, or when a terrain height is not cached yet; that fetches the
-   * heights and draws the cones again.
+   * Terrain-mode cone heights on the street, not on roofs: bare earth refined
+   * by mesh samples. Null when draped or while terrain heights are fetched.
    */
   function coneHeights(images, { request = true } = {}) {
     const ground = state.context.groundCaster;
@@ -173,10 +166,8 @@ export function createSequences({ state, source, parts }) {
   }
 
   /**
-   * New mesh samples landed: when any is under a cone, re-place the cones
-   * whose cast height changed, in place. A sample can move a neighbour too
-   * (refineHeights bridges across covered points), so every height is
-   * recomputed (cheap arithmetic) but only moved cones are touched.
+   * Re-place cones whose height new mesh samples changed. A sample can move
+   * a neighbour too, so every height is recomputed but only moved cones touched.
    */
   function onMeshSampled(batch) {
     if (state.context.getSurface?.() !== 'terrain' || !drawn.cones.length)

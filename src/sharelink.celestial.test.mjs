@@ -184,7 +184,7 @@ test('a collapsed Recent Imagery panel survives the share-link round trip beside
   ] });
 });
 
-test('a collapsed Street Level panel survives the share-link round trip (review P3)', () => {
+test('a collapsed Street Level panel survives the share-link round trip', () => {
   const manager = makeManager();
   manager.setPanelStateProvider(() => ({ specs: [
     { id: 'cctv-panel', collapsed: false },

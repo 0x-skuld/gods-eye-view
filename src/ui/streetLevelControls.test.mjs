@@ -13,10 +13,7 @@ import { fakeStreetLevelProvider } from '../testSupport/streetLevelFakes.mjs';
 
 /* ── A small DOM: just what the panel controls touch ───────────────────── */
 
-/**
- * Every write the page would see as a mutation: an attribute set or removed,
- * or a reflected property assigned (even to the value it already has).
- */
+/** Every write a page would see as a mutation, even one to the same value. */
 const mutations = { count: 0 };
 const REFLECTED = ['hidden', 'disabled', 'textContent', 'title', 'value'];
 /** The reflected properties a MutationObserver sees, as the record it gets. */
@@ -27,10 +24,8 @@ const REFLECTED_RECORDS = {
   textContent: { type: 'childList' },
 };
 
-/** The fake MutationObservers currently observing (see fakeMutationObserver). */
 const liveObservers = new Set();
 
-/** Queue a mutation record for every observer whose options cover it. */
 function recordMutation(target, { type, attributeName = null }) {
   for (const observer of liveObservers)
     observer.consider(target, type, attributeName);
@@ -116,10 +111,7 @@ class FakeNode {
     const siblings = this.parent.children;
     return siblings[siblings.indexOf(this) + 1] || null;
   }
-  /**
-   * As layout reports it: null when this node or an ancestor is hidden (no
-   * box), or when it is not in the document; else its parent.
-   */
+  /** Null when this node or an ancestor is hidden or disconnected. */
   get offsetParent() {
     if (!this.isConnected) return null;
     for (let node = this; node; node = node.parent)
@@ -388,11 +380,7 @@ const memoryStorage = () => {
   };
 };
 
-/**
- * The production path a panel click takes: controls → dataManager
- * .setLayerParams → layer.setParams → LayerStateCoordinator's durable state,
- * which is what share links and saved state encode.
- */
+/** The production path: controls → dataManager → layer → durable layer state. */
 async function productionPanel(dom) {
   const provider = standInProvider();
   const layer = createStreetLevelLayer({ providers: [provider.def] });
@@ -592,7 +580,7 @@ test('lighting a dark chip switches the provider on as a user params request, th
     assert.deepEqual(calls.setEnabled, [true]);
   }));
 
-test('the legend rebuilds when a swatch changes, even at the same count (review #9)', () =>
+test('the legend rebuilds when a swatch changes, even at the same count', () =>
   withDom(async (dom) => {
     const { layer } = stubPanel(dom, uiState());
     const legend = dom.root.querySelector('#sl-legend');
@@ -610,7 +598,7 @@ test('the legend rebuilds when a swatch changes, even at the same count (review 
     assert.equal(swatch(), '#a66bff');
   }));
 
-test('the viewer is resized once when it opens, not on every render (review #8, gekh P3)', () =>
+test('the viewer is resized once when it opens, not on every render', () =>
   withDom(async (dom) => {
     const { layer } = stubPanel(dom, uiState());
     await settle();
@@ -714,7 +702,7 @@ test('an image closed while expanded does not return focus into the hidden viewe
     controls.destroy();
   }));
 
-/* ── gekh review on #768 ───────────────────────────────────────────────── */
+/* ── Restores, the modal viewer and keyboard rules ─────────────────────── */
 
 test('a restored layer does not reopen a panel the user collapsed, and automatic opens are never stored (P2-1)', () =>
   withDom(async (dom) => {
@@ -811,10 +799,8 @@ test('a hidden expanded viewer (Clean View, recording, cockpit) holds neither Es
   }));
 
 /**
- * A MutationObserver stand-in. Like the real one it queues only the records
- * its `observe` options cover (childList, attributes / attributeFilter,
- * subtree) and delivers them in a microtask, only when there are some;
- * `fire()` delivers what is queued at once.
+ * A MutationObserver stand-in: queues only the records its options cover and
+ * delivers them in a microtask; `fire()` delivers at once.
  */
 function fakeMutationObserver() {
   const observers = [];
@@ -888,7 +874,7 @@ const inertOutside = (dom) =>
     .filter((node) => node.id !== 'sl-viewer-wrap')
     .map((node) => [node.id, node.inert === true]);
 
-test('the expanded viewer makes the rest of the app inert and gives it back on shrink (IC8 P2)', () =>
+test('the expanded viewer makes the rest of the app inert and gives it back on shrink', () =>
   withObserver(() =>
     withDom(async (dom) => {
       const { controls } = stubPanel(dom, uiState({ open: true }));
@@ -919,7 +905,7 @@ test('the expanded viewer makes the rest of the app inert and gives it back on s
     }),
   ));
 
-test('a CSS-hidden expanded viewer releases the app; showing it again, and new children, go inert (IC8 P2)', () =>
+test('a CSS-hidden expanded viewer releases the app; showing it again, and new children, go inert', () =>
   withObserver((observer) =>
     withDom(async (dom) => {
       const { controls } = stubPanel(dom, uiState({ open: true }));
@@ -954,7 +940,7 @@ test('a CSS-hidden expanded viewer releases the app; showing it again, and new c
     }),
   ));
 
-test('an image closed while expanded releases the app (IC8 P2)', () =>
+test('an image closed while expanded releases the app', () =>
   withObserver(() =>
     withDom(async (dom) => {
       const { layer, controls } = stubPanel(dom, uiState({ open: true }));

@@ -3,13 +3,10 @@ import { VectorTile } from '@mapbox/vector-tile';
 import { tileLocalToLonLat } from '../../tileMath.js';
 
 /**
- * Decode a Mapillary coverage tile (`mly1_public`) in the browser.
- * Sequences are LineStrings with capture metadata; z0–5 tiles carry
- * `overview` points instead. The z14 `image` layer (it can hold >150k
- * points) is never read.
+ * Decode a `mly1_public` coverage tile into sequences and (z0–5) overview
+ * points. The z14 `image` layer, which can hold >150k points, is skipped.
  * @param {Uint8Array} bytes
  * @param {{x:number,y:number,z:number}} address
- * @returns {{sequences: Array<object>, overview: Array<object>}}
  */
 export function decodeCoverageTile(bytes, address) {
   const result = { sequences: [], overview: [] };
@@ -44,7 +41,6 @@ export function decodeCoverageTile(bytes, address) {
       });
     }
   }
-  // z0–5 tiles carry an `overview` point layer instead of sequences.
   const overviewLayer = tile.layers.overview;
   if (overviewLayer) {
     for (let i = 0; i < overviewLayer.length; i++) {

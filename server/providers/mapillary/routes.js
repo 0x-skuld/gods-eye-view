@@ -70,8 +70,7 @@ async function handleTile(req, res, allow) {
           retryAfter,
         });
       }
-      // Any other refusal is Mapillary's fault, not the client's: an
-      // upstream 400 must not read as a malformed request to this proxy.
+      // An upstream 400 must not read as a malformed request to this proxy.
       return sendJson(res, 502, { error: error.message });
     }
     sendJson(res, 502, { error: error?.message || 'Tile fetch failed' });
@@ -79,11 +78,8 @@ async function handleTile(req, res, allow) {
 }
 
 /**
- * Attach every Mapillary route to a connect-style middleware stack. Both
- * refuse cross-site browser requests (server/providers/common/same-site.js):
- * another page could otherwise spend the user's token, and one Mapillary 429
- * it provokes holds every tile miss. Tiles are also rate-limited per client
- * IP (TILE_ROUTE_MAX_PER_MIN).
+ * Attach the Mapillary routes. Both refuse cross-site requests so another page
+ * cannot spend the token or provoke a 429 that holds every tile miss.
  */
 export function installMapillaryRoutes(middlewares) {
   const allow = makeRateLimiter({

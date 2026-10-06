@@ -18,9 +18,8 @@ import { COLORS } from './policy.js';
  */
 
 /**
- * What the switched-on providers add up to: summed counts, any loading, the
- * first hint and error, whether every one of them lacks its key, and whether
- * that is because a provider rejected the key it was given.
+ * Totals over switched-on providers. Key-gated only when every one lacks its
+ * key; `keyRejected` when that is because a key was refused.
  * @param {Array<ProviderSnapshot>} providers
  */
 export function summarizeCoverage(providers) {
@@ -40,12 +39,8 @@ export function summarizeCoverage(providers) {
 }
 
 /**
- * Compose the snapshot the panel renders from the core state and one
- * snapshot per registered provider. Pure, so the merge rules are testable:
- * counts add up across active providers, the layer is key-gated only when
- * every switched-on provider lacks its key, and the legend lists one swatch
- * per active source, in its colour and under its name, followed by the
- * shared selection colour.
+ * The panel snapshot from core state and provider snapshots. The legend has
+ * one swatch per active source, then the shared selection colour.
  * @param {{enabled: boolean, filter: object, providers: Array<ProviderSnapshot>, street: object, sequence: object}} input
  */
 export function composeUIState({

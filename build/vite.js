@@ -81,8 +81,7 @@ export function createBrowserViteConfig({
         '@jtarrio/signals/demod/modes.js',
         '@jtarrio/webrtlsdr/rtlsdr.js',
         'egm96-universal',
-        // MapillaryJS is loaded on demand the first time a street-level
-        // image is opened.
+        // Loaded on demand when the first street-level image opens.
         'mapillary-js',
       ],
     },

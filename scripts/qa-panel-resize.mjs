@@ -1,12 +1,8 @@
 #!/usr/bin/env node
 /**
- * Prove the portable CCTV panel in a real browser: a header drag lifts it out
- * of the right rail, every resize handle moves only its own edges, minimum
- * sizes hold, the window survives a reload and a header double-click snaps
- * it back and forgets the stored position. Page errors and Cesium render-loop
- * errors fail the run; a failed run saves screenshots, console and failed
- * requests under qa-artifacts/panel-resize/ (scripts/qa-browserEvidence.mjs).
- * `--fail-on-retry` (or QA_FAIL_ON_RETRY=1) fails on any header-press retry.
+ * Browser QA for the floating CCTV panel: lift, resize from every handle,
+ * minimum size, reload, and dock again. `--fail-on-retry` (or
+ * QA_FAIL_ON_RETRY=1) fails on any header-press retry.
  */
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
@@ -28,7 +24,6 @@ import {
 export const PANEL_ID = 'cctv-panel';
 export const STORAGE_KEY = `godsEyeView.v8.panelPos.${PANEL_ID}`;
 export const MIN_SIZE = { width: 300, height: 160 };
-/** Where a failed run leaves its screenshots and logs. */
 export const ARTIFACT_DIR = 'qa-artifacts/panel-resize';
 const VIEWPORT = { width: 1400, height: 900 };
 const EDGE_BY_SIDE = { n: 'top', s: 'bottom', e: 'right', w: 'left' };
@@ -67,7 +62,7 @@ export function handlePoint(rect, dir) {
   return { x, y };
 }
 
-/** Edges of `after` that moved although a resize in `dir` should have pinned them. */
+/** Pinned edges that moved during a resize in `dir`. */
 export function driftedEdges(before, after, dir, tolerance = 1.5) {
   const edges = (box) => ({
     left: box.left,
@@ -116,7 +111,6 @@ async function main() {
         timeout: 90_000,
       });
       await page.waitForSelector(`#${PANEL_ID} .panel-header`);
-      // The first-run dialog sits over the globe until a choice is made.
       await page.evaluate(() => {
         document.querySelector('.first-run-explore')?.click();
       });
@@ -152,11 +146,9 @@ async function main() {
           stored: localStorage.getItem(`godsEyeView.v8.panelPos.${id}`),
         };
       }, PANEL_ID);
-    /** Wait until the CCTV box has held still for ten animation frames. */
     /**
-     * Best effort: wait until the CCTV box (to the whole pixel) has held still
-     * for half a second. The lift is checked against the box at pointerdown,
-     * so a rail that keeps nudging the panel only costs the wait, not the run.
+     * Best effort: wait for the box to hold still for half a second. The lift
+     * is checked against the box at pointerdown, so a timeout only costs time.
      */
     const settle = async () => {
       try {
@@ -200,7 +192,6 @@ async function main() {
     }, STORAGE_KEY);
     await boot();
 
-    // Expand CCTV so the panel has a body worth resizing.
     await page.evaluate((id) => {
       const panel = document.getElementById(id);
       if (panel.classList.contains('collapsed'))
@@ -220,10 +211,7 @@ async function main() {
     assert.equal(docked.floating, false);
     assert.equal(docked.inRail, true);
 
-    // Lift out: drag the header 200px left and 100px up. The window must lift
-    // from wherever the panel sits when the pointer goes down, so record that
-    // box in the page instead of trusting the earlier read.
-    // What sits above CCTV in the rail, to name whatever shifted it.
+    // Names whatever above CCTV in the rail shifted it, for a retry note.
     const railAbove = () =>
       page.evaluate((id) => {
         const out = [];
@@ -237,11 +225,8 @@ async function main() {
         return out.join(' ');
       }, PANEL_ID);
     const aboveAtDock = await railAbove();
-    // Press only where the header really is, recording what the press landed
-    // on. A press the rail shifted out from under the header (seen on the CI
-    // runner: something above CCTV grows ~32 px after load) proves nothing
-    // about the drag, so it is retried; a press that landed in the header and
-    // did not lift fails at once (scripts/qa-panelDrag.mjs).
+    // On CI a panel above CCTV grows after load and can shift the header out
+    // from under the press; the helper retries only such a provable miss.
     const attempt = await liftPanelByHeader(page, PANEL_ID, {
       dx: -200,
       dy: -100,
@@ -289,7 +274,7 @@ async function main() {
     assert.equal(afterLayout.allocated, '', 'the rail no longer allocates it');
     const railExcludes = await page.evaluate((id) => {
       const rail = document.getElementById('right-context-rail');
-      // Same rule as the rail: hidden panels (a layer that is off) take no room.
+      // Same rule as the rail: hidden panels take no room.
       const counted = [...rail.children].filter((panel) =>
         panel.matches(
           '[data-panel-id]:not(.panel-floating):not(.collapsed):not([hidden])',
@@ -313,15 +298,13 @@ async function main() {
     );
     console.log('PASS: header drag lifts CCTV out of the rail');
 
-    // Park the window near the top: the voice dock sits above every panel at
-    // the bottom of the screen and would otherwise cover the south corners
-    // once the loop below has grown the window.
+    // Park near the top: the voice dock would cover the south corners once
+    // the loop below has grown the window.
     {
       const header = await headerPoint();
       await drag(header, 0, 120 - header.y);
     }
 
-    // Every handle moves only its own edges.
     const limits = {
       minWidth: MIN_SIZE.width,
       minHeight: MIN_SIZE.height,
@@ -332,7 +315,6 @@ async function main() {
       const before = await readPanel();
       const { dx, dy } = growthDelta(dir, 40);
       const point = handlePoint(before, dir);
-      // Name what the pointer lands on, so a covered handle is obvious.
       const hit = await page.evaluate(({ x, y }) => {
         const node = document.elementFromPoint(x, y);
         if (!node) return 'nothing';
@@ -350,7 +332,6 @@ async function main() {
     }
     console.log('PASS: eight resize handles keep the opposite edge pinned');
 
-    // Minimum size stops the moving edge.
     let before = await readPanel();
     await drag(handlePoint(before, 'se'), -2000, -2000);
     let after = await readPanel();
@@ -365,7 +346,6 @@ async function main() {
     assert.deepEqual(driftedEdges(before, after, 'nw', 2), []);
     console.log('PASS: minimum size holds from both corners');
 
-    // Reload restores the window.
     const saved = await readPanel();
     const record = JSON.parse(saved.stored);
     assert.equal(record.floating, true);
@@ -376,7 +356,6 @@ async function main() {
       near(restored[key], record[key], 2, `restored ${key}`);
     console.log('PASS: reload restores position and size');
 
-    // Double-click the header to snap back.
     const dock = await dockPanelByDoubleClick(page, PANEL_ID);
     const snapped = await readPanel();
     assert.equal(

@@ -2,26 +2,21 @@
 
 ## [Unreleased]
 
-- Rail panels can opt into a portable mode: dragging the CCTV or Street Level
-  panel by its header lifts it out of the right rail into a floating window
-  that resizes from any edge or corner, remembers its position and size across
-  reloads, and snaps back on a header double-click. A panel can also ask to
-  dock when it is collapsed while floating (Street Level does).
+- Street Level: a street-level imagery layer modelled on the iD editor's photo
+  overlay, with Mapillary as its first provider (free client token, CC BY-SA 4.0
+  imagery). One right-rail panel holds a chip per provider, shared 360°/flat and
+  captured-since filters, and an embedded viewer with EXPAND, FIT/FILL and
+  FOLLOW (Google 3D only). Coverage lines and image cones are drawn from orbit
+  down to a single street; on Google 3D they sit on the bare earth, refined
+  against the rendered mesh near the camera, so trees and buildings hide them.
+  Share links carry the provider switches, the filters and the panel's collapsed
+  state. A server proxy caches Mapillary coverage tiles (24 h, 1 GiB on disk),
+  refuses cross-site requests, rate-limits per IP and backs off when Mapillary
+  rejects the token or rate-limits.
 
-- Street Level: a provider-neutral street-level imagery layer modelled on the iD editor's photo overlay. One panel in the right rail carries a chip per imagery provider, shared 360°/flat and captured-since filters, coverage drawn on the globe from orbit down to a single street, image cones per sequence, and one embedded viewer whose adapter follows the provider of the open image; each active provider credits its imagery on the globe, and share links carry the provider switches and the filter. Mapillary is the first provider (free client token; CC BY-SA 4.0 imagery); Google Street View, KartaView and Panoramax are next. The panel is kept simple: the viewer opens at the top so the photo needs no scrolling, the header pill and the provider chips switch the layer, and SINCE is a slider. FOLLOW (the globe camera following the street-level view) is available on the Google 3D map only.
-
-- Street Level draws each imagery source in one colour, everywhere it appears: its PROVIDERS chip, coverage lines, overview points, image cones and a single legend swatch. Mapillary is green (no more age dimming or magenta panoramas; 360° cones are rings, and the 360°/FLAT filter still separates them); Panoramax will be purple and Google Street View blue.
-
-- Street Level coverage no longer floats over trees and bridges on the Google 3D map. At street zoom, sequence lines, image cones and the position marker are placed on the bare earth from the terrain service (with a 2 m lift) instead of being draped on the top of the photoreal mesh, so buildings and tree canopies hide what is behind them; other maps and higher views keep draped lines. Opening a photo no longer flies the camera underground when the Google tiles under it have not loaded yet. Near the camera the placement is refined against the rendered Google 3D surface, so lines also follow freeways in trenches and steep streets, and stay on the road under trees.
-
-- Street Level loads the coverage you are looking at in tilted views. Tiles are ranked along the line of sight, from the ground under the camera to the ground at the centre of the screen, and screen rays meet the ground at its real height (Denver is 1,600 m up), so the streets in front of the camera are no longer dropped for tiles near the horizon. On Google 3D, lines that are placed on the bare earth no longer fall back to draping over roofs when their finer points cross grid cells the coarse ones skipped.
-- Street Level names a Mapillary token that Mapillary refuses: the panel reads KEY REJECTED and says to replace `MAPILLARY_CLIENT_TOKEN` in Provider Settings, instead of a raw "HTTP 403". The proxy stops asking Mapillary on every camera move after a refusal (for that token) or a rate limit (until its `Retry-After`), and the panel clears the message when the layer is switched off.
-
-- Street Level polish from review: whole-earth coverage dots on the far side of the globe no longer show through it; a 360° or flat filter keeps a dense tile's matching lines instead of losing them to the per-tile cap; lines that lost their ground heights are cast again rather than left draped; a selection made while lines rebuild is applied once they are ready; hovering picks at most every 120 ms; Esc shrinks the expanded viewer wherever focus is, and closing a photo leaves focus in the panel; switching the layer off and on during the first photo load no longer leaves the viewer stuck. Portable panels lift only after a real mouse or pen drag, never on a click or a touch swipe. The MapillaryJS stylesheet now loads with the viewer instead of on every page (about 85 KB less render-blocking CSS). The tile proxy's disk cache is swept of expired tiles and capped at 1 GiB, keeps a cached tile's real age in memory, and refuses zoom levels the app never requests.
-
-- Street Level, second review round: the panel no longer reopens itself on every page load (only a user, voice or tool switch-on or an opening photo opens it, and those automatic opens are never stored); a floating panel is pulled back on-screen when its content grows or the window shrinks, and its header can never be dropped under the command dock or the voice pill; the expanded photo hides in Clean View, recording and the cockpit; closing a photo stops sequence playback; a failed sequence load can be retried and leaves no stale image cones. The tile proxy refuses cross-site requests and has a per-IP limit, runs at most six upstream fetches at once, stops a response past its size cap as it streams, counts empty tiles against its caches and answers other upstream refusals with 502. The panel's collapsed state now travels in share links (`ui` token `t`).
-
-- Street Level, third review round: closing a photo, switching the layer off or turning FOLLOW on stops the camera flight toward it (only while that flight is still Street Level's); a slow nearest-photo lookup can no longer replace a newer choice; distances, line densification and mesh sampling go the short way round the date line; image cones and the photo marker no longer show through the globe; a selection change recolours the previous zoom's lines still on screen; mesh sampling keeps to its time budget (a persistent priority queue, work only within range) and moves only the affected cones in place; the expanded viewer is a real modal (the rest of the app is inert while it shows); the tile proxy follows redirects only within the Mapillary tile origin; CI checks the real Mapillary routes.
+- The CCTV and Street Level panels are portable: drag the header to float the
+  panel, resize it from any edge or corner, and double-click the header to dock
+  it again. The position persists across reloads.
 
 - Add Norway's road cameras from Statens vegvesen as a CCTV pack. The camera
   list is one keyless GeoJSON request to the agency's OGC API view of its
@@ -458,7 +453,6 @@
 Add feed provenance to analyst/view answers and HUD context while retaining existing response fields and runner ownership (Matt Van Horn, #347).
 
 Analyst records for loaded satellites, datacenters and dams, with explicit bounded count/rank coverage (Matt Van Horn, #351).
-
 - New Fire Perimeters layer (Events group): live NIFC WFIGS interagency
   wildfire incident perimeters as ground-clamped polygons with a
   containment-colored fire line, refreshed every 5 minutes from the public
@@ -734,6 +728,7 @@ This changelog records public product changes. For the authoritative description
 of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md).
 
 ### Other changes
+
 
 - Add ECMWF IFS model selection to Wind (#464, thanks @beneduzi), with model-scoped forecast-step caches, cancellation of replaced requests, and separate issue/valid timestamps.
 
@@ -1543,3 +1538,4 @@ represent previously published GitHub Releases.
 ## [0.1.0] — 2026-02-09
 
 - Initial project version.
+

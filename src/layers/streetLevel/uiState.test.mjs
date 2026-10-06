@@ -118,7 +118,7 @@ test('summarizeCoverage is what getStats reports, without building a snapshot', 
   assert.equal(summarizeCoverage([]).keyRequired, false);
 });
 
-test('a rejected key gates like a missing one and is named as rejected (review IC8 P2)', () => {
+test('a rejected key gates like a missing one and is named as rejected', () => {
   const rejected = provider({
     keyRequired: true,
     keyRejected: true,

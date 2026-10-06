@@ -151,7 +151,7 @@ test('a box across the date line ranks the tiles at the line first, without and 
   }
 });
 
-test('a focus ranks tiles along the line of sight, not from the box centre (review IC8 P1)', () => {
+test('a focus ranks tiles along the line of sight, not from the box centre', () => {
   // A box that runs far north of the camera, as a tilted view's does: the
   // box centre is kilometres from both the camera and the screen centre.
   const from = { lon: -121.4944, lat: 38.5816 };

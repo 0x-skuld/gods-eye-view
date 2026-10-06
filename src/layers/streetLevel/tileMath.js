@@ -1,7 +1,4 @@
-/**
- * Web-Mercator tile arithmetic for Mapillary vector tiles. Pure functions,
- * no Cesium dependency, shared by the browser layer and the server executor.
- */
+/** Web-Mercator tile math, without Cesium, shared by the browser layer and the server executor. */
 
 const MAX_LAT = 85.05112878;
 
@@ -9,10 +6,7 @@ function clampLat(lat) {
   return Math.max(-MAX_LAT, Math.min(MAX_LAT, lat));
 }
 
-/**
- * A longitude, or the difference of two, wrapped into [-180, 180]: the short
- * way round the date line. Values already in range come back unchanged.
- */
+/** Wrap a longitude, or a difference of two, into [-180, 180]: the short way round. */
 export function wrapLon(lon) {
   if (lon >= -180 && lon <= 180) return lon;
   return ((((lon + 180) % 360) + 360) % 360) - 180;
@@ -31,7 +25,6 @@ function tileYAt(lat, z) {
   );
 }
 
-/** Tile column for a longitude at zoom z. */
 export function lonToTileX(lon, z) {
   const n = 2 ** z;
   // 180° is the east edge of the last column, not the west edge of the first.
@@ -39,7 +32,6 @@ export function lonToTileX(lon, z) {
   return Math.min(n - 1, Math.max(0, Math.floor(tileXAt(wrapLon(lon), z))));
 }
 
-/** Tile row for a latitude at zoom z. */
 export function latToTileY(lat, z) {
   const n = 2 ** z;
   return Math.min(n - 1, Math.max(0, Math.floor(tileYAt(lat, z))));
@@ -56,10 +48,7 @@ function tileYToLat(y, z) {
   return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
 }
 
-/**
- * Geographic bounds of one tile.
- * @returns {{west:number,south:number,east:number,north:number}}
- */
+/** @returns {{west:number,south:number,east:number,north:number}} degrees */
 export function tileBounds(x, y, z) {
   return {
     west: tileXToLon(x, z),
@@ -69,10 +58,7 @@ export function tileBounds(x, y, z) {
   };
 }
 
-/**
- * Normalize a bbox given as [west, south, east, north] (or an object) into
- * finite, ordered numbers. Returns null when the input is not a usable box.
- */
+/** A [west, south, east, north] array or object as finite, ordered bounds; null if unusable. */
 export function normalizeBbox(input) {
   const values = Array.isArray(input)
     ? input
@@ -121,16 +107,10 @@ function segmentDistance2(tile, from, to, z) {
 }
 
 /**
- * Enumerate the tiles at zoom z covering a bbox (west > east means it crosses
- * the date line), ordered from the centre of
- * the box outwards so a progressive renderer fills in what the user is most
- * likely looking at first. `limit` caps the list; the result reports whether
- * the cap was hit.
- *
- * `focus` ranks by distance from the line between `focus.from` (the ground
- * under the camera) and `focus.to` (the ground at the centre of the screen)
- * instead: a tilted view's box reaches far past what the user looks at, and
- * its centre can sit kilometres ahead of both.
+ * Tiles at zoom z covering a bbox (west > east crosses the date line), from
+ * the centre outwards, capped at `limit`. With `focus`, tiles rank by distance
+ * from the segment `from` (ground under the camera) to `to` (screen centre):
+ * a tilted view's box centre can sit kilometres ahead of both.
  * @param {{limit?: number, focus?: {from: {lon: number, lat: number}, to?: {lon: number, lat: number}|null}|null}} [options]
  * @returns {{tiles: Array<{x:number,y:number,z:number}>, truncated: boolean, total: number}}
  */
@@ -191,11 +171,7 @@ function tileGrid(box, z) {
   return { tiles, x0, x1, y0, y1 };
 }
 
-/**
- * Convert a vector-tile-local coordinate (0..extent) into longitude and
- * latitude for tile (x, y, z).
- * @returns {[number, number]} [lon, lat]
- */
+/** A vector-tile-local coordinate (0..extent) in tile (x, y, z) as [lon, lat]. */
 export function tileLocalToLonLat(px, py, extent, x, y, z) {
   const n = 2 ** z;
   const lon = ((x + px / extent) / n) * 360 - 180;
@@ -205,11 +181,7 @@ export function tileLocalToLonLat(px, py, extent, x, y, z) {
   return [lon, lat];
 }
 
-/**
- * Pick a coverage zoom for a camera height (metres above ground). Higher
- * cameras get coarser sequence tiles; below the floor Mapillary has no
- * finer tiles than z14.
- */
+/** Sequence-tile zoom for a camera height above ground (m); Mapillary stops at z14. */
 export function coverageZoomForHeight(heightM) {
   if (!Number.isFinite(heightM)) return null;
   if (heightM > 60_000) return null;
@@ -220,10 +192,8 @@ export function coverageZoomForHeight(heightM) {
 }
 
 /**
- * Pick the low-zoom `overview` tile level for a camera far above the ground.
- * Mapillary publishes coverage points at z0–5; sequences start at z6 and are
- * far too heavy for a continent-sized view. Returns null below the overview
- * ceiling (60 km), where `coverageZoomForHeight` takes over.
+ * Overview-point zoom (z0–5) above 60 km, where sequence tiles are too heavy;
+ * null below, where `coverageZoomForHeight` takes over.
  */
 export function overviewZoomForHeight(heightM) {
   if (!Number.isFinite(heightM) || heightM <= 60_000) return null;

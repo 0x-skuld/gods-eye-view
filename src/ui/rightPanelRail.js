@@ -12,16 +12,9 @@ import { displayPanelScroller } from './displayPanelScroll.js';
 const pendingCollapseRetries = new WeakSet();
 
 /**
- * Read where the left rail's top edge is going to settle, not where it is.
- * The left pass commits `--left-stack-safe-top` and requests this pass in the
- * same frame, but `top` then animates; nothing re-runs this pass when the
- * animation ends, because ResizeObserver ignores moves. Mid-flight, take the
- * running transition's end value (which also covers Cyber's fixed rail top),
- * falling back to the left pass's committed target.
- * @param {HTMLElement} leftStack Rail supplying the shared top baseline.
- * @param {number} viewportHeight Current viewport height in px.
- * @param {Function} getComputedStyle DOM style reader.
- * @returns {number} Settled top in px, or NaN when there is no left rail.
+ * Where the left rail's top will settle, not where it is mid-transition:
+ * nothing re-runs this pass when the `top` animation ends (ResizeObserver
+ * ignores moves). Returns NaN when there is no left rail.
  */
 function settledLeftRailTop(leftStack, viewportHeight, getComputedStyle) {
   const top = leftStack?.getBoundingClientRect().top;
@@ -76,8 +69,7 @@ export function layoutRightPanelRail({
   // A collapse may schedule one follow-up, which only measures and allocates.
   const isCollapseRetry = pendingCollapseRetries.delete(stack);
 
-  // A panel lifted out of the rail (PanelPositionControls' portable mode)
-  // is a fixed window the rail neither measures nor allocates.
+  // A floating (lifted-out) panel is not laid out by the rail.
   const panels = [...stack.children].filter(
     (panel) =>
       panel.matches('[data-panel-id]:not(.panel-floating)') && !panel.hidden,

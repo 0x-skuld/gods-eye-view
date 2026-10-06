@@ -1,8 +1,4 @@
-/**
- * Shared stand-ins for the Street Level tests: a provider snapshot as the
- * core reports it, the smallest provider definition the core accepts, and a
- * camera whose screen rays really meet the ellipsoid they are given.
- */
+/** Shared Street Level test stand-ins: provider snapshot, minimal provider, ray-casting camera. */
 import * as Cesium from 'cesium';
 import { MAPILLARY_CREDIT_HTML } from '../layers/streetLevel/providers/mapillary/policy.js';
 
@@ -28,10 +24,8 @@ export function providerSnapshot(overrides = {}) {
 }
 
 /**
- * The smallest provider definition the core accepts. `stats` is what
- * coverageStats() answers (mutate it to change the answer), `calls` counts
- * what the core asked of the provider and its viewer, `filters` lists every
- * filter it was given and `context()` is the context the core created it with.
+ * The smallest provider the core accepts. Mutate `stats` to change what
+ * coverageStats() answers; `calls`, `filters` and `context()` record use.
  */
 export function fakeStreetLevelProvider({
   id = 'mapillary',
@@ -90,10 +84,8 @@ export function fakeStreetLevelProvider({
 }
 
 /**
- * A pinhole camera at `altitude` metres above the WGS84 ellipsoid, looking
- * along `heading` (degrees from north) and `pitch` (degrees, negative is
- * down), over a `width`×`height` canvas with the given fields of view. Its
- * `pickEllipsoid` intersects whatever ellipsoid it is given, as Cesium's does.
+ * A pinhole camera `altitude` m above WGS84, at `heading` (deg from north) and
+ * `pitch` (deg, negative down); `pickEllipsoid` hits whatever ellipsoid it gets.
  */
 export function rayCamera({
   lon,

@@ -357,10 +357,8 @@ test('right rail aligns to the current left rail and excludes hidden obstacles',
   assert.equal(f.stack.dataset.safeTop, '200.0');
 });
 
-// The left pass commits its top and requests this pass in the same frame, but
-// `top` then animates for 150 ms and nothing re-runs the right pass when it
-// lands. CI docked the right rail at 234 px (26vh) while the left settled at
-// 266.4 px (29.6vh). Mid-flight the right rail must read the destination.
+// The left rail's `top` animates after the right pass runs, and nothing
+// re-runs it when the transition lands: the right rail must read the end value.
 function animatingLeftRail({ keyframes = true } = {}) {
   const f = fixture('right');
   const left = f.options.leftStack;

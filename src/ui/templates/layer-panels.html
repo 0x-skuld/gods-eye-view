@@ -71,8 +71,7 @@
     </div>
   </div>
 
-  <!-- Street Level (Mapillary) Panel — moved into #right-context-rail at
-       runtime next to CCTV (see PanelLayoutController). -->
+  <!-- Street Level Panel (moved into #right-context-rail at runtime) -->
   <div id="street-level-panel" class="panel-collapsible collapsed" data-panel-id="street-level-panel">
     <div class="panel-glow"></div>
     <div class="street-level-panel-inner" data-rail-scroller>
@@ -116,8 +115,8 @@
               <div id="sl-provider-chips" class="sl-chips"></div>
             </div>
             <div id="sl-error" class="sl-error" role="alert" hidden><span aria-hidden="true">⚠</span> <span id="sl-error-text"></span></div>
-            <!-- KEY REQUIRED gates the filters only: the provider chips above
-                 stay focusable so their tooltip can say how to add the key. -->
+            <!-- A missing key gates the filters only: the chips above stay
+                 focusable so their tooltip can say how to add the key. -->
             <fieldset id="sl-controls" class="sl-controls">
               <div class="sl-filters" role="group" aria-label="Imagery filters">
                 <span class="cctv-summary-label">IMAGERY</span>

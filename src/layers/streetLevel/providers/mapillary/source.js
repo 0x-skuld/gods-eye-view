@@ -7,11 +7,7 @@ import {
   SEQUENCE_IMAGES_LIMIT,
 } from './policy.js';
 
-/**
- * Error carrying the HTTP status and any server-provided payload: no token
- * (`keyRequired`), a token Mapillary rejected (`keyRejected`), or a rate
- * limit with the seconds to wait (`retryAfterSec`).
- */
+/** HTTP error flagged `keyRequired`, `keyRejected` or `retryAfterSec` (429). */
 export class MapillarySourceError extends Error {
   constructor(message, { status = 0, payload = null, retryAfterSec } = {}) {
     super(message);
@@ -44,10 +40,8 @@ async function readJsonOrThrow(response, label) {
 }
 
 /**
- * Every network path the Mapillary layer uses. Coverage tiles go through the
- * local dev-server proxy (which adds the token and caches them); image and
- * sequence lookups go straight to graph.mapillary.com with the client token,
- * exactly as the embedded MapillaryJS viewer does.
+ * Mapillary network access: tiles via the local proxy, which adds the token
+ * and caches; Graph API lookups direct with the client token, as MapillaryJS.
  * @param {{token?: string, fetchImpl?: Function, endpoints?: object}} options
  */
 export function createMapillarySource({

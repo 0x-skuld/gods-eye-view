@@ -1,17 +1,10 @@
 import { keySetupRequirement } from '../keySetupCore.mjs';
 
-/**
- * Turn the Street Level layer's UI state into the strings and flags the panel
- * renders. Pure: no DOM, no layer calls, so every wording decision is testable.
- */
+// Street Level UI state to panel strings and flags. Pure, so it is testable.
 
 const DAY_MS = 86_400_000;
 
-/**
- * Stops of the SINCE slider, oldest window on the left: position 0 shows
- * every capture, the right end only the last month. Stored as relative days
- * so a share link keeps its meaning over time.
- */
+/** SINCE slider stops, in relative days so a share link keeps its meaning. */
 export const SINCE_STOPS = Object.freeze([
   Object.freeze({ days: 0, label: 'ANY DATE' }),
   Object.freeze({ days: 3652, label: 'LAST 10 YEARS' }),
@@ -24,7 +17,7 @@ export const SINCE_STOPS = Object.freeze([
   Object.freeze({ days: 30, label: 'LAST MONTH' }),
 ]);
 
-/** Slider position for a day count: the exact stop, else the nearest one. */
+/** The exact stop for a day count, else the nearest one. */
 export function sinceStopIndex(days) {
   const value = Number(days) || 0;
   if (value <= 0) return 0;
@@ -38,7 +31,6 @@ export function sinceStopIndex(days) {
   return best;
 }
 
-/** Readout beside the slider: the window, plus the cut-off date it means today. */
 function presentSince(days, now) {
   const value = Number(days) || 0;
   const index = sinceStopIndex(value);
@@ -61,7 +53,6 @@ function formatDate(ms) {
   }
 }
 
-/** The header pill doubles as the layer's on/off switch. */
 function presentStatus(state) {
   const pressed = state.enabled === true;
   const title = pressed ? 'Turn Street Level off' : 'Turn Street Level on';
@@ -76,11 +67,7 @@ function presentStatus(state) {
     : { text: 'OFF', tone: '', pressed, title };
 }
 
-/**
- * One chip per registered provider; a keyless provider reads as an error
- * chip. A chip is lit only while the layer is on and that provider is
- * switched on, so with a single provider the chip is the layer's switch.
- */
+/** A chip is lit only while the layer and its provider are both on. */
 function presentProviders(state) {
   const enabled = state.enabled === true;
   return (state.providers || []).map((provider) => {
@@ -148,18 +135,13 @@ function presentMeta(state) {
   return state.coverage.hint || '';
 }
 
-/**
- * @param {object} state Snapshot from the layer's `getUIState()`.
- * @param {{now?: number}} [options] Clock for the SINCE readout (tests pin it).
- * @returns {object} Everything the panel needs, already worded.
- */
+/** @param {{now?: number}} [options] Clock for the SINCE readout. */
 export function presentStreetLevelPanel(state, { now = Date.now() } = {}) {
   const enabled = state.enabled === true;
   const keyRequired = state.keyRequired === true;
   const filter = state.filter || { pano: 'all', sinceDays: 0 };
-  // KEY REQUIRED already says it, and the chip's tooltip says how to fix it;
-  // the error under it would only repeat a raw code (`no_key`). A rejected
-  // key keeps its line: that message names the fix.
+  // A missing key is already shown by the status and chip tooltip; only a
+  // rejected key keeps its error line, since that message names the fix.
   const keyMissing = keyRequired && state.keyRejected !== true;
   return {
     enabled,
@@ -175,7 +157,6 @@ export function presentStreetLevelPanel(state, { now = Date.now() } = {}) {
     legend: state.legend || [],
     viewer: presentViewer(state),
     meta: presentMeta(state),
-    /** The panel opens itself when an image opens (a native panel stays put otherwise). */
     wantsOpen: state.street.open === true,
   };
 }

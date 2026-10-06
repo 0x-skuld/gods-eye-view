@@ -388,11 +388,7 @@ export class PanelChrome {
     this.shareLinkManager?.onPanelStateChange?.();
   }
 
-  /**
-   * Dock a floating portable panel back into its rail at its default size.
-   * @param {string} panelId
-   * @returns {boolean} Whether the panel was floating.
-   */
+  /** @returns {boolean} Whether the panel was floating and is now docked. */
   dockPanel(panelId) {
     return this._panelPosition?.dockPanel?.(panelId) === true;
   }
@@ -419,8 +415,7 @@ export class PanelChrome {
       panelEl.classList.contains('cyber-accordion-collapsed');
     // A user opening a Cyber rail panel owns the whole accordion, including
     // peers that were only presentation-collapsed during a saved-state restore.
-    // A floating window is outside the accordion both ways: opening one
-    // leaves the rail's panels as they are.
+    // A floating window is outside the accordion both ways.
     if (
       explicit &&
       !restore &&
@@ -433,7 +428,6 @@ export class PanelChrome {
         if (
           peer !== panelEl &&
           peer.matches('[data-panel-id]') &&
-          // A floating window is not part of the rail's accordion.
           !peer.classList.contains('panel-floating') &&
           !peer.hidden
         ) {
@@ -562,8 +556,8 @@ export class PanelChrome {
       }
     }
     panelEl.classList.toggle('collapsed', nextCollapsed);
-    // Only a user's own collapse docks a floating window; cockpit entry,
-    // restores and accordion peers must not discard where they put it.
+    // Only a user's own collapse docks a floating window; restores, cockpit
+    // entry and accordion peers keep its place.
     if (explicit && !restore)
       this._panelPosition?.onPanelCollapsed?.(panelId, nextCollapsed);
     if (

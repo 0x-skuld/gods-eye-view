@@ -1,9 +1,8 @@
 import { MAPILLARY_PROVIDER_ID, mapillaryImageUrl } from './policy.js';
 
 /**
- * The Mapillary viewer adapter: lazy-load MapillaryJS, mount it in the host
- * the core hands over, open images, and emit a provider-neutral pose for
- * every image, point-of-view or position change.
+ * Viewer adapter: lazy-loads MapillaryJS into the core's host and emits a
+ * provider-neutral pose on every image, view or position change.
  * @returns {import('../../registry.js').ViewerAdapter}
  */
 export function createMapillaryViewer({ source, render } = {}) {
@@ -11,7 +10,6 @@ export function createMapillaryViewer({ source, render } = {}) {
   let Library = null;
   let container = null;
   let pendingOpen = null;
-  /** The prewarm in flight, if any. */
   let prewarming = null;
   /** In-flight viewer construction, so pre-warm and open never build two. */
   let creating = null;
@@ -34,10 +32,8 @@ export function createMapillaryViewer({ source, render } = {}) {
 
   async function ensureLibrary() {
     if (Library) return Library;
-    // The stylesheet comes with the lazy chunk: Vite applies a dynamically
-    // imported stylesheet before its import resolves, so the viewer's chrome
-    // is styled from the first frame without costing every page load ~90 KB
-    // of render-blocking CSS.
+    // Lazy CSS: Vite applies it before the import resolves, so the viewer is
+    // styled from its first frame without ~90 KB of render-blocking CSS.
     const [library] = await Promise.all([
       import('mapillary-js'),
       import('mapillary-js/dist/mapillary.css'),
@@ -196,14 +192,11 @@ export function createMapillaryViewer({ source, render } = {}) {
       }
     },
 
-    /**
-     * Load the library and stand the viewer up ahead of the first image, so
-     * opening one only costs the image download. Safe to call repeatedly.
-     */
+    /** Build the viewer ahead of the first image. Safe to call repeatedly. */
     async prewarm(host) {
       if (!host) return;
-      // A prewarm already in flight may give up (the layer went off and on
-      // while the library downloaded): wait for it, then build if it did not.
+      // An in-flight prewarm may give up (layer toggled mid-download): wait
+      // for it, then build if it did not.
       if (prewarming) await prewarming;
       if (viewer) return;
       const run = (async () => {

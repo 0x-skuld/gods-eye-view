@@ -7,17 +7,17 @@
  * @property {string} label         Chip text and link label, e.g. 'MAPILLARY'.
  * @property {string|null} requiresKeyId  Key-setup id the provider needs, or null when keyless.
  * @property {string} pickPrefix    Every primitive id the provider creates starts with it.
- * @property {{coverage: string}} colors   The source's one colour (policy.js PROVIDER_COLORS): chip, lines, points, cones and legend.
+ * @property {{coverage: string}} colors   The source's one colour, from policy.js PROVIDER_COLORS.
  * @property {{html: string}} credit   On-globe attribution while the provider is active.
  * @property {(context: ProviderContext) => ProviderInstance} create
  *
  * @typedef {object} ProviderContext   Handed to `create()` once by the core.
  * @property {object} services         Scene services: picking, input, render, sprites, ground, terrain.
- * @property {() => {pano: string, sinceMs: number|null}} getFilter   The imagery filter resolved against now: read it whenever filtering, so a "since N days" window keeps up with the clock.
+ * @property {() => {pano: string, sinceMs: number|null}} getFilter   Filter resolved against now; read it on every use so "since N days" keeps up.
  * @property {() => boolean} isActive  Layer enabled and this provider switched on.
- * @property {() => 'draped'|'terrain'} getSurface   'terrain' on Google 3D at street zoom: draw on the bare earth, not the mesh top.
+ * @property {() => 'draped'|'terrain'} getSurface   'terrain' on Google 3D at street zoom: draw on bare earth.
  * @property {GroundCaster|null} groundCaster   Bare-earth heights for terrain mode (groundCast.js); null without a terrain service.
- * @property {{meshAt: (lon: number, lat: number) => number|undefined, request: (points: Array<[number, number]>) => void, onSampled: (listener: (cells: Array<[number, number]>) => void) => () => void}|null} meshSampler   Sampled Google 3D surface heights (meshSampler.js) that refine the cast; pass `meshAt` to `castLine`.
+ * @property {{meshAt: (lon: number, lat: number) => number|undefined, request: (points: Array<[number, number]>) => void, onSampled: (listener: (cells: Array<[number, number]>) => void) => () => void}|null} meshSampler   Sampled Google 3D surface heights (meshSampler.js); pass `meshAt` to `castLine`.
  * @property {() => void} notify       Ask the core to publish a new UI snapshot.
  * @property {{openImage: (imageId: string) => Promise<void>, reportError: (message: string|null) => void}} actions
  *
@@ -81,8 +81,7 @@ const REQUIRED = Object.freeze([
 const ID_GRAMMAR = /^[a-z][a-z0-9-]*$/;
 
 /**
- * Check a provider list once at construction and freeze its order, which is
- * also the chip order in the panel.
+ * Validate providers and freeze their order, which is also the chip order.
  * @param {Array<StreetLevelProvider>} providers
  * @returns {ReadonlyArray<StreetLevelProvider>}
  */
@@ -130,9 +129,8 @@ export function validateProviders(providers) {
 }
 
 /**
- * The layer-level key requirement: the one key id every provider shares, or
- * null as soon as any provider is keyless or they differ. Per-provider needs
- * are then reported chip by chip instead of gating the whole layer.
+ * The key id every provider shares, or null if any is keyless or they differ
+ * (then each chip reports its own need).
  * @param {ReadonlyArray<StreetLevelProvider>} providers
  * @returns {string|null}
  */

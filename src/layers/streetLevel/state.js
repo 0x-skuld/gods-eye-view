@@ -1,9 +1,8 @@
 import { FILTER_DEFAULT } from './policy.js';
 
 /**
- * The open image's fields of `state.street`, as they are with no image open.
- * Closing the viewer resets exactly these; the panel host, the render mode
- * and whether following is available outlive any one image.
+ * The per-image fields of `state.street` with no image open; closing resets
+ * exactly these (host, render mode and follow availability outlive an image).
  */
 export function freshStreet() {
   return {

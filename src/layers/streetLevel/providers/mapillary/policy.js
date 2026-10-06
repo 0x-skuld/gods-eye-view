@@ -24,10 +24,7 @@ export const PICK_PREFIX = Object.freeze({
   image: 'mly:img:',
 });
 
-/**
- * Mapillary draws in one colour, its brand green, for lines, overview points
- * and cones alike (360° cones keep their ring shape); selection is GEV cyan.
- */
+/** Mapillary green for lines, points and cones; GEV cyan for selection. */
 export const COLORS = Object.freeze({
   coverage: PROVIDER_COLORS.mapillary,
   selected: SHARED_COLORS.selected,
@@ -45,9 +42,8 @@ export const KEY_REJECTED_MESSAGE =
 export const RATE_LIMITED_MESSAGE =
   'Coverage requests are being rate-limited — they resume on their own';
 /**
- * How far from the camera a street-zoom view may reach for coverage: a tilted
- * view sees to the horizon, but only the ground within this range is ranked
- * and boxed. Scales with camera height, never below the floor.
+ * Street-zoom coverage reaches this far from the camera: camera height times
+ * the factor, never below the floor, even when a tilted view sees further.
  */
 export const SEQUENCE_VIEW_RANGE_MIN_M = 2_500;
 export const SEQUENCE_VIEW_RANGE_PER_HEIGHT = 10;
@@ -65,10 +61,7 @@ export const IMAGE_CONE_MIN_SPACING_M = 3;
 /** Images asked for in a nearest-image search (radius: NEAREST_RADIUS_M). */
 export const NEAREST_LIMIT = 8;
 
-/**
- * On-globe credit shown while the provider is active. Mapillary imagery and
- * derived data are CC BY-SA 4.0 and require visible attribution.
- */
+/** On-globe credit: Mapillary imagery is CC BY-SA 4.0 and needs attribution. */
 export const MAPILLARY_CREDIT_HTML =
   'Street Level: imagery © <a href="https://www.mapillary.com" target="_blank" rel="noopener">Mapillary</a> contributors, CC BY-SA 4.0';
 

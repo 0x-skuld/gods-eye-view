@@ -418,9 +418,8 @@ const OPTION_GROUPS = Object.freeze({
       pano: 'p',
       flat: 'f',
     }),
-    // "Captured since" as relative days, so a link means the same next year.
-    // The filter's MAX_SINCE_DAYS (streetLevel/policy.js); layerState.test
-    // pins the two together.
+    // Relative days, so a link means the same next year. The max matches
+    // MAX_SINCE_DAYS in streetLevel/policy.js (pinned by layerState.test).
     boundedIntegerOption('sinceDays', 's', 0, { min: 0, max: 36500 }),
   ]),
   radio: Object.freeze([

@@ -13,37 +13,29 @@ const PANEL_POSITION_STORAGE_VERSION = 'v8';
 const PANEL_Z_BASE = 100;
 const PANEL_Z_MAX = 139;
 /**
- * Lowest z a promoted (dragged or floating) panel may take: above every panel
- * docked in a rail, the highest of which is #pp-toggles at 110 (controls.css).
- * Renumbering restarts here, so a floating window never slips under DISPLAY.
- * Keep in step with `#right-context-rail > .panel-floating` in controls.css.
+ * Lowest z for a promoted panel: above every docked rail panel (#pp-toggles is
+ * 110). Keep in step with `#right-context-rail > .panel-floating` in controls.css.
  */
 const PANEL_Z_FLOATING_FLOOR = PANEL_Z_BASE + 11;
-/** Pointer travel before a header press becomes a drag that lifts a portable panel out. */
+/** Pointer travel before a press becomes a drag or resize. */
 const DRAG_THRESHOLD_PX = 4;
 /**
- * Two header presses this close in time and space snap a floating panel
- * back. Detected from pointerdown because the drag handler's
- * preventDefault() suppresses the mouse events a native dblclick needs.
+ * Double press that snaps a floating panel back. Detected from pointerdown
+ * because the drag's preventDefault() suppresses a native dblclick.
  */
 const DOUBLE_PRESS_MS = 400;
 const DOUBLE_PRESS_SLOP_PX = 6;
-/** Viewport margin every positioned panel keeps clear. */
 const VIEWPORT_MARGIN_PX = 6;
 /**
- * Fixed chrome that paints over every panel: the rail is its own stacking
- * context (z 110), below the command dock (145) and the voice pill (150). A
- * floating window keeps its header clear of these so it can always be
- * grabbed again.
+ * Fixed chrome that paints over the rail's stacking context; a floating
+ * window keeps its header clear of it so it can always be grabbed again.
  */
 const PANEL_OBSTACLE_IDS = ['command-dock', 'gev-voice-control'];
-/** One-time hint shown the first time a portable panel leaves its rail. */
 const PANEL_FLOAT_HINT_STORAGE_KEY = `godsEyeView.${PANEL_POSITION_STORAGE_VERSION}.panelFloatHintShown`;
 const PANEL_FLOAT_HINT = 'Double-click the header to snap the panel back';
 /** Header children whose own interaction wins over a drag or a snap-back. */
 const INTERACTIVE_SELECTOR =
   'input, select, option, textarea, button, a, [role="button"]';
-/** Inline geometry a snap-back clears so the rail owns placement again. */
 const FLOATING_STYLE_PROPERTIES = [
   'left',
   'top',
@@ -51,7 +43,6 @@ const FLOATING_STYLE_PROPERTIES = [
   'bottom',
   'width',
   'height',
-  // A docked panel takes the rail's stacking, not a floating window's.
   'z-index',
 ];
 
@@ -59,7 +50,6 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-/** A window extent that fits the viewport margins but never drops under its minimum. */
 function fitWindowExtent(value, minimum, viewportExtent) {
   return clamp(
     Math.round(value),
@@ -68,11 +58,6 @@ function fitWindowExtent(value, minimum, viewportExtent) {
   );
 }
 
-/**
- * Only a mouse or pen lifts and resizes a portable panel. On a phone the
- * rail is a scroll container, so a finger on a header is a swipe.
- */
-/** Pin a panel's top-left corner at (left, top) as a fixed window would sit. */
 function placeAt(panelEl, left, top) {
   panelEl.style.left = `${left}px`;
   panelEl.style.top = `${top}px`;
@@ -80,27 +65,19 @@ function placeAt(panelEl, left, top) {
   panelEl.style.bottom = 'auto';
 }
 
+/** On a phone the rail scrolls, so a finger on a header is a swipe, not a drag. */
 function isPrecisePointer(event) {
   const pointerType = event.pointerType || 'mouse';
   return pointerType === 'mouse' || pointerType === 'pen';
 }
 
-/** Inline geometry a cancelled gesture puts back. */
 function geometryOf(panelEl) {
   const { left, top, width, height } = panelEl.style;
   return { left, top, width, height };
 }
 
 export class PanelPositionControls {
-  /**
-   * @param {object} options
-   * @param {Function} options.syncPanelCollapseButton
-   * @param {Function} options.layoutRightPanels
-   * @param {Function} options.syncCctvPanelViewport
-   * @param {Function} options.showToast
-   * @param {(panelId: string) => void} [options.onPanelResized] Fires after a
-   *   portable panel's resize gesture ends or the panel snaps back to its rail.
-   */
+  /** `onPanelResized(panelId)` runs after a portable panel moves, resizes or docks. */
   constructor({
     syncPanelCollapseButton,
     layoutRightPanels,
@@ -117,7 +94,6 @@ export class PanelPositionControls {
     this._panelZCounter = PANEL_Z_BASE + 10;
     this._draggableResizeObserver = null;
     this._cancelDrag = null;
-    /** Portable panels by id: `{ panel, handle, min: { width, height }, dockOnCollapse }`. */
     this._portablePanels = new Map();
     this._resizeHandles = [];
     this._dragInitialized = false;
@@ -154,10 +130,7 @@ export class PanelPositionControls {
     }
   }
 
-  /**
-   * Bring a floating window back on-screen. Its size is the user's, except
-   * that a window wider or taller than the viewport shrinks to fit it.
-   */
+  /** Bring a floating window on-screen; shrink it only if it exceeds the viewport. */
   _reclampPortablePanel(entry) {
     const { panel, min } = entry;
     const left = parseInt(panel.style.left, 10);
@@ -178,15 +151,8 @@ export class PanelPositionControls {
   }
 
   /**
-   * Where a floating window may sit: inside the viewport margin, with its
-   * header out of the command dock and the voice pill, measured now because
-   * the dock grows and shrinks. Both sit at the foot of the screen, so the
-   * header goes above whichever it would land under.
-   * @param {object} entry A `_portablePanels` value.
-   * @param {number} left
-   * @param {number} top
-   * @param {{width: number, height: number, header: number}} [geometry]
-   *   Window size and header depth; measured when omitted.
+   * Clamp a floating window inside the viewport margin with its header above
+   * the command dock and voice pill, measured each time since the dock resizes.
    */
   _clampPortableWindow(
     entry,
@@ -224,7 +190,6 @@ export class PanelPositionControls {
     return { left: x, top: y };
   }
 
-  /** A window's size and how far down its header reaches. */
   _windowGeometry({ panel, handle }, rect = panel.getBoundingClientRect()) {
     const handleRect = handle?.getBoundingClientRect();
     const header = handleRect ? handleRect.bottom - rect.top : 0;
@@ -269,9 +234,8 @@ export class PanelPositionControls {
     this._dragInitialized = true;
     const cctvPanel = document.getElementById('cctv-panel');
     const streetLevelPanel = document.getElementById('street-level-panel');
-    // A `portable` spec lifts out of its rail on a header drag, resizes from
-    // every edge and remembers its window; the others only reposition in
-    // place. Another panel opts in by adding a spec here.
+    // A `portable` panel lifts out of its rail on a header drag, resizes from
+    // every edge and remembers its window; the others only reposition.
     const dragSpecs = [
       {
         id: 'pp-toggles',
@@ -316,8 +280,8 @@ export class PanelPositionControls {
     }
     // Keep a positioned panel on-screen when its HEIGHT changes after restore — it expands to its
     // full row set a frame or two later, so the restore-time clamp used a stale (shorter) height and
-    // the panel could still hang off the bottom (audit U2). Re-clamp on every size change. A floating
-    // window grows the same way when its content does (an image opens, a collapsed strip expands).
+    // the panel could still hang off the bottom (audit U2). Re-clamp on every size change. Floating
+    // windows grow the same way when their content does.
     const observed = [
       this._ppToggles,
       ...[...this._portablePanels.values()].map(({ panel }) => panel),
@@ -403,14 +367,12 @@ export class PanelPositionControls {
       const pos = JSON.parse(raw);
       if (!pos || typeof pos.left !== 'number' || typeof pos.top !== 'number')
         return;
-      // A floating record only means something to a panel that can float; a
-      // portable panel in turn only ever stores floating records.
+      // Only portable panels store, and accept, floating records.
       const portable = this._portablePanels.get(panelId);
       if (Boolean(pos.floating) !== Boolean(portable)) return;
       if (portable) {
         panelEl.classList.add('panel-floating', 'panel-draggable');
-        // A restored window must stack above the docked rail panels too, not
-        // only one that was lifted or clicked this session.
+        // A restored window must stack above the docked rail panels too.
         this._promotePanelZ(panelEl);
         if (Number.isFinite(pos.width)) {
           panelEl.style.width = `${fitWindowExtent(
@@ -504,7 +466,7 @@ export class PanelPositionControls {
       if (localStorage.getItem(PANEL_FLOAT_HINT_STORAGE_KEY)) return;
       localStorage.setItem(PANEL_FLOAT_HINT_STORAGE_KEY, '1');
     } catch {
-      // storage unavailable: still worth saying once this session
+      // storage unavailable: still show it once this session
       if (this._floatHintShown) return;
       this._floatHintShown = true;
     }
@@ -512,9 +474,8 @@ export class PanelPositionControls {
   }
 
   /**
-   * Switch a portable panel from rail flow to a fixed window at the place it
-   * currently occupies. Width is frozen so a `width: 100%` rail panel keeps
-   * its size once fixed-positioned; height stays natural until a resize.
+   * Turn a rail panel into a fixed window in place. Width is frozen so a
+   * `width: 100%` panel keeps its size; height stays natural until a resize.
    */
   _liftPanelOut(panelId, panelEl, rect = panelEl.getBoundingClientRect()) {
     if (panelEl.classList.contains('panel-floating')) return false;
@@ -522,7 +483,6 @@ export class PanelPositionControls {
     if (!panelEl.classList.contains('collapsed')) {
       panelEl.style.width = `${Math.round(rect.width)}px`;
     }
-    // Rail bookkeeping no longer applies to a window the rail does not allocate.
     panelEl.style.removeProperty('--right-panel-allocated-height');
     panelEl.removeAttribute('aria-hidden');
     panelEl.classList.add('panel-floating', 'panel-draggable');
@@ -619,13 +579,9 @@ export class PanelPositionControls {
   }
 
   /**
-   * Follow one pointer gesture on the window; every panel gesture runs on
-   * this. With a `threshold`, a press only becomes a gesture once the pointer
-   * has travelled that far: `onStart` runs then, and `onMove` (given the
-   * travel so far) only after it. `onEnd` (pointerup) and `onCancel`
-   * (pointercancel, `onEnd` unless given) learn whether it started. A new
-   * press, a snap-back or destroy() stops it through `_cancelDrag`, which
-   * calls neither.
+   * Track one pointer gesture. With a `threshold`, `onStart` and `onMove` wait
+   * until the pointer has travelled that far; `onEnd`/`onCancel` get whether
+   * it started. Stopping through `_cancelDrag` calls neither.
    */
   _trackPointerGesture(
     event,
@@ -665,18 +621,7 @@ export class PanelPositionControls {
     window.addEventListener('pointercancel', cancel);
   }
 
-  /**
-   * Portable drag: a press on the header only becomes a drag after a few
-   * pixels of travel, at which point the panel lifts out of its rail. The
-   * collapse button still toggles on a plain click, and the click that ends
-   * a real drag is swallowed so it cannot toggle by accident. Double-clicking
-   * the header snaps the panel back.
-   */
-  /**
-   * Put a floating portable panel back in its rail at its default size.
-   * @param {string} panelId
-   * @returns {boolean} Whether the panel was floating.
-   */
+  /** @returns {boolean} Whether the panel was floating and is now docked. */
   dockPanel(panelId) {
     const portable = this._portablePanels.get(panelId);
     if (!portable?.panel.classList.contains('panel-floating')) return false;
@@ -684,18 +629,17 @@ export class PanelPositionControls {
     return true;
   }
 
-  /**
-   * A panel was collapsed or expanded. A portable panel that opted into
-   * `dockOnCollapse` returns to its rail when collapsed while floating.
-   * @param {string} panelId
-   * @param {boolean} collapsed
-   */
+  /** A `dockOnCollapse` panel returns to its rail when collapsed while floating. */
   onPanelCollapsed(panelId, collapsed) {
     if (!collapsed || !this._portablePanels.get(panelId)?.dockOnCollapse)
       return;
     this.dockPanel(panelId);
   }
 
+  /**
+   * The collapse button still toggles on a plain click; the click that ends a
+   * real drag is swallowed so it cannot toggle by accident.
+   */
   _makePortablePanelDraggable(panelId, panelEl, handleEl) {
     let swallowNextClick = false;
     this.listen(
@@ -790,11 +734,7 @@ export class PanelPositionControls {
     });
   }
 
-  /**
-   * The browser took a gesture back (pointercancel): leave no trace and save
-   * nothing. A panel the gesture lifted returns to its rail; a window that
-   * was already floating returns to where it was.
-   */
+  /** On pointercancel, restore the panel as the gesture found it; save nothing. */
   _revertPanelGesture(panelId, panelEl, lifted, before) {
     if (lifted) {
       this._resetPanelPosition(panelId);
@@ -804,11 +744,7 @@ export class PanelPositionControls {
     this._onPanelResized?.(panelId);
   }
 
-  /**
-   * Append a resize handle for every edge and corner. Seven are invisible
-   * strips; the bottom-right corner shows a grip. Resizing a docked panel
-   * lifts it out first, so the handles work in both states.
-   */
+  /** Resizing a docked panel lifts it out first, so handles work in both states. */
   _makePanelResizable(panelId, panelEl, min = {}) {
     const limits = { width: 300, height: 160, ...min };
     for (const dir of RESIZE_DIRECTIONS) {
@@ -832,8 +768,8 @@ export class PanelPositionControls {
     if (event.button !== 0 || !isPrecisePointer(event)) return;
     event.preventDefault();
     this._cancelDrag?.();
-    // Set once the pointer has travelled: a plain click on an edge (or on
-    // the globe just beside a docked panel) must not lift it out.
+    // Set once the pointer has travelled: a plain click on an edge must not
+    // lift the panel out.
     let startBox = null;
     let lifted = false;
     let before = null;
@@ -874,7 +810,7 @@ export class PanelPositionControls {
       onStop: () => panelEl.classList.remove('panel-resizing'),
       onEnd: (resized) => {
         if (!resized) return;
-        // Re-clamping skipped the live gesture; a north edge may have carried
+        // Re-clamping skipped the live gesture; a north edge may have moved
         // the header under the command dock.
         const entry = this._portablePanels.get(panelId);
         if (entry) this._reclampPortablePanel(entry);

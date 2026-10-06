@@ -1,7 +1,6 @@
 /* ── Street Level panel ─────────────────────────────────────────
-   Lives in the right context rail next to CCTV; the rail owns position and
-   width (see layers.css). Everything here is panel-internal. The expanded
-   viewer is re-parented to <body>, so it carries the tokens too. */
+   The rail owns position and width (layers.css). The expanded viewer is
+   re-parented to <body>, so it carries the tokens too. */
 #street-level-panel,
 .sl-viewer-wrap {
   --sl-green: #05cb63;
@@ -111,8 +110,6 @@ button.sl-status:focus-visible {
   min-width: 0;
 }
 
-/* The filters a missing key gates. The provider chips stay outside it, so
-   their tooltip (how to add the key) is still reachable. */
 .sl-controls {
   display: flex;
   flex-direction: column;
@@ -128,8 +125,7 @@ button.sl-status:focus-visible {
   pointer-events: none;
 }
 
-/* Everything but the viewer. Docked, the whole panel scrolls; in a resized
-   window the viewer keeps its room and only this block scrolls. */
+/* In a resized window only this block scrolls; the viewer keeps its room. */
 .sl-settings {
   display: flex;
   flex-direction: column;
@@ -151,8 +147,7 @@ button.sl-status:focus-visible {
   gap: 4px;
 }
 
-/* One colour per source: a swatch dot, and the whole chip in that colour
-   while the source is on. `--chip-color` comes from the provider. */
+/* `--chip-color` comes from the provider. */
 .sl-chips .data-toggle-chip {
   display: inline-flex;
   align-items: center;
@@ -246,7 +241,6 @@ button.sl-status:focus-visible {
   color: var(--text-primary);
 }
 
-/* SINCE: a stepped slider, oldest window left, newest right. */
 .sl-since {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -318,8 +312,7 @@ button.sl-status:focus-visible {
   display: none;
 }
 
-/* The image stage: the viewer and its loading veil, nothing on top of it,
-   so the provider's own controls (sequence bar, zoom, bearing) stay clear. */
+/* Nothing sits over the image, so the provider's own controls stay clear. */
 .sl-viewer-stage {
   position: relative;
   display: flex;
@@ -362,7 +355,6 @@ button.sl-status:focus-visible {
   }
 }
 
-/* Our tools live in a bar above the image rather than over it. */
 .sl-viewer-bar {
   display: flex;
   align-items: center;
@@ -485,16 +477,15 @@ button.sl-status:focus-visible {
 }
 
 /* ── Floating window ─────────────────────────────────────────────────────── */
-/* A window that was only dragged keeps its natural height; bound it to the
-   viewport so nothing runs off-screen (the rail rule's max-height: 100% does
-   not bind an auto-height parent). Id-qualified to outrank that rule. */
+/* A dragged window keeps its natural height, so bound it to the viewport:
+   the rail's max-height: 100% does not bind an auto-height parent.
+   Id-qualified to outrank that rule. */
 #right-context-rail > #street-level-panel.panel-floating > .street-level-panel-inner {
   max-height: calc(100vh - 12px);
   overflow-y: auto;
 }
 
-/* A resized window (PanelPositionControls writes an inline height) hands the
-   spare height to the viewer, so the image never needs scrolling to. */
+/* A resized window (inline height) gives its spare height to the viewer. */
 .panel-floating[style*='height'] > .street-level-panel-inner {
   box-sizing: border-box;
   height: 100%;
@@ -532,9 +523,8 @@ button.sl-status:focus-visible {
 }
 
 /* ── Expanded viewer ─────────────────────────────────────────────────────── */
-/* The panel inner's backdrop-filter makes it the containing block for fixed
-   descendants, so the expanded viewer is re-parented to <body>. z-index sits
-   above panels (≤139) and below the voice pill (150) and toasts (200). */
+/* Re-parented to <body>: the panel's backdrop-filter would contain a fixed
+   child. z-index sits above panels (≤139), below the voice pill (150). */
 .sl-viewer-wrap-expanded {
   position: fixed;
   left: 4vw;
@@ -604,10 +594,9 @@ button.sl-status:focus-visible {
 }
 
 /* ── Phones ──────────────────────────────────────────────────────────────── */
-/* At this width the right rail is the band between mid-screen and the credit
-   line (responsive.css: top 50vh + 8px, bottom 2vh + 7.5rem). Size the photo
-   from that band, less the panel's header, tool bar and caption (~150px), so
-   the whole image shows without scrolling; EXPAND still gives full screen. */
+/* The phone rail spans 50vh + 8px to 2vh + 7.5rem from the bottom
+   (responsive.css). Size the photo to that band, less ~150px of panel chrome,
+   so it shows without scrolling. */
 @media (max-width: 720px) {
   .sl-viewer {
     aspect-ratio: auto;

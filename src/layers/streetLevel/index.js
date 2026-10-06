@@ -25,11 +25,8 @@ import {
 export { STREET_LEVEL_LAYER_ID } from './policy.js';
 
 /**
- * Construct the Street Level layer from a list of imagery providers (see
- * registry.js for the contract). The core owns what every provider shares:
- * the enable state and per-provider switches, the imagery filter, one click
- * handler, one viewer host, the position marker, camera follow, credits and
- * share-link parameters. Providers own their coverage, sequences and viewer.
+ * The Street Level layer over imagery providers (contract in registry.js).
+ * The core owns what they share; providers own coverage, sequences, viewer.
  * @param {{providers: Array<import('./registry.js').StreetLevelProvider>, services?: object}} options
  */
 export function createStreetLevelLayer({
@@ -84,23 +81,17 @@ export function createStreetLevelLayer({
   function providerContext(entry) {
     return Object.freeze({
       services: state.services,
-      /** The imagery filter resolved against now; read it when filtering. */
       getFilter: () => resolveFilter(state.filter),
       isActive: () => state.enabled && entry.on,
-      /** Bare-earth heights (see groundCast.js), or null without a terrain service. */
       groundCaster: parts.groundCaster,
-      /** Sampled Google 3D surface heights refining the cast (meshSampler.js), or null. */
       meshSampler: parts.meshSampler,
-      /** 'terrain' when overlays should sit on the bare earth, else 'draped'. */
       getSurface: () => state.surface,
       notify,
       actions: {
         openImage: (imageId) => openImage(entry.def.id, imageId),
         /**
-         * Show a provider error, or (null) withdraw the one it showed. A
-         * withdrawal never clears an error the viewer or another provider
-         * has shown since, and a stale one cannot mask a later coverage
-         * error such as KEY REJECTED.
+         * Show a provider error, or withdraw it (null). A withdrawal clears
+         * only this provider's own error, never a newer one from elsewhere.
          */
         reportError: (message) => {
           if (message) {
@@ -143,9 +134,8 @@ export function createStreetLevelLayer({
   }
 
   /**
-   * Camera height above the bare earth under it, for the surface mode. The
-   * ground comes from the caster's coarse grid; a cold cell near enough to
-   * matter is fetched once and the mode checked again when it lands.
+   * Camera height above bare earth, for the surface mode. A cold grid cell is
+   * fetched once and the mode rechecked when it lands.
    */
   function cameraHeightForSurface() {
     const carto = state.viewer?.camera?.positionCartographic;
@@ -163,10 +153,7 @@ export function createStreetLevelLayer({
     return height;
   }
 
-  /**
-   * On Google 3D at street zoom, overlays are cast to the bare earth; draped
-   * lines would land on roofs and trees. Elsewhere they stay draped.
-   */
+  /** Cast overlays to bare earth on Google 3D at street zoom; drape them elsewhere. */
   function syncSurface() {
     const available = Boolean(parts.groundCaster) && state.enabled;
     const photoreal = mapStack?.getActiveId?.() === FOLLOW_MAP_STACK_ID;
@@ -239,12 +226,7 @@ export function createStreetLevelLayer({
     parts.credits.hide(state.viewer, entry.def);
   }
 
-  /**
-   * The nearest-image lookup in flight. Anything newer the user asks for (a
-   * later lookup, a picked image, closing, the layer going off) aborts it,
-   * so its late answer can never replace that choice.
-   * @type {AbortController|null}
-   */
+  /** The nearest-image lookup in flight; any newer user action aborts it. */
   let nearestLookup = null;
 
   function abortNearest() {
@@ -502,7 +484,7 @@ export function createStreetLevelLayer({
         if (!state.enabled) break;
         // This provider was switched off while it looked: try the next.
         if (!imageId || !entry.on) continue;
-        nearestLookup = null; // answered: nothing left to abort
+        nearestLookup = null;
         return openImage(entry.def.id, imageId);
       }
       if (nearestLookup === lookup) nearestLookup = null;

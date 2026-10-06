@@ -4,12 +4,7 @@ export const STREET_LEVEL_LAYER_ID = 'street-level';
 /** Pick id of the viewer position marker; the core owns it, not a provider. */
 export const POSITION_PICK_ID = 'sl:pos';
 
-/**
- * One colour per imagery source, used everywhere that source appears: its
- * chip, coverage lines, overview points, image cones and legend swatch.
- * Registered providers take their entry from here; a new source adds its
- * colour together with its provider.
- */
+/** One colour per imagery source: chip, coverage lines, points, cones and legend. */
 export const PROVIDER_COLORS = Object.freeze({
   mapillary: '#05cb63',
 });
@@ -29,16 +24,12 @@ export const MAX_SINCE_DAYS = 36_500;
 /** Filter every provider starts with: all imagery, any date. */
 export const FILTER_DEFAULT = Object.freeze({ pano: 'all', sinceDays: 0 });
 
-/**
- * Nearest-image search when the user asks to look at a place, in metres
- * (Mapillary's graph API answers within at most 50 m).
- */
+/** Nearest-image search radius in metres (Mapillary's graph API caps it at 50 m). */
 export const NEAREST_RADIUS_M = 50;
 
 /**
- * Map stack the globe camera may follow the street-level view on. Only Google
- * Photorealistic 3D has buildings to stand among; on flat imagery or terrain
- * a camera at eye height looks at a smeared texture.
+ * The only map stack camera follow is offered on: elsewhere a camera at eye
+ * height looks at a smeared texture.
  */
 export const FOLLOW_MAP_STACK_ID = 'photoreal';
 

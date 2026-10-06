@@ -2,20 +2,11 @@ import * as Cesium from 'cesium';
 import { metresBetween, whenIdle } from './view.js';
 
 /**
- * Rendered-surface heights for ground casting on Google 3D (see groundCast.js
- * refineHeights). One `scene.sampleHeight` probe per ~11 m cell, cached, so
- * the many sequences that share a street share their samples.
- *
- * `sampleHeight` renders a pick pass per probe (about 1–3 ms), so probes run
- * in idle time within a small budget, nearest the camera first, and only
- * within MESH_SAMPLE_RADIUS_M of the point under the camera: the streamed
- * detail is fine there, and an error is visible at all. Requests are taken
- * in by the same budgeted slices, cells out of range then are not queued
- * (callers ask again when the camera moves), and the queue is a heap ranked
- * from where the camera was, re-ranked only once it has moved MESH_RERANK_M,
- * so no slice walks or sorts the whole queue. A probe that hits
- * nothing (tiles not streamed yet) is retried later rather than latched.
- * Overlays are excluded from the probe, so only 3D tilesets are hit.
+ * Google 3D surface heights for ground casting (groundCast.js refineHeights):
+ * one cached `scene.sampleHeight` probe per ~11 m cell. Each probe renders a
+ * pick pass (1–3 ms), so probes run in budgeted idle slices, nearest the
+ * camera first and only within MESH_SAMPLE_RADIUS_M. A miss (tiles not
+ * streamed yet) is retried later. Probes hit 3D tilesets only.
  */
 
 /** Cell size, in degrees (~11 m): samples are shared within a cell. */
@@ -35,10 +26,7 @@ const MESH_NOTIFY_MS = 700;
 
 const cellOf = (value) => Math.round(value / MESH_CELL_DEG);
 
-/**
- * The cache key of the mesh cell holding a point, one per ~11 m cell: a
- * number (exact well within 2^53), as a string key would be built per point.
- */
+/** Numeric key of the cell holding a point (exact within 2^53; no per-point string). */
 export const meshCellKey = (lon, lat) =>
   (cellOf(lon) + 1_800_001) * 2_000_000 + cellOf(lat) + 1_000_000;
 
@@ -70,7 +58,6 @@ function siftDown(heap, i) {
   heap[i] = cell;
 }
 
-/** Take the nearest cell off a min-heap. */
 function heapPop(heap) {
   const top = heap[0];
   const last = heap.pop();
@@ -104,11 +91,7 @@ export function createMeshSampler({
 }) {
   /** cell key → sampled mesh height (ellipsoidal metres). */
   const heights = new Map();
-  /**
-   * cell key → retry time for probes that hit nothing. An entry goes once
-   * its cell is sampled or asked for after the retry time, and with the
-   * height cache, so the map stays bounded.
-   */
+  /** cell key → retry time for probes that hit nothing; bounded like the height cache. */
   const misses = new Map();
   /** cell key → queued cell, so a cell is queued once. */
   const wanted = new Map();
@@ -142,10 +125,8 @@ export function createMeshSampler({
   }
 
   /**
-   * Ask for the cells under these [lon, lat] points (read later, so do not
-   * change the list). Nothing is done here: idle slices take requests in
-   * within their budget, and drop cells out of range of where the camera was
-   * when asked; callers ask again once it moves.
+   * Ask for the cells under [lon, lat] points; the list is read later, so do
+   * not mutate it. Out-of-range cells are dropped; callers ask again on move.
    */
   function request(points) {
     if (!enabled || !points?.length) return;
@@ -288,7 +269,6 @@ export function createMeshSampler({
     schedule();
   }
 
-  /** Drop every sample and remembered miss. */
   function forget() {
     heights.clear();
     misses.clear();

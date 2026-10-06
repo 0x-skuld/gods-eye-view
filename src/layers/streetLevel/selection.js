@@ -1,10 +1,7 @@
 import * as Cesium from 'cesium';
 import { STREET_LEVEL_LAYER_ID } from './policy.js';
 
-/**
- * Minimum time between hover picks: ~8 `scene.pick` calls a second while the
- * pointer moves, as the CCTV layer's hover does, never one per frame.
- */
+/** Hover picks at most ~8 times a second (like the CCTV layer), never per frame. */
 const HOVER_PICK_INTERVAL_MS = 120;
 
 /** One click/hover handler for every provider's coverage and image cones. */
@@ -92,9 +89,8 @@ export function createSelection({ state, parts }) {
   }
 
   /**
-   * Pointer cursor over anything this layer owns, so lines read as clickable.
-   * Picks the latest position at most every HOVER_PICK_INTERVAL_MS; a move
-   * inside the interval is picked when it ends, so the cursor never sticks.
+   * Pointer cursor over anything this layer owns. Throttled; a move inside
+   * the interval is picked when it ends, so the cursor never sticks.
    */
   function onMove(movement) {
     const viewer = state.viewer;
@@ -119,10 +115,8 @@ export function createSelection({ state, parts }) {
   }
 
   /**
-   * Track held buttons (a drag picks nothing) and camera stops. A moving
-   * camera does not stop hover: an orbiting or tracking camera never stops,
-   * and the throttle already bounds the cost. When the camera comes to rest
-   * the pointer is picked once more, since what was under it has moved.
+   * Track held buttons (a drag picks nothing) and re-pick when the camera
+   * rests. Hover keeps running while it moves: a tracking camera never stops.
    */
   function watchHover(viewer) {
     const canvas = viewer.scene.canvas;

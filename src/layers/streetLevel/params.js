@@ -1,9 +1,8 @@
 import { normalizeFilter } from './filter.js';
 
 /**
- * Share-link and stored parameters: one boolean per registered provider plus
- * the shared imagery filter. The codec in src/data/layerState.js names the
- * same keys, so a provider added later also needs an option there.
+ * Share-link params: one boolean per provider plus the filter. The codec in
+ * src/data/layerState.js names the same keys, so a new provider needs one there.
  * @param {{providers: Iterable<[string, boolean]>, filter: {pano: string, sinceDays: number}}} input
  */
 export function encodeParams({ providers, filter }) {
@@ -15,8 +14,8 @@ export function encodeParams({ providers, filter }) {
 }
 
 /**
- * Read parameters back. Unknown providers and malformed values are ignored,
- * so a link written for a build with more providers still applies cleanly.
+ * Read params back, ignoring unknown providers and malformed values so a link
+ * from a build with more providers still applies.
  * @param {object} params
  * @param {{providerIds: Iterable<string>, filter: {pano: string, sinceDays: number}}} current
  * @returns {{providers: Map<string, boolean>, filter: {pano: string, sinceDays: number}}}

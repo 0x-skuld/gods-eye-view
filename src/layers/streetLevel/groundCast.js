@@ -1,17 +1,9 @@
 /**
- * Ground casting for street-level overlays on Google Photorealistic 3D.
- *
- * Draped lines and clamped billboards land on the top of the photoreal mesh,
- * so on a street lined with trees or under an overpass the coverage appears
- * to float at roof height. Casting places the overlays at the bare-earth
- * height from the terrain service (DEM) instead, plus a small lift, and lets
- * the mesh hide what is behind buildings.
- *
- * Heights are sampled on a coarse grid and interpolated, so one z14 coverage
- * tile costs at most a few hundred terrain lookups, and the grid matches the
- * ground-floor service (3 decimals) so cached cells are shared. Only real DEM
- * heights count; a geoid fallback (terrain proxy down) is treated as unknown
- * and the caller keeps its draped placement.
+ * Ground casting for street-level overlays on Google 3D. Draped overlays land
+ * on the mesh top (trees, overpasses), so casting places them at bare-earth
+ * (DEM) height plus a lift and lets the mesh hide what is behind buildings.
+ * Heights come from a coarse grid shared with the ground-floor service; a
+ * geoid fallback (terrain proxy down) counts as unknown and stays draped.
  */
 
 import { wrapLon } from './tileMath.js';
@@ -28,15 +20,12 @@ export const GROUND_CAST_MAX_CORNERS = 1024;
 const GROUND_CAST_CACHE_MAX = 50_000;
 
 /**
- * Mesh refinement. The bare-earth grid cannot see a freeway in a trench, a
- * steep street between grid corners, or the road under a tree, so where the
- * rendered Google 3D surface has been sampled it refines the height:
- *   - mesh at most MESH_ROAD_ABOVE_M above bare earth (and not absurdly far
- *     below it) is the road itself: follow it, MESH_LIFT_M above;
- *   - mesh higher than that is something over the road (canopy, deck, roof):
- *     carry the road's offset from bare earth across from the nearest road
- *     samples on both sides, within MESH_BRIDGE_MAX_POINTS;
- *   - otherwise bare earth plus GROUND_CAST_LIFT_M, as without the mesh.
+ * Mesh refinement, where the Google 3D surface was sampled (the DEM grid
+ * misses trenches, steep streets and roads under trees):
+ *   - mesh up to MESH_ROAD_ABOVE_M above bare earth is the road: follow it;
+ *   - higher mesh is over the road (canopy, deck): interpolate the road's
+ *     offset from the nearest road samples on both sides;
+ *   - otherwise bare earth plus GROUND_CAST_LIFT_M.
  */
 export const MESH_ROAD_ABOVE_M = 3;
 /** A sample this far below bare earth is a bad probe, not a road. */
@@ -49,8 +38,7 @@ export const MESH_BRIDGE_MAX_POINTS = 8;
 export const MESH_DENSIFY_DEG = 0.0002;
 
 /**
- * Heights for a line's points from bare earth and, where sampled, the mesh.
- * Pure, so the rule above is testable without a scene.
+ * Heights for a line's points by the rule above.
  * @param {Array<{dem: number, mesh?: number|null}>} points
  * @param {{lift?: number}} [options]
  * @returns {Array<number>}
@@ -93,9 +81,8 @@ export const SURFACE_TERRAIN_ENTER_M = 1400;
 export const SURFACE_TERRAIN_EXIT_M = 1800;
 
 /**
- * The next surface mode for the camera. Terrain mode applies only on Google
- * 3D and only at street zoom; the gap between the enter and exit heights
- * stops the mode from flapping while the camera hovers at the boundary.
+ * Next surface mode: terrain only on Google 3D at street zoom, with
+ * hysteresis between the enter and exit heights.
  * @param {'draped'|'terrain'} current
  * @param {{photoreal: boolean, heightM: number|null, available: boolean}} view
  * @returns {'draped'|'terrain'}
@@ -108,9 +95,8 @@ export function nextSurfaceMode(current, { photoreal, heightM, available }) {
 }
 
 /**
- * Split long segments so a line follows the terrain between its vertices.
- * A segment across ±180° is split the short way round, and the points it
- * adds are wrapped back into [-180, 180].
+ * Split long segments so a line follows the terrain. Segments across ±180°
+ * go the short way round, with added points wrapped into [-180, 180].
  * @param {Array<[number, number]>} coords [lon, lat] pairs
  * @param {number} [maxStep] longest segment, in degrees
  * @returns {Array<[number, number]>}
@@ -172,9 +158,8 @@ export function createGroundCaster({
 
   async function resolve(points, signal) {
     if (signal?.aborted) return false;
-    // Make room first: evicting after counting would drop corners this
-    // request already treated as cached. Oldest first (a Map keeps insertion
-    // order), so the tiles cast last, likely still on screen, keep theirs.
+    // Evict before counting, or we could drop corners this request counted
+    // as cached. Oldest first, so the tiles still on screen keep theirs.
     for (const key of heights.keys()) {
       if (heights.size + maxCorners <= cacheMax) break;
       heights.delete(key);
@@ -182,8 +167,7 @@ export function createGroundCaster({
     const missing = missingCorners(points);
     if (!missing.length) return true;
     if (missing.length > maxCorners) return false;
-    // A corner east of 180° (the far corner of a point on the meridian) is
-    // asked for at its longitude on the other side.
+    // A corner east of 180° is asked for at its wrapped longitude.
     const results = await terrain.resolveEllipsoidalGround(
       missing.map(([, { i, j }]) => ({
         lon: Number(wrapLon(i * step).toFixed(6)),
@@ -202,9 +186,8 @@ export function createGroundCaster({
   }
 
   /**
-   * Fetch the grid corners around the given points. Resolves true when every
-   * point can now be cast; false when some corners are unknown (terrain proxy
-   * down, too many corners, or aborted). Never rejects.
+   * Fetch the grid corners around the points. True when all can be cast;
+   * false when some are unknown, too many, or aborted. Never rejects.
    * @param {Array<[number, number]>} points [lon, lat] pairs
    * @param {{signal?: AbortSignal}} [options]
    */
@@ -215,10 +198,8 @@ export function createGroundCaster({
   }
 
   /**
-   * `prepare` for lines, including the points densifying adds. `castLine`
-   * densifies finer when mesh heights refine it, and those points can fall in
-   * grid cells the coarse points skip, so both sets are prepared: otherwise
-   * the cast comes back null and the line stays draped over roofs and trees.
+   * `prepare` for lines at both densities: the finer mesh points can fall in
+   * cells the coarse ones skip, and a missing cell leaves the line draped.
    */
   function prepareLines(lines, options) {
     return prepare(
@@ -250,10 +231,8 @@ export function createGroundCaster({
   }
 
   /**
-   * A line as flat [lon, lat, height, ...] degrees and metres, densified;
-   * null when any corner it needs is not cached yet. With `meshAt` (sampled
-   * mesh heights, undefined or null where unknown) the line is densified
-   * finer and its heights refined by `refineHeights`.
+   * Densified line as flat [lon, lat, height, ...]; null until every corner is
+   * cached. With `meshAt` it is densified finer and refined by `refineHeights`.
    * @param {Array<[number, number]>} coords
    * @param {{meshAt?: (lon: number, lat: number) => number|null|undefined}} [options]
    */

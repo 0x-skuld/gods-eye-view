@@ -3,8 +3,8 @@ import { FILTER_DEFAULT, MAX_SINCE_DAYS, PANO_MODES } from './policy.js';
 const DAY_MS = 86_400_000;
 
 /**
- * Merge a partial filter change into the current one. Unknown panorama modes
- * and negative or non-integer day counts leave the current value alone.
+ * Merge a partial filter change; unknown pano modes and invalid day counts
+ * keep the current value.
  * @param {{pano?: string, sinceDays?: number}|null} next
  * @param {{pano: string, sinceDays: number}} [current]
  * @returns {{pano: string, sinceDays: number}}
@@ -26,8 +26,8 @@ export function sameFilter(a, b) {
 }
 
 /**
- * Turn the stored filter (relative days, stable in share links) into the
- * absolute form providers compare capture times against.
+ * Stored filter (relative days, stable in share links) to the absolute form
+ * providers compare capture times against.
  * @returns {{pano: string, sinceMs: number|null}}
  */
 export function resolveFilter(filter, now = Date.now()) {
@@ -39,8 +39,8 @@ export function resolveFilter(filter, now = Date.now()) {
 }
 
 /**
- * Whether one capture passes the resolved imagery filter: panorama mode
- * ('all' | 'pano' | 'flat') and an optional earliest capture time.
+ * Whether a capture passes the resolved filter: pano mode and an optional
+ * earliest capture time.
  * @param {{isPano?: boolean, capturedAt?: number}} record
  * @param {{pano: string, sinceMs: number|null}|null} filter
  */

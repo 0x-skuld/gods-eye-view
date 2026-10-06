@@ -120,7 +120,7 @@ test('nearestImage picks the closest image, not the first the API returned', asy
   assert.equal(await instance.nearestImage({ lat: 1, lon: 2 }), 'near');
 });
 
-test('a "since N days" window follows the clock in a long-open tab (review P3)', async (t) => {
+test('a "since N days" window follows the clock in a long-open tab', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 9, 1) });
   const day = 86_400_000;
   const capturedAt = Date.now() - day / 2;
@@ -140,7 +140,7 @@ test('a "since N days" window follows the clock in a long-open tab (review P3)',
   );
 });
 
-test('nearestImage measures the short way round the date line (review IC8 P2)', async () => {
+test('nearestImage measures the short way round the date line', async () => {
   const at = (id, lon, lat) => ({
     id,
     is_pano: false,
@@ -167,7 +167,7 @@ test('nearestImage measures the short way round the date line (review IC8 P2)', 
   assert.equal(await west.nearestImage({ lat: 0, lon: -179.9999 }), 'across');
 });
 
-test('cone thinning across the date line drops images metres apart (review IC8 P2)', () => {
+test('cone thinning across the date line drops images metres apart', () => {
   const image = (id, lon) => ({ id, lon, lat: 0 });
   // A sequence driving east over ±180° with images ~1 m apart, then ~11 m on.
   const kept = thinImages(
@@ -220,7 +220,7 @@ function streetViewer() {
   };
 }
 
-test('coverage asks for no tiles before the key status is known (gekh P3)', async () => {
+test('coverage asks for no tiles before the key status is known', async () => {
   for (const configured of [false, true]) {
     let answer;
     const tiles = [];

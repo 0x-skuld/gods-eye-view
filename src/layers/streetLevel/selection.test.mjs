@@ -155,7 +155,7 @@ test('hover does not pick while a mouse button is held', () => {
   }
 });
 
-test('a camera that never stops (orbit, tracking) keeps hover throttled, not off (review P3)', () => {
+test('a camera that never stops (orbit, tracking) keeps hover throttled, not off', () => {
   const h = harness();
   try {
     // An orbiting or tracking camera raises moveStart and never moveEnd.
@@ -171,7 +171,7 @@ test('a camera that never stops (orbit, tracking) keeps hover throttled, not off
   }
 });
 
-test('when the camera stops, the pointer is picked again so the cursor cannot stick (review P3)', () => {
+test('when the camera stops, the pointer is picked again so the cursor cannot stick', () => {
   const h = harness();
   try {
     h.scene.under = 'mly:seq:1';
@@ -204,9 +204,8 @@ test('a hover frame queued before the layer went off does not pick', () => {
 });
 
 /**
- * An element as Esc sees it: `closest` matches the tag names a selector list
- * names, and `isContentEditable` is what the browser reports, inherited from
- * an editing host.
+ * An element as Esc sees it: `closest` matches tag names in a selector list;
+ * `isContentEditable` is inherited from an editing host, as in a browser.
  */
 function element(tag, { isContentEditable = false } = {}) {
   return {

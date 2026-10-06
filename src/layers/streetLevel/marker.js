@@ -6,11 +6,7 @@ import { createHorizonCull } from './view.js';
 
 const SPRITE_ID = 'street-level:marker';
 
-/**
- * The on-globe marker for the image the viewer currently shows. In terrain
- * mode (Google 3D at street zoom) it stands on the bare earth instead of
- * clamping to the top of the photoreal mesh.
- */
+/** On-globe marker for the open image; in terrain mode it stands on bare earth. */
 export function createMarker({ state, parts }) {
   const { render, sprites } = state.services;
   let last = null;
@@ -36,9 +32,8 @@ export function createMarker({ state, parts }) {
   }
 
   /**
-   * Height for the position in terrain mode: bare earth, refined by the
-   * sampled Google 3D surface where it is known; null to clamp. Fetches a
-   * missing terrain cell and asks for a mesh sample under the marker.
+   * Terrain-mode height (bare earth refined by mesh samples), or null to
+   * clamp. Requests a missing terrain cell or mesh sample as a side effect.
    */
   function castHeight(position) {
     const ground = parts?.groundCaster;

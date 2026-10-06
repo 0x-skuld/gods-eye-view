@@ -78,7 +78,7 @@ test('fixture tiles give the hermetic gate something real to filter', async () =
   assert.equal(fixtureTile(8, 1, 1, now).length, 0, 'nothing in between');
 });
 
-/* ── The real status route probe (review IC8 P2) ───────────────────────── */
+/* ── The real status route probe ─────────────────────────────────────── */
 
 test('the gate requires the server’s real Mapillary status route', async () => {
   const { assertRealStatusRoute } =
@@ -124,14 +124,12 @@ test('the gate requires the server’s real Mapillary status route', async () =>
     );
 });
 
-/* ── Header press-and-verify shared with the panel gate (review IC8 P2) ── */
+/* ── Header press-and-verify shared with the panel gate ───────────────── */
 
 /**
- * A page stand-in whose `evaluate` runs the page function in Node against a
- * fake document. The hit check always sees the header; `presses` says where
- * each real pointerdown lands ('header', or 'other' when the rail moved the
- * panel between the check and the press). A drag from the header lifts the
- * panel and a header double-click docks it, unless `stuck`.
+ * A page stand-in that runs page functions in Node against a fake document.
+ * The hit check always sees the header; `presses` says where each pointerdown
+ * lands ('header', 'other', 'moved' or 'none').
  */
 function fakePanelPage({ presses = [], floating = false, stuck = false } = {}) {
   const state = { floating, downs: 0, last: null, dragging: false, shift: 0 };
@@ -164,7 +162,6 @@ function fakePanelPage({ presses = [], floating = false, stuck = false } = {}) {
   const window = {
     addEventListener: (type, listener) => listeners.push(listener),
   };
-  /** Run page code (an evaluated function or a page listener) in the page. */
   const inPage = (fn, ...args) => {
     const saved = { document: globalThis.document, window: globalThis.window };
     Object.assign(globalThis, { document, window });

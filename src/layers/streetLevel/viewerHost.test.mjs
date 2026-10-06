@@ -458,7 +458,7 @@ test('a prewarm that gave up when the layer went off and on mid-download is foll
   adapter.unmount();
 });
 
-test('the Mapillary viewer leaves resizing to the panel, so a hidden one never asks for z=NaN (gekh P3)', async () => {
+test('the Mapillary viewer leaves resizing to the panel, so a hidden one never asks for z=NaN', async () => {
   const { gate, viewers } = fakeLibrary();
   gate.resolve();
   const adapter = createMapillaryViewer({ source: { token: 't' } });
@@ -467,7 +467,7 @@ test('the Mapillary viewer leaves resizing to the panel, so a hidden one never a
   adapter.unmount();
 });
 
-test('closing the photo stops sequence playback in the hidden viewer (review P2-6)', async () => {
+test('closing the photo stops sequence playback in the hidden viewer', async () => {
   const { gate, viewers } = fakeLibrary();
   gate.resolve();
   const adapter = createMapillaryViewer({ source: { token: 't' } });
@@ -480,7 +480,7 @@ test('closing the photo stops sequence playback in the hidden viewer (review P2-
   assert.equal(viewers.live, 1, 'the viewer itself stays warm');
 });
 
-test('closing the photo or switching the layer off stops its framing flight (review IC8 P1)', async () => {
+test('closing the photo or switching the layer off stops its framing flight', async () => {
   const adapter = fakeAdapter();
   const { framing, host } = harness(adapter);
   await host.open('mapillary', 'a');

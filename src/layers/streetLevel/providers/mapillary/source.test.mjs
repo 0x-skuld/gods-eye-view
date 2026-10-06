@@ -110,7 +110,7 @@ test('the source exposes only imagery lookups', () => {
     assert.equal(source[gone], undefined, gone);
 });
 
-test('a rejected key and a rate limit are told apart from other tile errors (review IC8 P2)', async () => {
+test('a rejected key and a rate limit are told apart from other tile errors', async () => {
   const rejectedSource = createMapillarySource({
     token: 'MLY|1|abc',
     fetchImpl: fakeFetch(() =>

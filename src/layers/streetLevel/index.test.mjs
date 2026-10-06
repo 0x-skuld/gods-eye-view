@@ -242,7 +242,7 @@ test('switching a provider off deactivates it and closes the image it shows', as
   assert.equal(layer.getUIState().street.providerId, null);
 });
 
-test('openNearest without the panel reports it instead of loading forever (review P3)', async (t) => {
+test('openNearest without the panel reports it instead of loading forever', async (t) => {
   const provider = fakeProvider({ nearestImage: async () => 'img1' });
   const { layer } = await enabledLayer(t, [provider]);
   assert.equal(await layer.openNearest({ lat: 38.58, lon: -121.49 }), false);
@@ -252,7 +252,7 @@ test('openNearest without the panel reports it instead of loading forever (revie
   assert.equal(provider.calls.mount, 0);
 });
 
-test('openNearest opens nothing once the layer went off during the lookup (review P3)', async (t) => {
+test('openNearest opens nothing once the layer went off during the lookup', async (t) => {
   const answer = deferred();
   const provider = fakeProvider({ nearestImage: () => answer.promise });
   const { layer } = await enabledLayer(t, [provider]);
@@ -268,7 +268,7 @@ test('openNearest opens nothing once the layer went off during the lookup (revie
   assert.equal(street.error, null);
 });
 
-test('openNearest skips a provider switched off during its lookup (review P3)', async (t) => {
+test('openNearest skips a provider switched off during its lookup', async (t) => {
   const answer = deferred();
   const provider = fakeProvider({ nearestImage: () => answer.promise });
   const { layer } = await enabledLayer(t, [provider]);
@@ -281,7 +281,7 @@ test('openNearest skips a provider switched off during its lookup (review P3)', 
   assert.equal(layer.getUIState().street.loading, false);
 });
 
-test('a provider withdraws only the error it reported (review P3)', async (t) => {
+test('a provider withdraws only the error it reported', async (t) => {
   const provider = fakeProvider();
   const { layer } = await enabledLayer(t, [provider]);
   const { actions } = provider.context();
@@ -298,7 +298,7 @@ test('a provider withdraws only the error it reported (review P3)', async (t) =>
   assert.match(layer.getUIState().street.error, /Open the Street Level panel/);
 });
 
-test('closing the photo stops the globe flying to it (review IC8 P1)', async (t) => {
+test('closing the photo stops the globe flying to it', async (t) => {
   const { layer, viewer } = await enabledLayer(t, [posingProvider()]);
   layer.attachViewerHost({});
   assert.equal(await layer.openImage('mapillary', 'img1'), true);
@@ -307,7 +307,7 @@ test('closing the photo stops the globe flying to it (review IC8 P1)', async (t)
   assert.equal(viewer.flights.cancelled, 1);
 });
 
-test('switching the layer off or destroying it stops the framing flight (review IC8 P1)', async (t) => {
+test('switching the layer off or destroying it stops the framing flight', async (t) => {
   const { layer, viewer } = await enabledLayer(t, [posingProvider()]);
   layer.attachViewerHost({});
   await layer.openImage('mapillary', 'img1');
@@ -320,7 +320,7 @@ test('switching the layer off or destroying it stops the framing flight (review 
   assert.equal(viewer.flights.cancelled, 2, 'destroyed');
 });
 
-test('closing the photo leaves a newer navigation flight alone (review IC8 P1)', async (t) => {
+test('closing the photo leaves a newer navigation flight alone', async (t) => {
   const { layer, viewer } = await enabledLayer(t, [posingProvider()]);
   layer.attachViewerHost({});
   await layer.openImage('mapillary', 'img1');
@@ -331,7 +331,7 @@ test('closing the photo leaves a newer navigation flight alone (review IC8 P1)',
   assert.equal(viewer.flights.cancelled, 0, 'the search flight keeps going');
 });
 
-test('an older nearest lookup that answers late cannot replace a newer one (review IC8 P2)', async (t) => {
+test('an older nearest lookup that answers late cannot replace a newer one', async (t) => {
   const { lookups, nearestImage } = slowLookups();
   const provider = fakeProvider({ nearestImage });
   const { layer } = await enabledLayer(t, [provider]);
@@ -347,7 +347,7 @@ test('an older nearest lookup that answers late cannot replace a newer one (revi
   assert.equal(lookups[1].signal?.aborted, false);
 });
 
-test('an image picked during a nearest lookup wins over its late answer (review IC8 P2)', async (t) => {
+test('an image picked during a nearest lookup wins over its late answer', async (t) => {
   const { lookups, nearestImage } = slowLookups();
   const provider = fakeProvider({ nearestImage });
   const { layer } = await enabledLayer(t, [provider]);
@@ -361,7 +361,7 @@ test('an image picked during a nearest lookup wins over its late answer (review 
   assert.equal(lookups[0].signal?.aborted, true);
 });
 
-test('closing the viewer or switching the layer off retires a nearest lookup (review IC8 P2)', async (t) => {
+test('closing the viewer or switching the layer off retires a nearest lookup', async (t) => {
   const { lookups, nearestImage } = slowLookups();
   const provider = fakeProvider({ nearestImage });
   const { layer, viewer } = await enabledLayer(t, [provider]);
@@ -393,7 +393,7 @@ test('closing the viewer or switching the layer off retires a nearest lookup (re
   assert.equal(lookups[1].signal?.aborted, true, 'layer off aborts it too');
 });
 
-test('the Mapillary provider hands the lookup signal to its source (review IC8 P2)', async () => {
+test('the Mapillary provider hands the lookup signal to its source', async () => {
   const requests = [];
   const source = {
     hasToken: () => true,

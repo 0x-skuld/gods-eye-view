@@ -1,22 +1,10 @@
 /**
- * Header press-and-verify for the browser QA gates that lift a rail panel
- * into a floating window (header drag) and dock it again (header
- * double-click). The rail animates panel heights, so a point read once can
- * be under another panel by the time the pointer goes down. Each attempt
- * re-resolves the header, presses only where the header really is, records
- * what the press landed on, and waits for the panel's actual state. Only a
- * provable miss (a recorded press that landed outside the header) is
- * retried; a press in the header that did not lift or dock, and a press that
- * recorded no pointerdown at all, are real failures.
- *
- * Every retry is logged with what led to it (the pre-press hit check, the
- * stillness wait, the panel box at the hit check and at the press) and as a
- * GitHub `::warning::`. With QA_FAIL_ON_RETRY=1 (or `--fail-on-retry`) a
- * miss the panel's own movement cannot explain fails the run instead: if its
- * box was the same at the hit check and at the press, the pointer missed a
- * header that stood still. A panel whose content changed its layout between
- * the two (a photo finishing loading, a live count wrapping a line) is
- * retried with a warning that names the move.
+ * Header press-and-verify for the QA gates that lift a rail panel into a
+ * floating window and dock it again. The rail animates panel heights, so a
+ * point read once can be under another panel by the time the pointer goes
+ * down. Only a provable miss (a recorded press outside the header) is
+ * retried, with a GitHub `::warning::`. With QA_FAIL_ON_RETRY=1 a miss the
+ * panel's own movement cannot explain fails the run instead.
  */
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -34,18 +22,15 @@ export function failOnRetryDefault(
 }
 
 /**
- * Whether an attempt proves nothing about the panel: it did not reach the
- * wanted state and the recorded press demonstrably landed outside the
- * header. No recorded press (`pressed` null) is not a miss but a failure:
- * the pointer never reached the page, which a retry would only hide.
+ * A failed attempt whose press landed outside the header. No recorded press
+ * is a failure, not a miss: a retry would only hide it.
  * @param {{done: boolean, pressed: {inHeader: boolean}|null}} attempt
  */
 export function pressMissed(attempt) {
   return !attempt.done && attempt.pressed?.inHeader === false;
 }
 
-/** The panel's box, rounded, as `left,top widthxheight`. */
-/** Whether the panel's box changed (by more than 2 px) between two reads. */
+/** Whether the panel's box changed by more than 2 px between two reads. */
 export function panelMoved(before, after) {
   if (!before || !after) return false;
   return ['left', 'top', 'width', 'height'].some(
@@ -53,6 +38,7 @@ export function panelMoved(before, after) {
   );
 }
 
+/** The panel's box, rounded, as `left,top widthxheight`. */
 export function formatBox(box) {
   if (!box) return 'unknown';
   const r = (value) => Math.round(value ?? NaN);
@@ -66,7 +52,6 @@ function panelBox(page, panelId) {
   }, panelId);
 }
 
-/** The centre of the panel's header title, read now. */
 export function headerPoint(page, panelId) {
   return page.evaluate((id) => {
     const title = document.querySelector(`#${id} .panel-header .panel-title`);
@@ -75,7 +60,7 @@ export function headerPoint(page, panelId) {
   }, panelId);
 }
 
-/** Name the element at a viewport point, and whether it is the panel's header. */
+/** Name the element at a point, and whether it is the panel's header. */
 export function hitAt(page, point, panelId) {
   return page.evaluate(
     ({ x, y, id }) => {
@@ -91,9 +76,8 @@ export function hitAt(page, point, panelId) {
 }
 
 /**
- * The header point to press, re-resolved until it lands on the header (or the
- * bounded wait runs out; the press then records the miss). `timedOut` says
- * the hit check never passed; `box` is the panel's box at the last check.
+ * Re-resolve the header point until it hits the header or the wait runs out
+ * (the press then records the miss).
  */
 export async function headerTarget(
   page,
@@ -112,10 +96,8 @@ export async function headerTarget(
 }
 
 /**
- * Best effort: wait until the panel's box (to the whole pixel) has held still
- * for `stillMs`, so a rail still animating heights does not move the header
- * between the hit check and the press. Never fails the run; resolves to
- * whether the box held still in time.
+ * Best effort: wait until the panel's box has held still for `stillMs`, so
+ * the header does not move between the hit check and the press.
  */
 export async function waitForStill(
   page,
@@ -145,10 +127,7 @@ export async function waitForStill(
   }
 }
 
-/**
- * Record what the next pointerdown lands on, with the panel's box at that
- * moment, in `window.__qaPressBox` (null until a press arrives).
- */
+/** Record the next pointerdown's target and the panel's box at that moment. */
 export function recordNextPress(page, panelId) {
   return page.evaluate((id) => {
     window.__qaPressBox = null;
@@ -162,7 +141,6 @@ export function recordNextPress(page, panelId) {
           top: r.top,
           width: r.width,
           height: r.height,
-          // What the press landed on, so a failed press says why.
           target: `${target.tagName?.toLowerCase()}${target.id ? `#${target.id}` : ''}.${[...(target.classList || [])].join('.')}`,
           inHeader: Boolean(target.closest?.(`#${id} .panel-header`)),
         };
@@ -172,12 +150,10 @@ export function recordNextPress(page, panelId) {
   }, panelId);
 }
 
-/** The press recorded by `recordNextPress`, or null. */
 function readPress(page) {
   return page.evaluate(() => window.__qaPressBox ?? null);
 }
 
-/** Wait (bounded) until the panel is, or is not, a floating window. */
 export async function waitForFloating(
   page,
   panelId,
@@ -200,10 +176,7 @@ export async function waitForFloating(
   }
 }
 
-/**
- * Wait for the page to paint twice: pointer handlers apply synchronously, so
- * by then every layout change an input caused is on screen.
- */
+/** Two paints: by then every layout change an input caused is on screen. */
 export function nextFrames(page) {
   return page.evaluate(
     () =>
@@ -213,7 +186,6 @@ export function nextFrames(page) {
   );
 }
 
-/** Press at `from`, move by (dx, dy) in two legs, release. */
 export async function dragPointer(page, from, dx, dy, { steps = 6 } = {}) {
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
@@ -223,10 +195,6 @@ export async function dragPointer(page, from, dx, dy, { steps = 6 } = {}) {
   await nextFrames(page);
 }
 
-/**
- * One line naming why a press is retried: what it landed on, the pre-press
- * hit check, the stillness wait and the panel's box at the check and press.
- */
 export function describeRetry(
   panelId,
   attempt,
@@ -243,10 +211,7 @@ export function describeRetry(
     .join('; ');
 }
 
-/**
- * Run `press` (one attempt at the header) until it reaches the wanted state,
- * a press in the header fails to, or the retries run out.
- */
+/** Retry `press` only while it provably misses the header. */
 async function pressUntilDecided(
   page,
   panelId,
@@ -293,8 +258,6 @@ async function pressUntilDecided(
 /**
  * Lift a docked panel into a floating window with a header drag.
  * @returns {Promise<{point: {x: number, y: number}, hit: {target: string, inHeader: boolean}, done: boolean, pressed: object|null}>}
- *   `done` is whether the panel is floating; `pressed` names what the press
- *   landed on and the panel's box at that moment.
  */
 export function liftPanelByHeader(
   page,
@@ -320,11 +283,7 @@ export function liftPanelByHeader(
   );
 }
 
-/**
- * Dock a floating panel with a header double-click, waiting on the docked
- * state rather than a fixed sleep. Same result shape as `liftPanelByHeader`;
- * `done` is whether the panel is docked.
- */
+/** Dock a floating panel with a header double-click; same result as lifting. */
 export function dockPanelByDoubleClick(
   page,
   panelId,
@@ -348,7 +307,7 @@ export function dockPanelByDoubleClick(
   );
 }
 
-/** One line naming where an attempt pressed, for an assertion message. */
+/** Where an attempt pressed, for an assertion message. */
 export function describePress(attempt) {
   const { point, hit, pressed } = attempt;
   const where = `pressed ${Math.round(point.x)},${Math.round(point.y)}`;

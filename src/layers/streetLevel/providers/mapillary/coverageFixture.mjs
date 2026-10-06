@@ -1,11 +1,5 @@
 import { PbfWriter } from 'pbf';
 
-/**
- * Encode a Mapillary-shaped coverage tile (mly1_public: `sequence` lines and
- * `overview` points) from lon/lat features, for tests and the hermetic QA
- * gate. The decoder in ./decode.js reads it like a real tile.
- */
-
 const zigzag = (value) => (value << 1) ^ (value >> 31);
 
 /** Tile-local [x, y] (0..extent) of a lon/lat inside tile (x, y, z). */
@@ -67,7 +61,7 @@ function layerWriter(name, extent) {
   };
 }
 
-/** MoveTo/LineTo commands for line parts, with the cursor carried across parts. */
+/** MVT MoveTo/LineTo commands; the cursor carries over between parts. */
 function lineGeometry(parts) {
   const out = [];
   let cx = 0;
@@ -89,9 +83,10 @@ function lineGeometry(parts) {
 }
 
 /**
+ * Encode a `mly1_public`-shaped tile from lon/lat features, for tests and
+ * the hermetic QA gate.
  * @param {{x: number, y: number, z: number}} tile
  * @param {{sequences?: Array<{id: string, capturedAt?: number, isPano?: boolean, parts: Array<Array<[number, number]>>}>, overview?: Array<{id: string, lon: number, lat: number, capturedAt?: number, isPano?: boolean}>, extent?: number}} [content]
- * @returns {Uint8Array}
  */
 export function encodeCoverageTile(
   tile,

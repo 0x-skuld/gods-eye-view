@@ -28,7 +28,7 @@ export function syncChipGroup(container, chips = [], { before = null } = {}) {
       `data-toggle-chip chip-${state}${chip.active ? ' active' : ''}`,
     );
     set(button, 'textContent', chip.label);
-    // Optional per-chip colour (a Street Level source); CSS decides its use.
+    // Optional per-chip colour; CSS decides how it is used.
     const color = chip.color || '';
     if ((button.dataset.chipColor || '') !== color) {
       if (color) {

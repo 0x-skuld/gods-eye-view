@@ -83,8 +83,7 @@ test('the keyless state gates the controls rather than leaving dead buttons', ()
   );
   assert.match(html, /<fieldset id="sl-controls"/);
   assert.match(html, /<div id="sl-provider-chips" class="sl-chips"><\/div>/);
-  // The gate holds the filters only: the provider chips stay reachable, so
-  // their tooltip can say how to add the key (gekh P3).
+  // The gate holds the filters only, so the chips' key tooltip stays reachable.
   const gate = html.slice(
     html.indexOf('<fieldset id="sl-controls"'),
     html.indexOf('</fieldset>', html.indexOf('<fieldset id="sl-controls"')),
@@ -168,9 +167,8 @@ test('the viewer comes first and the panel is a portable, resizable window', () 
     panelCss,
     /\.panel-floating\[style\*='height'\] \.sl-settings \{[^}]*overflow-y: auto/,
   );
-  // Shrinking docks it back at its default size rather than leaving a
-  // window over the globe: collapsing a floating panel, or SHRINK / Esc on
-  // the expanded viewer.
+  // Collapsing a floating panel, or SHRINK / Esc on the expanded viewer,
+  // docks it rather than leaving a window over the globe.
   assert.match(
     position,
     /id: 'street-level-panel',[\s\S]*?dockOnCollapse: true/,
@@ -190,8 +188,6 @@ test('the viewer comes first and the panel is a portable, resizable window', () 
     /panelId === 'street-level-panel'\)\s*this\._streetLevelControls\?\.onPanelResized\(\)/,
   );
 });
-
-/* ── gekh review on #768 ───────────────────────────────────────────────── */
 
 test('Clean View, recording and the cockpit hide the expanded viewer on <body> (P2-5)', () => {
   // EXPAND moves the viewer out of every panel, past the panel-hiding rules.

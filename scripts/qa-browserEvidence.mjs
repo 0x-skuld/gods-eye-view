@@ -1,19 +1,12 @@
 /**
- * Evidence the browser QA gates (qa-street-level, qa-panel-resize) collect
- * while they run and save when they fail: every page's console (last 200
- * messages), failed requests and HTTP errors, Cesium render-loop errors (the
- * "An error occurred while rendering" console line and `scene.renderError`)
- * and, on failure, a full-page screenshot of every open page plus the Street
- * Level UI state, under `qa-artifacts/<gate>/` (CI uploads that directory).
- *
- * Keys never reach the evidence: URLs lose their `access_token`, `key` (and
- * similar) values, and `MLY|…` client tokens and Google `AIza…` keys are
- * masked wherever they appear.
+ * Evidence the browser QA gates collect while they run and save under
+ * `qa-artifacts/<gate>/` when they fail (CI uploads that directory). Tokens
+ * and keys are masked before anything is printed or saved.
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-/** How many console messages and failed requests each page keeps. */
+/** Console messages and failed requests kept per page. */
 export const EVIDENCE_LIMIT = 200;
 
 /** Cesium's console line when the render loop throws (CesiumWidget). */
@@ -59,7 +52,6 @@ export function hookRenderErrors(page) {
   });
 }
 
-/** Render errors the in-page hook saw in the current document. */
 export async function readRenderErrors(page) {
   try {
     return await page.evaluate(() => window.__qaRenderErrors ?? []);
@@ -69,9 +61,8 @@ export async function readRenderErrors(page) {
 }
 
 /**
- * Watch one page: console, page errors, failed requests and HTTP errors.
- * `errors` (shared across pages) receives page errors, render-loop console
- * errors and the extra `isError(text)` console lines a gate cares about.
+ * Watch one page's console, errors and failed requests. `errors` is shared
+ * across pages; `isError(text)` adds console lines a gate treats as errors.
  * @returns {{name: string, page: object, console: Array<object>, failed: Array<object>, renderErrors: Array<string>}}
  */
 export function watchPage(page, { name, errors, isError = () => false }) {
@@ -115,7 +106,6 @@ const withTimeout = (promise, ms, label) =>
     ),
   ]);
 
-/** The Street Level layer's UI state on a page, or why it could not be read. */
 function streetLevelState(page) {
   return page.evaluate(() => {
     const module =
@@ -125,10 +115,8 @@ function streetLevelState(page) {
 }
 
 /**
- * Save the evidence of a failed run under `dir`: per page a full-page
- * screenshot, the Street Level UI state, the console, failed requests and
- * render errors; plus the error itself. Never throws: a page that cannot be
- * captured records why instead.
+ * Save a screenshot and JSON record per page, plus the error. A page that
+ * cannot be captured records why instead.
  * @returns {Promise<string>} the directory written
  */
 export async function saveFailureArtifacts({ dir, browser, monitors, error }) {

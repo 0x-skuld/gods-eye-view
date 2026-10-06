@@ -28,13 +28,11 @@ import {
   _settleTileWritesForTest,
 } from '../../server/providers/mapillary/tiles.js';
 
-// Every tile these tests cache lands in a throwaway directory, never in the
-// developer's .gev-cache.
+// Keep test tiles out of the developer's .gev-cache.
 const cacheDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gev-mly-tiles-'));
 _setTileCacheDirForTest(cacheDir);
-// The directory is not switched back: a background write still landing must
-// never sweep the real cache. Background writes and sweeps settle first, so
-// none lands in the directory while it is being removed.
+// Not switched back, so a late background write can never sweep the real
+// cache; writes settle before the directory is removed.
 after(async () => {
   await tiles._settleTileWritesForTest();
   await fsp.rm(cacheDir, { recursive: true, force: true });
@@ -43,7 +41,6 @@ const tileFile = ({ z, x, y }, root = cacheDir) =>
   path.join(root, 'coverage', String(z), `${x}-${y}.pbf`);
 const HOUR = 60 * 60 * 1000;
 
-/** Write a cache file dated `ageMs` ago. */
 async function writeAged(file, bytes, ageMs) {
   await fsp.mkdir(path.dirname(file), { recursive: true });
   await fsp.writeFile(file, bytes);
@@ -67,9 +64,8 @@ const exists = (file) =>
   );
 
 /**
- * Mount the plugin and return callers keyed by route. `start` returns at once
- * with the response, its `close` trigger and the handler's `done` promise;
- * `call` waits for the handler.
+ * Mount the plugin. `call` waits for the handler; `start` returns at once with
+ * the response, its `close` trigger and the handler's `done` promise.
  */
 function install(plugin, mode = 'configureServer') {
   const routes = new Map();
@@ -186,11 +182,7 @@ test('tile route validates the path and refuses to proxy without a token', async
   }
 });
 
-/**
- * Drive the tile route against a scripted upstream: `answer(call, url)`
- * returns the Response for each upstream fetch; `inits` holds each fetch's
- * options. Refusals are never cached, so no disk tile is written.
- */
+/** Drive the tile route against a scripted upstream `answer(call, url)`. */
 async function withUpstream(answer, run) {
   const savedFetch = globalThis.fetch;
   const savedToken = process.env.MAPILLARY_CLIENT_TOKEN;
@@ -217,7 +209,7 @@ async function withUpstream(answer, run) {
 }
 
 for (const status of [401, 403])
-  test(`an upstream ${status} is a rejected key, and misses stop asking Mapillary (review IC8 P2)`, async () => {
+  test(`an upstream ${status} is a rejected key, and misses stop asking Mapillary`, async () => {
     await withUpstream(
       () => new Response('{}', { status }),
       async ({ calls, call }) => {
@@ -239,7 +231,7 @@ for (const status of [401, 403])
     );
   });
 
-test('a 429 passes its Retry-After on and holds misses until it is over (review IC8 P2)', async (t) => {
+test('a 429 passes its Retry-After on and holds misses until it is over', async (t) => {
   await withUpstream(
     () => new Response('{}', { status: 429, headers: { 'Retry-After': '30' } }),
     async ({ calls, call }) => {
@@ -335,7 +327,7 @@ test('normalizeTileAddress refuses prototype keys as layer names', () => {
     );
 });
 
-test('coverage zooms the app never requests (z6–10) are refused with a 400 (review P2)', async () => {
+test('coverage zooms the app never requests (z6–10) are refused with a 400', async () => {
   for (const z of [6, 7, 8, 9, 10])
     assert.throws(
       () => normalizeTileAddress({ layer: 'coverage', z, x: 0, y: 0 }),
@@ -429,7 +421,7 @@ test('a tile held in memory past the 24 h TTL is fetched again', async (t) => {
   });
 });
 
-test('a disk tile keeps its age in memory and through a retrim rewrite (review P2)', async (t) => {
+test('a disk tile keeps its age in memory and through a retrim rewrite', async (t) => {
   const address = { layer: 'coverage', z: 14, x: 8, y: 8 };
   const file = tileFile(address);
   const untrimmed = tile([
@@ -476,7 +468,7 @@ async function withCacheDir(run) {
   }
 }
 
-test('the disk sweep removes expired tiles and keeps fresh ones (review P2)', async () => {
+test('the disk sweep removes expired tiles and keeps fresh ones', async () => {
   await withCacheDir(async (dir) => {
     const expired = tileFile({ z: 14, x: 1, y: 1 }, dir);
     const fresh = tileFile({ z: 14, x: 2, y: 2 }, dir);
@@ -489,7 +481,7 @@ test('the disk sweep removes expired tiles and keeps fresh ones (review P2)', as
   });
 });
 
-test('the disk sweep evicts the oldest tiles past the size cap (review P2)', async () => {
+test('the disk sweep evicts the oldest tiles past the size cap', async () => {
   await withCacheDir(async (dir) => {
     const files = [3, 2, 1].map((age) => {
       const file = tileFile({ z: 13, x: age, y: age }, dir);
@@ -506,7 +498,7 @@ test('the disk sweep evicts the oldest tiles past the size cap (review P2)', asy
   });
 });
 
-test('caching a tile sweeps expired files off the disk in the background (review P2)', async () => {
+test('caching a tile sweeps expired files off the disk in the background', async () => {
   await withCacheDir(async (dir) => {
     const expired = tileFile({ z: 12, x: 1, y: 1 }, dir);
     const fresh = tileFile({ z: 12, x: 2, y: 2 }, dir);
@@ -525,11 +517,7 @@ test('caching a tile sweeps expired files off the disk in the background (review
   });
 });
 
-/**
- * A deferred upstream for in-flight tests: every fetch waits until released,
- * and records whether its signal was aborted. Their disk files are removed
- * first.
- */
+/** An upstream whose fetches wait until released and record their abort. */
 async function withDeferredUpstream(tiles, run) {
   const savedFetch = globalThis.fetch;
   const savedToken = process.env.MAPILLARY_CLIENT_TOKEN;
@@ -681,7 +669,7 @@ test('a request arriving before a cancelled fetch has wound down starts a fresh 
   });
 });
 
-// ── Route: success path, refusals, gate and limiter (review gekh) ──
+// ── Route: success path, refusals, gate and limiter ──
 
 /** Every header value and the body, as text, for a token-leak check. */
 const leakText = (res) =>
@@ -690,7 +678,7 @@ const leakText = (res) =>
     Buffer.isBuffer(res.body) ? res.body.toString('latin1') : String(res.body),
   ].join('\n');
 
-test('the tile route serves a trimmed protobuf tile, then from memory (review gekh P0)', async () => {
+test('the tile route serves a trimmed protobuf tile, then from memory', async () => {
   const address = { layer: 'coverage', z: 14, x: 9, y: 9 };
   await fsp.rm(tileFile(address), { force: true });
   const upstream = tile([
@@ -723,7 +711,7 @@ test('the tile route serves a trimmed protobuf tile, then from memory (review ge
 });
 
 for (const status of [204, 404])
-  test(`an empty upstream tile (${status}) is a 204 with no body (review gekh P0)`, async () => {
+  test(`an empty upstream tile (${status}) is a 204 with no body`, async () => {
     const address = { layer: 'coverage', z: 14, x: 10, y: status };
     await fsp.rm(tileFile(address), { force: true });
     await withUpstream(
@@ -742,7 +730,7 @@ for (const status of [204, 404])
     );
   });
 
-test('closing the response mid-flight aborts the upstream fetch (review gekh P0)', async () => {
+test('closing the response mid-flight aborts the upstream fetch', async () => {
   const address = { layer: 'coverage', z: 14, x: 11, y: 11 };
   await withDeferredUpstream([address], async ({ upstream }) => {
     const { start } = install(mapillaryProxy());
@@ -757,7 +745,7 @@ test('closing the response mid-flight aborts the upstream fetch (review gekh P0)
 });
 
 for (const status of [400, 410, 422])
-  test(`an upstream ${status} is a 502, not the client's fault (review gekh)`, async () => {
+  test(`an upstream ${status} is a 502, not the client's fault`, async () => {
     await withUpstream(
       () => new Response('{}', { status }),
       async ({ call }) => {
@@ -776,7 +764,7 @@ const redirect = (location) =>
     headers: location === null ? {} : { location },
   });
 
-test('a redirect within the Mapillary tile origin is followed by hand (IC8 P2)', async () => {
+test('a redirect within the Mapillary tile origin is followed by hand', async () => {
   await fsp.rm(tileFile({ z: 14, x: 13, y: 13 }), { force: true });
   await withUpstream(
     (n) =>
@@ -808,7 +796,7 @@ for (const [why, location] of [
   ['a scheme-relative host', '//evil.example/t'],
   ['no Location', null],
 ])
-  test(`a redirect off the tile origin (${why}) is a 502, and the token stays home (IC8 P2)`, async () => {
+  test(`a redirect off the tile origin (${why}) is a 502, and the token stays home`, async () => {
     await withUpstream(
       (n) =>
         n === 1
@@ -827,7 +815,7 @@ for (const [why, location] of [
     );
   });
 
-test('an endless same-origin redirect stops after a few hops (IC8 P2)', async () => {
+test('an endless same-origin redirect stops after a few hops', async () => {
   await withUpstream(
     (n) => redirect(`/maps/vtp/mly1_public/2/14/15/15?hop=${n}`),
     async ({ calls, call }) => {
@@ -841,7 +829,7 @@ test('an endless same-origin redirect stops after a few hops (IC8 P2)', async ()
   );
 });
 
-test('cross-site requests are refused on both routes; the app itself passes (review gekh)', async () => {
+test('cross-site requests are refused on both routes; the app itself passes', async () => {
   await withUpstream(
     () => new Response(tile([{ name: 'sequence' }]), { status: 200 }),
     async ({ calls, call }) => {
@@ -893,7 +881,7 @@ test('cross-site requests are refused on both routes; the app itself passes (rev
   );
 });
 
-test('the tile route answers 429 past its per-IP budget (review gekh)', async () => {
+test('the tile route answers 429 past its per-IP budget', async () => {
   const saved = process.env.MAPILLARY_CLIENT_TOKEN;
   delete process.env.MAPILLARY_CLIENT_TOKEN;
   try {
@@ -917,9 +905,9 @@ test('the tile route answers 429 past its per-IP budget (review gekh)', async ()
   }
 });
 
-// ── Tile cache and upstream bounds (review gekh) ──
+// ── Tile cache and upstream bounds ──
 
-test('concurrent disk hits on an untrimmed tile rewrite it once, keeping its age (review gekh)', async (t) => {
+test('concurrent disk hits on an untrimmed tile rewrite it once, keeping its age', async (t) => {
   const address = { layer: 'coverage', z: 14, x: 14, y: 14 };
   const file = tileFile(address);
   await writeAged(
@@ -956,7 +944,7 @@ test('concurrent disk hits on an untrimmed tile rewrite it once, keeping its age
   assert.ok(Math.abs(stat.mtimeMs - writtenAt) < 1000, 'no fresh 24 h of life');
 });
 
-test('a rewrite overtaken by a fresh tile write steps aside cleanly (review gekh)', async (t) => {
+test('a rewrite overtaken by a fresh tile write steps aside cleanly', async (t) => {
   const address = { layer: 'coverage', z: 14, x: 15, y: 15 };
   const file = tileFile(address);
   await writeAged(
@@ -1012,7 +1000,7 @@ test('a rewrite overtaken by a fresh tile write steps aside cleanly (review gekh
   );
 });
 
-test('at most a few upstream fetches run at once; a queued abort never fetches (review gekh)', async () => {
+test('at most a few upstream fetches run at once; a queued abort never fetches', async () => {
   const addresses = Array.from(
     { length: TILE_UPSTREAM_CONCURRENCY + 2 },
     (_, i) => ({
@@ -1058,7 +1046,7 @@ test('at most a few upstream fetches run at once; a queued abort never fetches (
   });
 });
 
-test('a caller gone while the disk cache is read starts no upstream fetch (review gekh)', async () => {
+test('a caller gone while the disk cache is read starts no upstream fetch', async () => {
   const address = { layer: 'coverage', z: 13, x: 120, y: 100 };
   await withDeferredUpstream([address], async ({ upstream, settle }) => {
     const controller = new AbortController();
@@ -1070,7 +1058,7 @@ test('a caller gone while the disk cache is read starts no upstream fetch (revie
   });
 });
 
-test('empty tiles are charged against the memory budget (review gekh)', async () => {
+test('empty tiles are charged against the memory budget', async () => {
   const addresses = [16, 17, 18].map((x) => ({
     layer: 'coverage',
     z: 14,
@@ -1092,7 +1080,7 @@ test('empty tiles are charged against the memory budget (review gekh)', async ()
   );
 });
 
-/** A one-layer tile of exactly `size` bytes (a big opaque payload). */
+/** A one-layer tile of exactly `size` bytes. */
 function tileOfSize(size) {
   const probe = tile([{ name: 'sequence', payload: Buffer.alloc(size) }]);
   const bytes = tile([
@@ -1102,10 +1090,7 @@ function tileOfSize(size) {
   return bytes;
 }
 
-/**
- * Serve each address's big tile from a scripted upstream, with disk writes
- * off: a tile memory dropped can only come back from Mapillary.
- */
+/** Disk writes are off, so a tile memory dropped comes back from Mapillary. */
 async function withBigTiles(t, bodies, run) {
   for (const address of bodies.keys())
     await fsp.rm(tileFile(address), { force: true });
@@ -1212,7 +1197,7 @@ test('a tile costing more than half the memory budget is served but not kept', a
   );
 });
 
-test('empty tile files count toward the disk cap (review gekh)', async () => {
+test('empty tile files count toward the disk cap', async () => {
   await withCacheDir(async (dir) => {
     const files = [3, 2, 1].map((age) => ({
       file: tileFile({ z: 13, x: age, y: age }, dir),
@@ -1232,7 +1217,7 @@ test('empty tile files count toward the disk cap (review gekh)', async () => {
   });
 });
 
-test('a body past the size cap aborts the upstream request as it streams (review gekh)', async () => {
+test('a body past the size cap aborts the upstream request as it streams', async () => {
   const address = { layer: 'coverage', z: 14, x: 19, y: 19 };
   await fsp.rm(tileFile(address), { force: true });
   const MB = 1024 * 1024;
@@ -1279,7 +1264,7 @@ test('a body past the size cap aborts the upstream request as it streams (review
   }
 });
 
-// ── Tile trimming (relocated from server/providers/mapillary/trim.test.mjs) ──
+// ── Tile trimming ──
 /** Build a minimal MVT: layers with a name, a version and one opaque feature. */
 function tile(layers) {
   const writer = new PbfWriter();

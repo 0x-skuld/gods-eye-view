@@ -109,7 +109,7 @@ test('a missed cell is probed again after the retry window, not before', (t) => 
   sampler.destroy();
 });
 
-test('remembered misses are bounded like the samples (review P3)', (t) => {
+test('remembered misses are bounded like the samples', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const { viewer, probes } = fakeViewer({ holes: () => true });
   const sampler = createMeshSampler({ getViewer: () => viewer, cacheMax: 2 });
@@ -191,7 +191,7 @@ function grid(lon, lat, n, step) {
   return points;
 }
 
-test('cells out of range when asked are not queued, even once the camera reaches them (review IC8 P2)', (t) => {
+test('cells out of range when asked are not queued, even once the camera reaches them', (t) => {
   const { sampler, probes, slice, moveTo } = clocked(t);
   // 400 cells ~3.6 km east, past the sampler's range.
   sampler.request(grid(10.05, 50, 20, 0.0002));
@@ -206,7 +206,7 @@ test('cells out of range when asked are not queued, even once the camera reaches
   sampler.destroy();
 });
 
-test('a slice keeps to its budget, counting the work before its first probe (review IC8 P2)', (t) => {
+test('a slice keeps to its budget, counting the work before its first probe', (t) => {
   const { sampler, probes, slice } = clocked(t, { probeMs: 2, cameraMs: 3 });
   sampler.request(grid(10.001, 50, 5, 0.0002));
   const lengths = [];
@@ -217,7 +217,7 @@ test('a slice keeps to its budget, counting the work before its first probe (rev
   sampler.destroy();
 });
 
-test('a large queue is ranked once, not sorted again every slice (review IC8 P2)', (t) => {
+test('a large queue is ranked once, not sorted again every slice', (t) => {
   const { sampler, probes, slice, moveTo } = clocked(t);
   // 2,500 cells ~17 m apart around the camera, all within range.
   const cells = grid(10, 50, 50, 0.00015);
@@ -255,7 +255,7 @@ test('a large queue is ranked once, not sorted again every slice (review IC8 P2)
   sampler.destroy();
 });
 
-test('the sampling range is measured the short way round the date line (review IC8 P2)', (t) => {
+test('the sampling range is measured the short way round the date line', (t) => {
   const { sampler, probes, slice, moveTo } = clocked(t);
   moveTo(179.9999, 0);
   sampler.request([

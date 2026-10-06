@@ -2678,8 +2678,7 @@ test('Street Level: every option round-trips through a share link and stored sta
 });
 
 test('Street Level: the link codec accepts exactly the windows the filter keeps', () => {
-  // The codec's ceiling is the filter's MAX_SINCE_DAYS: a longer window is
-  // rejected (read as "any date"), the longest one is kept whole.
+  // A window past MAX_SINCE_DAYS reads as "any date".
   assert.equal(
     streetLevelOptions(`0.s.${MAX_SINCE_DAYS}`).sinceDays,
     MAX_SINCE_DAYS,

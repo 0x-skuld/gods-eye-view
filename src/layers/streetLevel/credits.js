@@ -1,9 +1,8 @@
 import * as Cesium from 'cesium';
 
 /**
- * One on-screen Cesium credit per active provider. Street-level imagery is
- * typically CC BY-SA, which needs visible attribution that goes away with
- * the imagery, so these are static credits added and removed per provider.
+ * One static Cesium credit per active provider: CC BY-SA imagery needs
+ * visible attribution that goes away with the imagery.
  */
 export function createCredits() {
   /** @type {Map<string, object>} provider id → Cesium.Credit */

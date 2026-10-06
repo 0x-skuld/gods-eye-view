@@ -103,7 +103,7 @@ function pinhole({ lon, lat, ground, agl, pitch, w = 1600, h = 900 }) {
   };
 }
 
-test('a tilted street view over high ground boxes the streets it looks at, not the horizon (review IC8 P1)', () => {
+test('a tilted street view over high ground boxes the streets it looks at, not the horizon', () => {
   // Denver, 600 m above a street 1,610 m up, looking 20° down: the centre of
   // the screen meets the street about 1.65 km north of the camera.
   const view = pinhole({
@@ -115,8 +115,8 @@ test('a tilted street view over high ground boxes the streets it looks at, not t
   });
   const ahead = 39.74 + 1648 / 111_000;
   const unranged = visibleBbox(view);
-  // Rays to the bare ellipsoid travel 1.6 km further down: the old box was
-  // 20 km wide and started past the street at the centre of the screen.
+  // Without options, rays to the bare ellipsoid travel 1.6 km further down:
+  // the box is 20 km wide and starts past the street at the screen centre.
   assert.ok(unranged[2] - unranged[0] > 0.2);
   assert.ok(unranged[1] > ahead, 'the old box missed the street in view');
   const options = { groundHeight: 1610, maxRange: 6000, nearRange: 1000 };
@@ -149,7 +149,7 @@ test('looking at the horizon from eye height still boxes the ground around the c
   assert.ok(east - -121.4944 > 0.008 && -121.4944 - west > 0.008);
 });
 
-test('metresBetween measures the short way round the date line (review IC8 P2)', () => {
+test('metresBetween measures the short way round the date line', () => {
   const east = { lon: 179.9999, lat: 0 };
   const west = { lon: -179.9999, lat: 0 };
   // 0.0002° of longitude at the equator, not 40,000 km round the other way.
@@ -284,7 +284,7 @@ function cullFrom(camera, points) {
   return items.map((item) => item.show);
 }
 
-test('cones and the marker stay visible on ground below the WGS84 ellipsoid (gekh P2)', () => {
+test('cones and the marker stay visible on ground below the WGS84 ellipsoid', () => {
   // NYC in FOLLOW: eye 2.4 m above ground at -22 m, a cone 10 m away.
   assert.deepEqual(
     cullFrom([-74.006, 40.7128, -19.6], [[-74.006, 40.71289, -22]]),
@@ -301,14 +301,14 @@ test('cones and the marker stay visible on ground below the WGS84 ellipsoid (gek
     ),
     [true, true],
   );
-  // Austin, ground well above the ellipsoid: as before.
+  // Austin, ground well above the ellipsoid.
   assert.deepEqual(
     cullFrom([-97.7431, 30.2672, 132], [[-97.7431, 30.2681, 130]]),
     [true],
   );
 });
 
-test('the horizon cull still hides the far side of the Earth from orbit (gekh P2)', () => {
+test('the horizon cull still hides the far side of the Earth from orbit', () => {
   assert.deepEqual(
     cullFrom(
       [0, 0, 20_000_000],

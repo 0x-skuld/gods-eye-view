@@ -8,7 +8,6 @@ import {
 const RENDER_MODE_KEY = 'gev:street-level:render-mode';
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-/** Arrow keys inside a radiogroup: the step to the next radio. */
 const RADIO_STEPS = Object.freeze({
   ArrowRight: 1,
   ArrowDown: 1,
@@ -26,11 +25,8 @@ const setAttr = (node, key, value) => {
 };
 
 /**
- * Own the Street Level panel: the provider chips, the imagery filters, the
- * legend and the embedded street-level viewer. The panel itself is
- * ordinary GEV chrome (collapse button, rail layout, persistence) driven by
- * the application shell; this class only fills the body and asks the shell
- * to open the panel when something worth seeing arrives.
+ * Fills the Street Level panel body: provider chips, filters, legend and
+ * viewer. The panel chrome itself belongs to the application shell.
  */
 export class StreetLevelControls {
   constructor({ root, layer, actions }) {
@@ -47,21 +43,14 @@ export class StreetLevelControls {
     // Until the user first touches the app, an off → on is the saved layer
     // state being restored, not a user switching the layer on.
     this._restoreWindow = true;
-    /**
-     * Whether the last request to switch the layer on came from the user
-     * (or voice, or a tool) rather than a restore; null when the shell does
-     * not report requests, and the restore window decides instead.
-     */
+    // Whether the last switch-on was explicit (user, voice, tool) rather than
+    // a restore; null when the shell does not report request origins.
     this._explicitEnable = null;
     this._unsubscribeEnableRequests = null;
     this._resizeQueued = false;
     this._wrapHome = null;
     this._expandReturnFocus = null;
-    /**
-     * The <body> children this class made inert while the expanded viewer is
-     * a modal on screen; only these are released again.
-     * @type {Set<Element>}
-     */
+    // Only the <body> children this class made inert are released again.
     this._inerted = new Set();
     this._modalObserver = null;
     this._elements = this._collect();
@@ -111,7 +100,6 @@ export class StreetLevelControls {
     this.layer.attachViewerHost?.(el.viewer);
 
     this.listen(el.status, 'click', () => this._toggleEnabled());
-    // One delegated listener; chips are re-synced in place on every render.
     this.listen(el.providerChips, 'click', (event) => {
       const button = event.target?.closest?.('.data-toggle-chip');
       if (!button || button.disabled) return;
@@ -185,11 +173,7 @@ export class StreetLevelControls {
     }
   }
 
-  /**
-   * One radiogroup (ARIA radio pattern): a single tab stop, arrow keys move
-   * the selection, Home and End jump to the ends. Selecting is the radio's
-   * own click, so the keyboard takes the same path as the pointer.
-   */
+  /** ARIA radio keys. Selecting clicks the radio, so keys and pointer share a path. */
   _bindRadioGroup(buttons) {
     buttons.forEach((button, index) => {
       this.listen(button, 'keydown', (event) => {
@@ -208,9 +192,8 @@ export class StreetLevelControls {
   }
 
   /**
-   * Refit the viewer once, on the next frame, however many asked. A hidden
-   * viewer measures 0×0 and would ask for tiles at z=NaN; the observer fires
-   * again once it has a size.
+   * Refit the viewer once per frame. Skips a hidden (0×0) viewer, which would
+   * ask for tiles at z=NaN; the observer fires again once it has a size.
    */
   _requestResize() {
     if (this._resizeQueued) return;
@@ -247,11 +230,7 @@ export class StreetLevelControls {
     }
   }
 
-  /**
-   * Filter and provider changes go through the data manager as a user params
-   * request, so saved state and share links record them; the layer applies
-   * them through its own `setParams`.
-   */
+  /** Through the data manager, so saved state and share links record it. */
   _setParams(params) {
     if (this.actions.setParams)
       this.actions.setParams(params, { origin: 'user' });
@@ -259,9 +238,8 @@ export class StreetLevelControls {
   }
 
   /**
-   * A provider chip is the layer's switch: lighting one turns the layer on
-   * with that provider; darkening the last lit one turns the layer off (the
-   * provider stays switched on, so the layer comes back with it).
+   * Lighting a chip turns the layer on; darkening the last lit one turns the
+   * layer off but keeps the provider on, so the layer comes back with it.
    */
   async _toggleProvider(providerId) {
     const chip = this._view?.providers.find((entry) => entry.id === providerId);
@@ -298,12 +276,10 @@ export class StreetLevelControls {
     if (this.layer.getUIState) this.render(this.layer.getUIState());
   }
 
-  /** The panel window was resized or docked again: refit the viewer. */
   onPanelResized() {
     this._requestResize();
   }
 
-  /** Ask the shell to open (or close) the rail panel. */
   setCollapsed(collapsed, options = {}) {
     this.actions.setPanelCollapsed?.(collapsed, options);
     if (!collapsed) this._requestResize();
@@ -318,9 +294,8 @@ export class StreetLevelControls {
   }
 
   /**
-   * Grow the street-level viewer to most of the screen, or shrink it back.
-   * A user's shrink (`dock`) also returns a floating panel to its rail at its
-   * default size, so the viewer does not land in a window over the globe.
+   * A user's shrink (`dock`) also returns a floating panel to its rail, so the
+   * viewer does not land in a window over the globe.
    */
   setViewerExpanded(expanded, { dock = false } = {}) {
     const wrap = this._elements.viewerWrap;
@@ -384,10 +359,7 @@ export class StreetLevelControls {
     target?.focus?.({ preventScroll: true });
   }
 
-  /**
-   * The expanded viewer holds Esc and Tab only while it is on screen: Clean
-   * View, recording and the cockpit hide it with CSS.
-   */
+  /** Clean View, recording and the cockpit hide the expanded viewer with CSS. */
   _isDialogShown() {
     if (!this.isViewerExpanded()) return false;
     const wrap = this._elements.viewerWrap;
@@ -402,11 +374,9 @@ export class StreetLevelControls {
   }
 
   /**
-   * Make the application modal-inert while the expanded viewer is on screen:
-   * every other <body> child is `inert` (one already inert is left alone), so
-   * no control around the viewer takes a click or focus. A viewer that CSS
-   * hides (Clean View, recording, cockpit) releases them, since a hidden
-   * modal must not leave the app dead. Returns whether the dialog is shown.
+   * Make every other <body> child inert while the expanded viewer is shown.
+   * A CSS-hidden viewer releases them so a hidden modal never leaves the app
+   * dead. Returns whether the dialog is shown.
    */
   _syncModal() {
     if (this.destroyed || !this._isDialogShown()) {
@@ -422,17 +392,12 @@ export class StreetLevelControls {
     return true;
   }
 
-  /** Give the application back every node `_syncModal` made inert. */
   _releaseModal() {
     for (const node of this._inerted) node.inert = false;
     this._inerted.clear();
   }
 
-  /**
-   * While expanded, re-check the modal whenever <body> changes class (the
-   * modes that hide the viewer) or gains a child (which must be inert too).
-   * Shrinking stops watching and releases the application.
-   */
+  /** Re-check the modal when <body> changes class or gains a child. */
   _watchModal(on) {
     this._modalObserver?.disconnect();
     this._modalObserver = null;
@@ -534,7 +499,6 @@ export class StreetLevelControls {
     setProp(el.errorText, 'textContent', view.error || '');
   }
 
-  /** Mark the checked radio of a group and make it the group's tab stop. */
   _renderRadios(buttons, isChecked) {
     for (const button of buttons) {
       const checked = isChecked(button);
@@ -629,16 +593,14 @@ export class StreetLevelControls {
   }
 
   /**
-   * Open the panel at the moments a user would look for it. These opens are
-   * never persisted: the stored collapse state stays the user's own choice.
+   * Open the panel on a switch-on or when an image opens. Never persisted:
+   * the stored collapse state stays the user's own choice.
    */
   _reactToTransitions(view, state) {
     const enabled = view.enabled;
     if (enabled && this._wasEnabled === false) {
-      // A restore that turns the saved layer back on must not reopen a panel
-      // the user (or a share link) chose to keep collapsed. With the shell's
-      // request origins the panel opens only for a user, voice or tool
-      // switch-on; without them, the restore window stands in.
+      // A restore must not reopen a panel the user or a share link kept
+      // collapsed. Without request origins, the restore window decides.
       const preference = this.root.dataset?.collapsedPreference;
       const restoring =
         this._explicitEnable === null
@@ -650,10 +612,8 @@ export class StreetLevelControls {
       this._explicitEnable = this._explicitEnable === null ? null : false;
     }
     this._wasEnabled = enabled;
-    // Size changes reach the viewer through the ResizeObserver; resizing on
-    // every render ran each frame while a panorama was dragged. Opening is the
-    // one moment the element may not have reported a size yet, and opening
-    // the panel asks for that one (coalesced) resize.
+    // Other size changes reach the viewer through the ResizeObserver; opening
+    // asks for one resize because the element may not have a size yet.
     const open = state.street.open === true;
     if (open && !this._wasStreetOpen)
       this.setCollapsed(false, { persist: false });

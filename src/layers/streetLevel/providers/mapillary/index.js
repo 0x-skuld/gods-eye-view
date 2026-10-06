@@ -23,19 +23,16 @@ function createProviderState(context) {
     services: context.services,
     viewer: null,
     keyRequired: false,
-    /**
-     * False until the first status answer: coverage asks for nothing before
-     * it, so a key-less install never sends tile requests that get 503.
-     */
+    /** Coverage waits for the first status: no tile requests without a key. */
     statusKnown: false,
-    /** Mapillary refused the configured token: nothing is requested until re-enabled. */
+    /** Mapillary refused the token: request nothing until re-enabled. */
     keyRejected: false,
     status: null,
     coverage: {
       zoom: null,
-      /** @type {Map<string, {primitive: object|null, sequences: Map<string, object>, count: number}>} */
+      /** Current zoom's tiles by `z/x/y` key. */
       tiles: new Map(),
-      /** Tiles from the previous zoom, kept on screen until replacements land. */
+      /** Previous zoom's tiles, kept on screen until replacements land. */
       stale: new Map(),
       staleTimer: null,
       /** Tile key → its request's controller; any entry means LOADING. */
@@ -53,7 +50,7 @@ function createProviderState(context) {
     sequence: {
       selectedId: null,
       images: [],
-      /** @type {Map<string, Array<object>>} recent sequences' thinned images */
+      /** Recent sequences' thinned images, by sequence id. */
       cache: new Map(),
       collection: null,
       loading: false,
@@ -63,9 +60,8 @@ function createProviderState(context) {
 }
 
 /**
- * Mapillary as a Street Level provider: coverage from cached vector tiles,
- * per-sequence image cones from the Graph API and the MapillaryJS viewer.
- * @param {{source: object}} options  A source from ./source.js (or a stand-in with the same methods).
+ * Mapillary Street Level provider: tile coverage, Graph API image cones and
+ * the MapillaryJS viewer. `source` is ./source.js or a stand-in.
  * @returns {import('../../registry.js').StreetLevelProvider}
  */
 export function createMapillaryProvider({ source }) {

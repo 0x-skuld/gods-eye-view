@@ -205,8 +205,7 @@ export class PanelLayoutController {
       this._streetLevelPanel,
     ]) {
       if (!panel) continue;
-      // A portable panel restored as a floating window keeps the place and
-      // size PanelPositionControls gave it; only docked panels are reset.
+      // A floating window keeps its restored place and size.
       if (!panel.classList.contains('panel-floating')) {
         for (const property of ['top', 'right', 'bottom', 'left', 'z-index'])
           panel.style.removeProperty(property);

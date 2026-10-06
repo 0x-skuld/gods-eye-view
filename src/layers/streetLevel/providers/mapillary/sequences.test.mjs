@@ -91,7 +91,7 @@ function setup() {
   return { state, source, sequences, colours, errors, drawn };
 }
 
-test('a failed sequence load leaves no stale cones and can be retried (review P2-4)', async () => {
+test('a failed sequence load leaves no stale cones and can be retried', async () => {
   const { state, source, sequences, colours, errors, drawn } = setup();
   sequences.select('A');
   source.last('A').resolve(records('A'));
@@ -174,9 +174,8 @@ test('clearSelection cancels the lookup and uncolours the sequence', async () =>
 });
 
 /**
- * Terrain mode (Google 3D at street zoom): bare earth 10 m everywhere, a
- * mesh sampler whose samples the test sets and announces, and cones that
- * log every change made to them or their collection.
+ * Terrain mode with bare earth at 10 m, a mesh sampler the test drives, and
+ * cones that log every change made to them.
  */
 function terrainSetup() {
   const context = setup();
@@ -240,7 +239,7 @@ function terrainSetup() {
   return { ...context, sequences, changes, items, sample, heightOf };
 }
 
-test('a mesh sample away from the selected sequence changes no cone (review IC8 P1)', async () => {
+test('a mesh sample away from the selected sequence changes no cone', async () => {
   const { source, sequences, changes, items, sample } = terrainSetup();
   sequences.select('A');
   source.last('A').resolve(records('A', 3));
@@ -251,7 +250,7 @@ test('a mesh sample away from the selected sequence changes no cone (review IC8 
   assert.deepEqual(changes, [], 'nothing rebuilt or moved');
 });
 
-test('a mesh sample under a cone moves that cone in place, and no other (review IC8 P1)', async () => {
+test('a mesh sample under a cone moves that cone in place, and no other', async () => {
   const { source, sequences, changes, items, sample, heightOf } =
     terrainSetup();
   sequences.select('A');
@@ -282,7 +281,7 @@ test('a mesh sample under a cone moves that cone in place, and no other (review 
   assert.deepEqual([after[0], after[2]], [before[0], before[2]]);
 });
 
-test('cones behind the globe are hidden, and show again from the other side (review IC8 P2)', async () => {
+test('cones behind the globe are hidden, and show again from the other side', async () => {
   const { state, source, sequences } = setup();
   const view = { lon: -121.49, lat: 38.58, height: 20_000_000 };
   const preRender = new Set();

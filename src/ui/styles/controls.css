@@ -104,10 +104,8 @@
 }
 
 /* ── Portable rail panels ────────────────────
-   A header drag lifts a portable panel (PanelPositionControls) out of its
-   rail into a fixed window that remembers its place and size. The rail's
-   own placement rules in layers.css are guarded with :not(.panel-floating),
-   so these only have to beat a panel's base placement (one id). */
+   Rail placement in layers.css is guarded with :not(.panel-floating), so
+   these rules only have to beat a panel's base placement (one id). */
 .panel-portable .panel-header {
   cursor: grab;
 }
@@ -117,16 +115,14 @@
 #right-context-rail > .panel-floating {
   position: fixed;
   inset: auto;
-  /* Above every docked rail panel (#pp-toggles is 110). PanelPositionControls
-     promotes floating windows from this floor (PANEL_Z_FLOATING_FLOOR). */
+  /* Above every docked rail panel; keep in step with PANEL_Z_FLOATING_FLOOR. */
   z-index: 111;
   max-height: calc(100vh - 12px);
   margin: 0;
   flex: none;
   pointer-events: auto;
 }
-/* A collapsed window keeps its stored height for later but shows only its
-   header strip, so the resize handles have nothing to attach to. */
+/* A collapsed window shows only its header strip; its inline height stays. */
 #right-context-rail > .panel-floating.collapsed {
   max-height: max-content;
 }
@@ -1110,7 +1106,7 @@ body.ui-clean-view #cctv-panel,
 body.ui-clean-view #radio-panel,
 body.ui-clean-view #global-context-panel,
 body.ui-clean-view #scene-panel,
-/* The expanded Street Level viewer lives on <body>, outside every panel. */
+/* The expanded viewer lives on <body>, outside every panel. */
 body.ui-clean-view .sl-viewer-wrap-expanded {
   opacity: 0 !important;
   visibility: hidden !important;

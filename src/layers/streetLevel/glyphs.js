@@ -1,8 +1,4 @@
-/**
- * Canvas glyphs for billboards: a camera cone for images, a ring for
- * panoramas and a position marker for the street-level viewer. Pure canvas
- * drawing so it can run without Cesium.
- */
+/** Canvas billboard glyphs (image cone, pano ring, position marker); no Cesium needed. */
 
 const _cache = new Map();
 
@@ -29,7 +25,6 @@ function wedge(ctx, c, radius, halfAngle, color, alpha) {
   ctx.globalAlpha = 1;
 }
 
-/** A stroked circle around the centre. */
 function ring(ctx, c, radius, color, width, alpha) {
   ctx.beginPath();
   ctx.arc(c, c, radius, 0, Math.PI * 2);
@@ -40,7 +35,6 @@ function ring(ctx, c, radius, color, width, alpha) {
   ctx.globalAlpha = 1;
 }
 
-/** A filled dot at the centre with a dark outline. */
 function dot(ctx, c, radius, color, outline, width) {
   ctx.beginPath();
   ctx.arc(c, c, radius, 0, Math.PI * 2);
@@ -71,7 +65,7 @@ export function imageConeGlyph({
   });
 }
 
-/** Pulsing-looking marker for the image the viewer currently shows. */
+/** Marker for the image the viewer currently shows. */
 export function positionMarkerGlyph({ size = 44, color = '#ffb300' } = {}) {
   return cachedGlyph(`pos:${size}:${color}`, size, (ctx, c) => {
     wedge(ctx, c, size * 0.48, 0.55, color, 0.55);

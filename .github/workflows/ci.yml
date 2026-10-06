@@ -60,22 +60,14 @@ jobs:
         run: npm run build
 
   street-level-browser:
-    # The Street Level gate in its hermetic mode, against a production build
-    # served by `vite preview`: coverage tiles, the Graph API and the image
-    # CDN are answered from fixtures (scripts/fixtures/street-level), so no
-    # real token and no Mapillary network are needed, and the whole photo
-    # flow runs. The server gets a dummy, non-secret client token: the build
-    # bakes it into the bundle (the viewer needs one to ask for photos) and
-    # the preview server's status route reports it as configured. The page
-    # intercepts every *.mapillary.com request, so the token never leaves it.
+    # Hermetic: every Mapillary request is answered from fixtures, so the
+    # dummy token below never leaves the page.
     name: Street Level browser gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       GEV_REQUIRE_ALLOCATION_GATE: '0'
-      # A header press that misses while the panel stood still is a failure
-      # (the right rail now aligns to where the left rail settles); a miss the
-      # panel's own layout change explains is retried with a ::warning::.
+      # Fail on a missed header press unless the panel itself moved.
       QA_FAIL_ON_RETRY: '1'
     steps:
       - name: Check out source
