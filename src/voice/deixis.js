@@ -137,7 +137,14 @@ function resolveFly(args, { pointer, referents }) {
   if (target.layerId && target.id && source === 'referent') {
     // Contacts move: locate them when the flight starts, not from a list.
     return {
-      args: { ...rest, entity: { layerId: target.layerId, id: target.id } },
+      args: {
+        ...rest,
+        entity: {
+          layerId: target.layerId,
+          id: target.id,
+          ...(hasPosition(target) ? { lat: target.lat, lon: target.lon } : {}),
+        },
+      },
       used,
     };
   }

@@ -387,6 +387,12 @@ the session cost and cap. The debug log omits transcripts, text, tool arguments
 and complete tool-result bodies (including serialized function outputs) unless
 `GEV_VOICE_LOG_CONTENT=1`.
 Tool names, call IDs, protocol event metadata and usage remain available.
+Numbered analyst targets resolve from current layer records, including layers
+without pick/context lookup; numbered annotations retain their resolved coordinates.
+Requested analyst lists and rankings may speak up to three returned items and
+values in result order alongside the count and its caveats. A rejected current
+action emits a failure result to settle its card; cancelled turns remain silent.
+Coverage grading validates calls before accepting an expected capability match.
 The voice manifest includes Street Level visibility toggles; its imagery has no
 analyst query or entity-context records.
 

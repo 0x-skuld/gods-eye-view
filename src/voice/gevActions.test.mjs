@@ -3822,3 +3822,66 @@ test('point-and-ask: only accepted, current results become the referent list', a
   assert.equal(used, 1, 'a current pointer resolution announces the chip');
   assert.equal(tracked, 1);
 });
+
+
+test('numbered analyst records navigate using the current layer accessor', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const { viewer, styleManager } = createVoiceNavigationHarness();
+  const referents = createReferentRegistry();
+  let enabled = true;
+  let records = [{ id: 'congress', name: 'Congress station', lat: 30.27, lon: -97.74 }];
+  const runner = createActionRunner({
+    viewer, styleManager,
+    dataManager: {
+      layers: new Map([['bikeshare', { module: { getAnalystRecords: () => records } }]]),
+      isEnabled: () => enabled,
+      getAll: () => [],
+    },
+    deixis: { referents },
+  });
+  referents.recordResult('analyst_query', { ok: true, items: [{ ...records[0], layerKey: 'bikeshare' }] });
+  const result = await runner('fly_to_location', { referent: 1 });
+  assert.equal(result.ok, true);
+  assert.equal(result.latitude, 30.27);
+  assert.equal(result.longitude, -97.74);
+  enabled = false;
+  assert.equal((await runner('fly_to_location', { referent: 1 })).ok, false, 'disabled records cannot be revisited');
+  enabled = true;
+  records = [];
+  assert.equal((await runner('fly_to_location', { referent: 1 })).ok, false, 'removed records are not resurrected');
+});
+
+
+test('analyst-only lookup distinguishes duplicate names and uses canonical aircraft IDs', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const { viewer, styleManager } = createVoiceNavigationHarness();
+  const referents = createReferentRegistry();
+  const stations = [
+    { id: 'Central Station', name: 'Central Station', lat: 30, lon: -97 },
+    { id: 'Central Station', name: 'Central Station', lat: 40, lon: -74 },
+  ];
+  const aircraft = [{ id: 'UAL1', icao24: 'abc123', lat: 35, lon: -100 }];
+  const runner = createActionRunner({
+    viewer, styleManager,
+    dataManager: {
+      layers: new Map([
+        ['bikeshare', { module: { getAnalystRecords: () => stations } }],
+        ['local-adsb', { module: { getAnalystRecords: () => aircraft } }],
+      ]),
+      isEnabled: () => true, getAll: () => [],
+    },
+    deixis: { referents },
+  });
+  referents.recordResult('analyst_query', { ok: true, items: stations.map(row => ({ ...row, layerKey: 'bikeshare' })) });
+  const station = await runner('fly_to_location', { referent: 2 });
+  assert.equal(station.ok, true);
+  assert.equal(station.latitude, 40);
+  assert.equal(station.longitude, -74);
+  stations.pop();
+  assert.equal((await runner('fly_to_location', { referent: 2 })).ok, false, 'a removed station must not resolve to its remaining namesake');
+  referents.recordResult('analyst_query', { ok: true, items: aircraft.map(row => ({ ...row, layerKey: 'local-adsb' })) });
+  aircraft[0].lat = 36;
+  const plane = await runner('fly_to_location', { referent: 1 });
+  assert.equal(plane.ok, true);
+  assert.equal(plane.latitude, 36, 'canonical ID resolves the current position, not old coordinates');
+});

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { attachVoiceResult } from './speech.js';
 import { resolveDeicticArgs } from './deixis.js';
 import { createReferentRegistry, referentsFromResult } from './referents.js';
 
@@ -166,4 +167,16 @@ test('registry: hidden card rows never resolve and last means displayed item fiv
   );
   assert.equal(referents.get(6), null);
   assert.equal(referents.get(-1)?.id, 'F5');
+});
+
+
+test('numbered custom-labeled pins retain their resolved coordinates', () => {
+  const referents = createReferentRegistry();
+  const result = attachVoiceResult('annotate_map', {
+    ok: true,
+    items: [{ ok: true, id: 'pin-1', label: 'Meeting point', latitude: 30.27, longitude: -97.74 }],
+  });
+  referents.recordResult('annotate_map', result);
+  assert.deepEqual(resolveDeicticArgs('fly_to_location', { referent: 1 }, { referents }).args,
+    { latitude: 30.27, longitude: -97.74 });
 });

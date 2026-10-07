@@ -308,3 +308,16 @@ test('coverage v2: a count for the removed drawn-area scope is never graded corr
   assert.equal(honest.verdict, 'honest-refusal');
   assert.equal(honest.acceptable, true);
 });
+
+
+test('coverage validates all calls before accepting a matching capability', () => {
+  const item = coverageRubric(coverage('transit-on'), 'v2');
+  const valid = { name: 'set_layer_visibility', args: { layerId: 'transit', enabled: true } };
+  const invalid = { name: 'set_layer_visibility', args: { layerId: 'transit-invented', enabled: true } };
+  for (const calls of [[invalid], [valid, invalid]]) {
+    const result = gradeCoverage(item, calls, 'Transit on.', GEV_REALTIME_TOOLS);
+    assert.equal(result.verdict, 'hallucinated-capability');
+    assert.equal(result.acceptable, false);
+  }
+  assert.equal(gradeCoverage(item, [valid], 'Transit on.', GEV_REALTIME_TOOLS).verdict, 'correct');
+});

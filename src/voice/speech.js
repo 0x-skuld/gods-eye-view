@@ -373,6 +373,8 @@ function annotateMap(result) {
     n: index + 1,
     id: item.id || null,
     label: spokenLabel(item.label || item.target || `Mark ${index + 1}`),
+    latitude: item.latitude,
+    longitude: item.longitude,
   }));
   const parts = [];
   if (failed.length)

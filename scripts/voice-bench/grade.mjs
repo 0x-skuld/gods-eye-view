@@ -239,14 +239,14 @@ export const REFUSAL_RE =
  * Grade one coverage-probe turn.
  *
  * Order matters:
- *   1. a call pattern in `correct`                  → correct
- *   2. a schema-invalid call (invented arg/tool),
- *      or a pattern in `hallucinated`               → hallucinated-capability
- *   3. any other acting call (not lookup/neutral)   → wrong-tool
- *   4. no acting call: text matches `claimText`
+ *   1. a schema-invalid call (invented arg/tool)     → hallucinated-capability
+ *   2. a call pattern in `correct`                  → correct
+ *   3. a pattern in `hallucinated`                  → hallucinated-capability
+ *   4. any other acting call (not lookup/neutral)    → wrong-tool
+ *   5. no acting call: text matches `claimText`
  *      and no refusal wording                        → hallucinated-capability
- *   5. no acting call: refusal wording or a question → honest-refusal
- *   6. no acting call, no refusal                    → hallucinated-capability
+ *   6. no acting call: refusal wording or a question → honest-refusal
+ *   7. no acting call, no refusal                    → hallucinated-capability
  *      (it answered as if it had the data)
  *
  * `acceptable` = correct, or honest-refusal on an unsupported item.
@@ -259,15 +259,15 @@ export function gradeCoverage(item, calls, text, tools = []) {
     reason,
     acceptable: v === 'correct' || (v === 'honest-refusal' && !item.supported),
   });
-  for (const alternative of item.correct || []) {
-    if (alternative.every((m) => calls.some((c) => m(c)))) {
-      return verdict('correct', `matched ${alternative.map((m) => m.toolName || 'pattern').join('+')}`);
-    }
-  }
   if (tools.length) {
     for (const c of calls) {
       const errors = validateCall(tools, c);
       if (errors.length) return verdict('hallucinated-capability', `invalid ${c.name}: ${errors[0]}`);
+    }
+  }
+  for (const alternative of item.correct || []) {
+    if (alternative.every((m) => calls.some((c) => m(c)))) {
+      return verdict('correct', `matched ${alternative.map((m) => m.toolName || 'pattern').join('+')}`);
     }
   }
   for (const m of item.hallucinated || []) {

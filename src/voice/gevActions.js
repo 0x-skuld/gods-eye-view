@@ -3318,7 +3318,7 @@ async function getEntityContext(
 const AIRCRAFT_LAYERS = new Set(['flights', 'military']);
 
 /** Live position of a layer record by id, or null when it is gone. */
-function locateLayerEntity(dataManager, { layerId, id }) {
+function locateLayerEntity(dataManager, { layerId, id, lat, lon }) {
   if (!layerId || !id) return null;
   if (dataManager?.isEnabled && !dataManager.isEnabled(layerId)) return null;
   let found = null;
@@ -3338,6 +3338,33 @@ function locateLayerEntity(dataManager, { layerId, id }) {
     Number.isFinite(record.longitude)
   )
     return { lat: record.latitude, lon: record.longitude, record };
+  // Analyst-only layers (e.g. bikeshare) have no pick/context lookup. Read
+  // their current snapshot, so a removed or moved record is not resurrected.
+  try {
+    const matches =
+      dataManager?.layers
+        ?.get(layerId)
+        ?.module?.getAnalystRecords?.()
+        .filter(
+          (item) =>
+            String(item.icao24 ?? item.mmsi ?? item.noradId ?? item.id) ===
+            String(id),
+        ) || [];
+    // Bikeshare uses station names as IDs: retain the coordinate identity
+    // even if a namesake disappears. Moving records use their fresh fix.
+    const row =
+      matches.length === 1 && layerId !== 'bikeshare'
+        ? matches[0]
+        : matches.find((item) => item.lat === lat && item.lon === lon);
+    if (Number.isFinite(row?.lat) && Number.isFinite(row?.lon))
+      return {
+        lat: row.lat,
+        lon: row.lon,
+        found: { ...row, latitude: row.lat, longitude: row.lon },
+      };
+  } catch {
+    // A missing or unavailable snapshot cannot establish a live position.
+  }
   return null;
 }
 

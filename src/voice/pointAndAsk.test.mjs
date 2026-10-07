@@ -350,3 +350,13 @@ test('deixis prompt lint: one short rule, and every sentinel it names exists in 
   const size = instructions.length + JSON.stringify(GEV_REALTIME_TOOLS).length;
   assert.ok(size <= 52000, `prompt size ${size}`);
 });
+
+
+test('after-tool speech allows returned items to answer requested lists and rankings', () => {
+  const rule = realtimeInstructions().split('\n').find(line => line.startsWith('AFTER TOOLS:'));
+  assert.match(rule, /requested analyst list or ranking/);
+  assert.match(rule, /returned items.*returned values/);
+  assert.match(rule, /keep their order/);
+  assert.doesNotMatch(rule, /never adding to it/);
+  assert.match(rule, /always preserve them/);
+});

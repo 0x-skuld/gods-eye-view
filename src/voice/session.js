@@ -62,11 +62,11 @@ export function createVoiceSession({ createAdapter, runner, signal }) {
       !actionSignal.aborted &&
       epoch === generation &&
       (!options.isCurrent || options.isCurrent());
+    const callId = options.callId ?? null;
     try {
       if (!isCurrent()) throw abortError();
       // Calls carry the adapter's call id so observers can match progress
       // and results to the right call when a tool runs twice at once.
-      const callId = options.callId ?? null;
       emit({ type: 'action-call', name, callId, arguments: args });
       if (!isCurrent()) throw abortError();
       // Step reports reach observers only while the action is current, so a
@@ -91,6 +91,15 @@ export function createVoiceSession({ createAdapter, runner, signal }) {
       if (!isCurrent()) throw abortError();
       emit({ type: 'action-result', name, callId, result });
       return result;
+    } catch (error) {
+      if (isCurrent())
+        emit({
+          type: 'action-result',
+          name,
+          callId,
+          result: { ok: false, error: error?.message || String(error) },
+        });
+      throw error;
     } finally {
       actions.delete(action);
     }

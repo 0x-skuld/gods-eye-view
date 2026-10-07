@@ -1,5 +1,11 @@
 # Changelog
 
+- Voice revisits numbered analyst records through current layer snapshots and
+  preserves resolved pin coordinates. Requested analyst lists and rankings can
+  speak returned items alongside the exact count and coverage caveats. Failed
+  actions settle the voice card without reviving cancelled turns. Coverage
+  benchmarks reject invalid calls before accepting semantic matches.
+
 - Street Level is included in the voice layer manifest for visibility toggles;
   imagery is not exposed as countable analyst records.
 
