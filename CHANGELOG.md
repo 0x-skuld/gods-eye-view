@@ -63,6 +63,14 @@
 
 ## [Unreleased]
 
+- Stdio servers from one install share a panel key so a page read from one
+  process can make requests through another. Concurrent malformed-key repairs
+  now select one winner; unavailable storage or a busy repair retains the
+  logged per-process fallback. Thanks to [Jibran Tahir](https://github.com/jibraaan)
+  for #958, [MarvinNL046](https://github.com/MarvinNL046) for the report and
+  proposed diagnosis in #927, and [kvnloo](https://github.com/kvnloo) for identifying
+  the repair race. Windows/Claude Desktop Cowork confirmation remains outstanding.
+
 - Street Level: a street-level imagery layer modelled on the iD editor's photo
   overlay, with Mapillary as its first provider (free client token, CC BY-SA 4.0
   imagery). One right-rail panel holds a chip per provider, shared 360°/flat and
