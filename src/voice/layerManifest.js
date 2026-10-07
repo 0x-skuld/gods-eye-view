@@ -299,6 +299,12 @@ const layers = [
     noQuery: 'use control_radio',
   },
   {
+    id: 'street-level',
+    aliases: ['street level', 'street-level imagery', 'mapillary'],
+    context: false,
+    noQuery: 'street-level imagery; no countable records',
+  },
+  {
     id: 'recent-imagery',
     aliases: [
       'recent satellite imagery',

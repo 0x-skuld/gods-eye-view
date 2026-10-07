@@ -46,6 +46,7 @@ test('tool enums are generated from the manifest', () => {
   for (const id of [
     'transit',
     'recent-imagery',
+    'street-level',
     'wind',
     'weather-radar',
     'weather-satellite',
@@ -99,6 +100,7 @@ test('spoken aliases resolve to real layers, keep every legacy phrase and never 
     buses: 'transit', trains: 'transit', hurricanes: 'weather-cyclones', cyclones: 'weather-cyclones',
     'weather radar': 'weather-radar', lightning: 'weather-lightning', 'military bases': 'military-installations',
     'recent imagery': 'recent-imagery', 'bike share': 'bikeshare', 'rocket launches': 'rocket-launches',
+    'street level': 'street-level', mapillary: 'street-level',
     wind: 'wind', directions: 'directions', 'fire perimeters': 'fire-perimeters',
     'wildfire perimeters': 'fire-perimeters', 'burn areas': 'fire-perimeters',
   };
