@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- Keep the globe panel working when an MCP client starts more than one
+  server process. Each stdio server made its own panel key, so a client that
+  read the panel page from one process and sent its requests to another
+  (seen in Claude Desktop) got "Only the God's Eye View panel may make this
+  request". Stdio servers of one install now share a key, created once in
+  `.gev-cache/`; a server that cannot store it keeps a key of its own, as
+  before (#927).
+
 - Add Norway's road cameras from Statens vegvesen as a CCTV pack. The camera
   list is one keyless GeoJSON request to the agency's OGC API view of its
   DATEX 3.1 CCTV table, so no DATEX account is needed. Every working camera
