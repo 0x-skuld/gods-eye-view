@@ -374,3 +374,32 @@ test('a sample needs a real bare-earth prior and must sit in the shared mesh win
   unknown.destroy();
   outside.destroy();
 });
+
+test('a failed refresh keeps the last good distance and is retried after the cooldown', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const { viewer, probes } = liveViewer({ surface: 90, height: 700 });
+  viewer.camera.positionCartographic.longitude = 10.001 * RAD;
+  const sampler = liveSampler(viewer);
+  sampler.setEnabled(true);
+  sampler.request([[10.001, 50]]);
+  probeNow(t);
+  assert.equal(sampler.meshAt(10.001, 50), 90);
+  // The camera comes down to 20 m and the refresh misses (tiles in flux).
+  viewer.camera.positionCartographic.height = 110;
+  viewer.surface = undefined;
+  sampler.request([[10.001, 50]]);
+  probeNow(t);
+  assert.equal(probes.length, 2);
+  assert.equal(sampler.meshAt(10.001, 50), 90, 'the old sample stays');
+  viewer.surface = 100;
+  t.mock.timers.tick(MESH_MISS_RETRY_MS - 100);
+  sampler.request([[10.001, 50]]);
+  probeNow(t);
+  assert.equal(probes.length, 2, 'not before the cooldown');
+  t.mock.timers.tick(100);
+  sampler.request([[10.001, 50]]);
+  probeNow(t);
+  assert.equal(probes.length, 3, 'retried after it');
+  assert.equal(sampler.meshAt(10.001, 50), 100);
+  sampler.destroy();
+});

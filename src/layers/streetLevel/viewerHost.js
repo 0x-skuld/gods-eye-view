@@ -113,6 +113,9 @@ export function createViewerHost({ state, parts }) {
     }
     const seq = ++openSeq;
     const current = () => seq === openSeq;
+    // Claimed now, honoured after loading only if nothing newer took the camera.
+    const ticket =
+      frame && !state.street.follow ? parts.follow.beginFraming() : null;
     Object.assign(state.street, {
       loading: true,
       error: null,
@@ -127,7 +130,7 @@ export function createViewerHost({ state, parts }) {
       if (!current()) return false;
       await adapter.open(String(imageId));
       if (!current()) return false;
-      if (frame && !state.street.follow) parts.follow.lookAtPosition();
+      if (ticket && !state.street.follow) parts.follow.lookAtPosition(ticket);
     } catch (error) {
       if (current())
         state.street.error = error?.message || 'Image could not be opened';

@@ -79,7 +79,7 @@ function setup({ sampled, dem = null, globe = null, altitude = 149 }) {
 
 test('framing a photo ignores a sample kilometres underground and uses bare earth', () => {
   const { follow, flights } = setup({ sampled: -14_886, dem: 117 });
-  follow.lookAtPosition();
+  follow.lookAtPosition(follow.beginFraming());
   assert.equal(flights.length, 1);
   const centre = heightOf(flights[0].sphere.center);
   assert.ok(
@@ -90,7 +90,7 @@ test('framing a photo ignores a sample kilometres underground and uses bare eart
 
 test('a plausible mesh sample near bare earth wins (a street, or a modest roof)', () => {
   const { follow, flights } = setup({ sampled: 121, dem: 117 });
-  follow.lookAtPosition();
+  follow.lookAtPosition(follow.beginFraming());
   assert.ok(Math.abs(heightOf(flights[0].sphere.center) - 123) < 0.01);
 });
 
@@ -101,7 +101,7 @@ test('without bare earth an absurd sample falls back to the image altitude, neve
     globe: undefined,
     altitude: 149,
   });
-  follow.lookAtPosition();
+  follow.lookAtPosition(follow.beginFraming());
   assert.ok(Math.abs(heightOf(flights[0].sphere.center) - 151) < 0.01);
 });
 
@@ -119,15 +119,15 @@ test('following stands the camera at eye height above the checked ground', () =>
 test('cancelFraming stops the framing flight while it is still ours', () => {
   const { follow, state } = setup({ sampled: 121, dem: 117 });
   const { camera } = state.viewer;
-  follow.lookAtPosition();
+  follow.lookAtPosition(follow.beginFraming());
   follow.cancelFraming();
   assert.equal(camera.cancelled, 1, 'the flight toward the closed photo stops');
   follow.cancelFraming();
   assert.equal(camera.cancelled, 1, 'and only once');
 
   // Re-framing (the next photo) supersedes the first flight, not the claim.
-  follow.lookAtPosition();
-  follow.lookAtPosition();
+  follow.lookAtPosition(follow.beginFraming());
+  follow.lookAtPosition(follow.beginFraming());
   follow.cancelFraming();
   assert.equal(camera.cancelled, 2);
 });
@@ -135,12 +135,12 @@ test('cancelFraming stops the framing flight while it is still ours', () => {
 test('cancelFraming leaves a landed flight and a newer navigation flight alone', () => {
   const { follow, state, flights } = setup({ sampled: 121, dem: 117 });
   const { camera } = state.viewer;
-  follow.lookAtPosition();
+  follow.lookAtPosition(follow.beginFraming());
   camera.land();
   follow.cancelFraming();
   assert.equal(camera.cancelled, 0, 'landed: nothing to stop');
 
-  follow.lookAtPosition();
+  follow.lookAtPosition(follow.beginFraming());
   // A search result flies the globe elsewhere; Cesium cancels ours first.
   camera.flyToBoundingSphere(null, {});
   assert.equal(flights.length, 3);
@@ -151,7 +151,7 @@ test('cancelFraming leaves a landed flight and a newer navigation flight alone',
 test('turning FOLLOW on stops the framing flight so it cannot fight the follow view', () => {
   const { follow, state, views } = setup({ sampled: 121, dem: 117 });
   const { camera } = state.viewer;
-  follow.lookAtPosition();
+  follow.lookAtPosition(follow.beginFraming());
   follow.setFollow(true);
   assert.equal(camera.cancelled, 1, 'the framing tween stops');
   assert.equal(views.length, 1, 'and the camera stands at the photo');
@@ -163,43 +163,73 @@ test('turning FOLLOW on stops the framing flight so it cannot fight the follow v
  */
 function navigationFor(state, { refuse = false } = {}) {
   const listeners = new Set();
+  let generation = 0;
+  const stamp = () => {
+    generation++;
+    for (const listener of listeners) listener({ generation });
+    return generation;
+  };
   const nav = {
     runs: [],
+    begins: [],
     run(noun, move) {
       nav.runs.push(noun);
       if (refuse) return false;
-      for (const listener of listeners)
-        listener({ generation: nav.runs.length });
+      const current = stamp();
       state.viewer.trackedEntity = undefined;
-      return move(nav.runs.length);
+      return move(current);
+    },
+    /** Deferred: stamp now, release only on a successful reassert. */
+    begin(noun) {
+      nav.begins.push(noun);
+      return refuse ? false : stamp();
+    },
+    reassert(ticket) {
+      if (ticket !== generation) return false;
+      state.viewer.trackedEntity = undefined;
+      return true;
     },
     subscribeHandoff(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    handOff() {
-      for (const listener of listeners) listener({ generation: -1 });
-    },
+    /** Another feature takes the camera. */
+    handOff: () => stamp(),
     listeners,
   };
   return nav;
 }
 
-test('framing a photo claims the camera through the application, releasing tracking', () => {
+test('a photo claims the camera when it starts opening and frames once loaded, releasing tracking', () => {
   const { follow, state, flights } = setup({ sampled: 160 });
   state.viewer.trackedEntity = { id: 'aircraft' };
   const nav = navigationFor(state);
   follow.attachNavigation(nav);
-  follow.lookAtPosition();
-  assert.deepEqual(nav.runs, ['photo']);
+  const ticket = follow.beginFraming();
+  assert.deepEqual(nav.begins, ['photo']);
+  assert.ok(state.viewer.trackedEntity, 'nothing is released while it loads');
+  follow.lookAtPosition(ticket);
   assert.equal(state.viewer.trackedEntity, undefined);
   assert.equal(flights.length, 1);
+});
+
+test('a photo that finishes loading after newer navigation does not frame', () => {
+  const { follow, state, flights } = setup({ sampled: 160 });
+  const nav = navigationFor(state);
+  follow.attachNavigation(nav);
+  const ticket = follow.beginFraming();
+  // The user flies to Sacramento, and then tracks an aircraft, while it loads.
+  nav.handOff();
+  state.viewer.trackedEntity = { id: 'aircraft' };
+  follow.lookAtPosition(ticket);
+  assert.equal(flights.length, 0, 'no flight back to the photo');
+  assert.deepEqual(state.viewer.trackedEntity, { id: 'aircraft' });
 });
 
 test('a refused claim (cockpit) neither frames the photo nor turns FOLLOW on', () => {
   const { follow, state, flights, views } = setup({ sampled: 160 });
   follow.attachNavigation(navigationFor(state, { refuse: true }));
-  follow.lookAtPosition();
+  follow.lookAtPosition(follow.beginFraming());
   follow.setFollow(true);
   assert.equal(flights.length, 0);
   assert.equal(views.length, 0);

@@ -317,13 +317,11 @@ export function createMeshSampler({
       height = validated(height, lon, lat);
       const previous = heights.get(key);
       if (height === undefined) {
-        // A failed refresh keeps the old sample, and waits for a closer camera.
-        if (previous !== undefined)
-          probedFrom.set(key, cameraDistance(ground, centre, previous));
-        else {
-          if (misses.size >= cacheMax) misses.clear();
-          misses.set(key, Date.now() + MESH_MISS_RETRY_MS);
-        }
+        // A miss, or a failed refresh: the old sample (if any) and the
+        // distance it was taken from stay, and the probe is retried after
+        // the same cooldown.
+        if (misses.size >= cacheMax) misses.clear();
+        misses.set(key, Date.now() + MESH_MISS_RETRY_MS);
         continue;
       }
       if (previous === undefined && heights.size >= cacheMax) forget();

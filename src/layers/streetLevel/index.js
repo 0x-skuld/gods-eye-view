@@ -414,9 +414,11 @@ export function createStreetLevelLayer({
     },
 
     /**
-     * The application's camera authority: `run(noun, move)` and
-     * `subscribeHandoff(listener)`. Framing and FOLLOW claim the camera
-     * through it, and FOLLOW stops when another feature takes the camera.
+     * The application's camera authority: `run(noun, move)`, the deferred
+     * `begin(noun)` / `reassert(generation)` pair and
+     * `subscribeHandoff(listener)`. FOLLOW claims the camera with `run`; a
+     * photo claims it when opening starts and frames only if it still owns
+     * it once loaded. FOLLOW stops when another feature takes the camera.
      */
     attachNavigation(navigation) {
       parts.follow.attachNavigation(navigation);

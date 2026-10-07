@@ -16,6 +16,8 @@ export function createCameraFollow({ state, parts }) {
   /**
    * The application's camera authority (`attachNavigation`): `run(noun, move)`
    * releases tracking and other owners before `move`, or refuses (cockpit);
+   * `begin(noun)` takes a deferred ticket (a generation, or false) that
+   * `reassert(generation)` honours only if nothing newer took the camera;
    * `subscribeHandoff` reports a newer owner. Without it, moves run directly.
    */
   let navigation = null;
@@ -37,6 +39,21 @@ export function createCameraFollow({ state, parts }) {
           return true;
         }) === true
       );
+    } finally {
+      claiming = false;
+    }
+  }
+
+  /**
+   * Ask for the camera as a photo starts opening. The ticket goes to
+   * `lookAtPosition`; null when the application refuses (cockpit).
+   */
+  function beginFraming() {
+    if (!navigation?.begin || !navigation.reassert) return { generation: null };
+    claiming = true;
+    try {
+      const generation = navigation.begin('photo');
+      return generation === false ? null : { generation };
     } finally {
       claiming = false;
     }
@@ -108,12 +125,20 @@ export function createCameraFollow({ state, parts }) {
   /** Our framing flight while it is current; Cesium calls `cancel` when another flight starts. */
   let framing = null;
 
-  /** Frame the current image from a short distance behind it. */
-  function lookAtPosition() {
+  /**
+   * Frame the current image from a short distance behind it, unless another
+   * action took the camera since `ticket` (from `beginFraming`) was issued.
+   */
+  function lookAtPosition(ticket) {
     const { position, bearing, altitude } = state.street;
-    if (!position || !state.viewer) return;
+    if (!ticket || !position || !state.viewer) return;
+    if (
+      ticket.generation !== null &&
+      !navigation?.reassert?.(ticket.generation)
+    )
+      return;
     const ground = groundHeightAt(position.lon, position.lat, altitude);
-    claim(() => {
+    const fly = () => {
       // Owned before the call: starting it cancels the previous flight (ours
       // included) synchronously, and a zero-length one completes at once.
       const flight = {};
@@ -137,7 +162,10 @@ export function createCameraFollow({ state, parts }) {
           cancel: release,
         },
       );
-    });
+    };
+    // A reasserted ticket has already released the other owners.
+    if (ticket.generation === null) claim(fly);
+    else fly();
   }
 
   /** Stop our framing flight if it is still in the air; another feature's flight is left alone. */
@@ -171,6 +199,7 @@ export function createCameraFollow({ state, parts }) {
 
   return {
     followCamera,
+    beginFraming,
     lookAtPosition,
     cancelFraming,
     setFollow,

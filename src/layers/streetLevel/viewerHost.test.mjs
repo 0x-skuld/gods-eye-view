@@ -54,7 +54,7 @@ function harness(adapter) {
     sequenceStats: () => ({ selectedId }),
   };
   state.providers.set('mapillary', { def, instance });
-  const framing = { started: 0, cancelled: 0 };
+  const framing = { begun: 0, started: 0, cancelled: 0 };
   const marker = [];
   const followed = { count: 0 };
   const parts = {
@@ -65,7 +65,8 @@ function harness(adapter) {
     },
     follow: {
       followCamera: () => followed.count++,
-      lookAtPosition: () => framing.started++,
+      beginFraming: () => ({ generation: ++framing.begun }),
+      lookAtPosition: (ticket) => ticket && framing.started++,
       cancelFraming: () => framing.cancelled++,
     },
   };
@@ -556,4 +557,22 @@ test('back-to-back Mapillary opens download only the newer image', async () => {
     poses.map((pose) => pose.imageId),
     ['b'],
   );
+});
+
+test('a photo asks for the camera when it starts opening and frames with that ticket once loaded', async () => {
+  const openGate = deferred();
+  const adapter = fakeAdapter({ openGate });
+  const { state, host, framing } = harness(adapter);
+  const opening = host.open('mapillary', 'a');
+  assert.equal(framing.begun, 1, 'claimed before the download');
+  await settle();
+  assert.equal(framing.started, 0);
+  openGate.resolve();
+  assert.equal(await opening, true);
+  assert.equal(framing.started, 1);
+
+  // FOLLOW owns the camera already: an open neither claims nor frames.
+  state.street.follow = true;
+  assert.equal(await host.open('mapillary', 'b'), true);
+  assert.deepEqual([framing.begun, framing.started], [1, 1]);
 });

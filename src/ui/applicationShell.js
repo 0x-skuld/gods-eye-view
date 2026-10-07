@@ -942,6 +942,8 @@ export class StyleManager extends ShellFacade {
     // Photo framing and FOLLOW release tracking like any explicit flight.
     streetLevelLayer.attachNavigation?.({
       run: (noun, move) => this._runExplicitNavigation(noun, move),
+      begin: (noun) => this._beginDeferredNavigation(noun),
+      reassert: (generation) => this._reassertNavigationHandoff(generation),
       subscribeHandoff: (listener) =>
         this._navigation.subscribeCameraHandoff(listener),
     });
