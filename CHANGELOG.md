@@ -59,13 +59,13 @@
 
 ## [Unreleased]
 
-- Keep the globe panel working when an MCP client starts more than one
-  server process. Each stdio server made its own panel key, so a client that
-  read the panel page from one process and sent its requests to another
-  (seen in Claude Desktop) got "Only the God's Eye View panel may make this
-  request". Stdio servers of one install now share a key, created once in
-  `.gev-cache/`; a server that cannot store it keeps a key of its own, as
-  before (#927).
+- Stdio servers from one install share a panel key so a page read from one
+  process can make requests through another. Concurrent malformed-key repairs
+  now select one winner; unavailable storage or a busy repair retains the
+  logged per-process fallback. Thanks to [Jibran Tahir](https://github.com/jibraaan)
+  for #958, [MarvinNL046](https://github.com/MarvinNL046) for the report and
+  proposed diagnosis in #927, and [kvnloo](https://github.com/kvnloo) for identifying
+  the repair race. Windows/Claude Desktop Cowork confirmation remains outstanding.
 
 - Street Level: a street-level imagery layer modelled on the iD editor's photo
   overlay, with Mapillary as its first provider (free client token, CC BY-SA 4.0

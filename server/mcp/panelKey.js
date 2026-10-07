@@ -20,17 +20,52 @@ function readKey(file) {
   return KEY_PATTERN.test(text) ? text : null;
 }
 
+/** Serialize malformed-file repair; ordinary first creation still uses link(). */
+function repairKey(file, tmp, key) {
+  const lock = `${file}.repair-lock`;
+  const deadline = Date.now() + 2000;
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  let fd;
+  for (;;) {
+    try {
+      fd = fs.openSync(lock, 'wx', 0o600);
+      break;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      // Another repair may already have published a usable key.
+      const winner = readKey(file);
+      if (winner) return winner;
+      if (Date.now() >= deadline) {
+        throw Object.assign(new Error('panel key repair is busy'), {
+          code: 'ETIMEDOUT',
+        });
+      }
+      Atomics.wait(pause, 0, 0, 10);
+    }
+  }
+  try {
+    // A repair completed between our earlier read and acquiring the lock.
+    const winner = readKey(file);
+    if (winner) return winner;
+    fs.renameSync(tmp, file);
+    return key;
+  } finally {
+    fs.closeSync(fd);
+    fs.rmSync(lock, { force: true });
+  }
+}
+
 /**
  * The panel key every stdio server of this install shares.
  *
  * A client can start more than one server process for one connection: Claude
- * Desktop has been seen serving the globe panel's page from one and sending
- * the page's `panel_request` calls to the other. A key made per process then
- * never matches, and the panel reports that only it may make the request
- * (#927). The first process to run creates the key, without replacing one
+ * Desktop was reported to start two processes; serving the panel's page from
+ * one and sending its `panel_request` calls to the other reproduces #927.
+ * Per-process keys then mismatch, and the panel refuses the request.
+ * The first process to run creates the key, without replacing one
  * another process created at the same moment; the rest read it. When the file
- * cannot be read or written, the process falls back to a key of its own,
- * which is what every process used before.
+ * cannot be read or written, or repair stays busy for two seconds, the process
+ * falls back to its own key, as every process did before.
  *
  * As before, the key keeps `panel_request` from clients that only list it; it
  * is not access control.
@@ -71,10 +106,7 @@ export function sharedPanelKey({
       if (error.code !== 'EEXIST') throw error;
       const winner = readKey(file);
       if (winner) return winner;
-      // A malformed file left by something else: replace it.
-      fs.renameSync(tmp, file);
-      tmp = null;
-      return key;
+      return repairKey(file, tmp, key);
     }
   } catch (error) {
     log(notShared(error));
