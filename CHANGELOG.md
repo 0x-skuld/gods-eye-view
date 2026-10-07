@@ -1,5 +1,9 @@
 # Changelog
 
+- Voice debug logs omit complete tool-result bodies and serialized function
+  outputs by default, including location queries and generated spoken replies.
+  `GEV_VOICE_LOG_CONTENT=1` retains them for explicit content debugging.
+
 - Unqualified Alps searches use the bundled European range for navigation
   and annotations instead of a same-named peak returned by a geocoder.
   Coordinates, supplied presets and geographically qualified place names

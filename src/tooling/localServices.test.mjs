@@ -22,6 +22,8 @@ import { keySetupEndpoint } from 'gods-eye-view/server/standalone/key-setup';
 import { realtimeInstructions } from '../../server/providers/openai/instructions.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
 import { createDebugLogHandler } from '../../server/providers/openai/debug-log.js';
+import { attachVoiceResult } from '../voice/speech.js';
+import { sanitizeDebugValue } from '../voice/realtimeDiagnostics.js';
 import { standaloneVoiceTools } from '../../server/standalone/voiceTools.js';
 
 function install(plugin, preview = false) {
@@ -576,6 +578,88 @@ test('the debug-log sink omits what people said and tool arguments unless conten
         records[1].payload.payload.arguments,
       );
       assert.equal(numericArguments.payload.arguments, 2);
+    }
+  }
+});
+
+test('debug logs omit structured and serialized tool results unless content logging is enabled', async (t) => {
+  const secret = 'private-address-fixture';
+  const result = attachVoiceResult('fly_to_location', {
+    ok: true,
+    query: secret,
+    label: secret,
+    arrived: true,
+    // New tool-specific fields must not need their own redaction rule.
+    futureField: { nested: [secret] },
+  });
+  const records = [
+    {
+      event: 'tool.result',
+      payload: { name: 'fly_to_location', callId: 'call-1', result },
+    },
+    {
+      event: 'client.function_call_output',
+      payload: {
+        message: {
+          type: 'conversation.item.create',
+          item: {
+            type: 'function_call_output',
+            call_id: 'call-1',
+            output: JSON.stringify(result),
+          },
+        },
+      },
+    },
+    {
+      event: 'server.event',
+      payload: {
+        response: {
+          id: 'response-1',
+          output: [
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: secret }],
+            },
+          ],
+          usage: { input_tokens: 40, output_tokens: 10 },
+        },
+      },
+    },
+  ].map((record) => sanitizeDebugValue(record));
+  for (const includeContent of [false, true]) {
+    const sourceRoot = root(t);
+    const handler = createDebugLogHandler({ sourceRoot, includeContent });
+    for (const record of records) {
+      const response = await request(handler, {
+        method: 'POST',
+        body: JSON.stringify(record),
+      });
+      assert.equal(response.status, 204);
+    }
+    const logged = readFileSync(
+      path.join(sourceRoot, '.gev-logs/realtime-conversations.jsonl'),
+      'utf8',
+    );
+    assert.equal(logged.includes(secret), includeContent);
+    const [tool, client, server] = logged.trim().split('\n').map(JSON.parse);
+    assert.equal(tool.payload.name, 'fly_to_location');
+    assert.equal(tool.payload.callId, 'call-1');
+    assert.equal(client.payload.message.item.call_id, 'call-1');
+    assert.equal(server.payload.response.id, 'response-1');
+    assert.equal(server.payload.response.output[0].type, 'message');
+    assert.deepEqual(
+      server.payload.response.usage,
+      records[2].payload.response.usage,
+    );
+    if (includeContent) {
+      assert.deepEqual(tool.payload.result, result);
+      assert.equal(client.payload.message.item.output, JSON.stringify(result));
+    } else {
+      assert.equal(tool.payload.result, '[omitted]');
+      assert.match(
+        client.payload.message.item.output,
+        /^\[omitted \d+ chars\]$/,
+      );
     }
   }
 });

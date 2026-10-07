@@ -25,7 +25,7 @@ const REALTIME_DEBUG_LOG_MAX_PER_MIN = 120;
 
 /**
  * Fields that carry what people said or heard: transcripts, typed and spoken
- * text, streamed deltas, structured tool arguments and the span's quoted
+ * text, streamed deltas, tool arguments/results and the span's quoted
  * replies. They are dropped from the persisted log unless content logging is explicitly enabled
  * (GEV_VOICE_LOG_CONTENT=1), so timing and tool diagnostics never retain
  * speech by default.
@@ -40,7 +40,7 @@ const VOICE_TEXT_FIELDS = new Set([
 const VOICE_CONTENT_MAX_DEPTH = 12;
 const VOICE_CONTENT_MAX_DEPTH_MARKER = '[omitted: max depth]';
 
-/** Replace spoken or typed content and structured tool arguments. */
+/** Replace spoken or typed content and complete tool argument/result bodies. */
 function omitVoiceContent(value, depth = 0) {
   if (depth > VOICE_CONTENT_MAX_DEPTH) return VOICE_CONTENT_MAX_DEPTH_MARKER;
   if (value === null || typeof value !== 'object') return value;
@@ -48,7 +48,15 @@ function omitVoiceContent(value, depth = 0) {
     return value.map((item) => omitVoiceContent(item, depth + 1));
   const output = {};
   for (const [key, item] of Object.entries(value)) {
-    if (key === 'arguments') {
+    // Tool bodies have open-ended schemas: omit the whole body rather than
+    // chasing query, label, say, display, or future tool-specific fields.
+    // Protocol response.output arrays still carry useful event metadata; only
+    // string output is a serialized function result and must be opaque.
+    if (
+      key === 'arguments' ||
+      key === 'result' ||
+      (key === 'output' && typeof item === 'string')
+    ) {
       output[key] =
         typeof item === 'string'
           ? `[omitted ${item.length} chars]`

@@ -383,8 +383,10 @@ the speaker (`mayVoiceClaimSpeaker()`). Progress lines stay outside the reply
 lifecycle and Radio handoff. `turn.span` debug records carry generation and
 playback latency, silence, preamble and word-count figures. Caption
 transcription (`OPENAI_REALTIME_TRANSCRIBE_MODEL`, default on) is metered into
-the session cost and cap. The debug log omits transcripts, text and tool
-arguments unless `GEV_VOICE_LOG_CONTENT=1`.
+the session cost and cap. The debug log omits transcripts, text, tool arguments
+and complete tool-result bodies (including serialized function outputs) unless
+`GEV_VOICE_LOG_CONTENT=1`.
+Tool names, call IDs, protocol event metadata and usage remain available.
 
 Point and ask: `pointerContext.js` reads what the cursor is on. A Space hold
 is the pointing gesture: its keydown snapshot (released with the key) is sent
