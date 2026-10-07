@@ -1,5 +1,9 @@
 # Changelog
 
+- MCP setup examples use the app's default port, `4173`. Thanks to
+  [Huanyi Xie](https://github.com/xiehuanyi) (#934) and
+  [shirunjies8-png](https://github.com/shirunjies8-png) (#959) for the same fix.
+
 - Voice revisits numbered analyst records through current layer snapshots and
   preserves resolved pin coordinates. Requested analyst lists and rankings can
   speak returned items alongside the exact count and coverage caveats. Failed
