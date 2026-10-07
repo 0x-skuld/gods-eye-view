@@ -216,12 +216,14 @@ export function createCoverage({ state, source }) {
   }
 
   /**
-   * Fetch the terrain heights a tile's lines need, then redraw it cast. A
-   * cast that resolves nothing clears `castRequested`, so the next refresh
-   * retries instead of this looping.
+   * Fetch the terrain heights a tile's lines need, then redraw it cast.
+   * `castRequested` stops the redraw from casting again at once; a refresh
+   * `retry`s a tile whose lines are still draped (a failed or partial cast),
+   * and it is redrawn only when more of its lines can be cast.
    */
-  function castTile(entry) {
-    if (entry.castRequested || entry.castAbort || !terrainMode()) return;
+  function castTile(entry, { retry = false } = {}) {
+    if ((entry.castRequested && !retry) || entry.castAbort || !terrainMode())
+      return;
     entry.castRequested = true;
     entry.castAbort = new AbortController();
     const { signal } = entry.castAbort;
@@ -233,9 +235,13 @@ export function createCoverage({ state, source }) {
       if (entry.castAbort?.signal === signal) entry.castAbort = null;
       const attached = [...state.coverage.tiles.values()].includes(entry);
       if (signal.aborted || !attached || !terrainMode()) return;
-      // Nothing new to cast: keep it draped until the next refresh.
-      if (!lines.some((coords) => caster.castLine(coords))) {
-        entry.castRequested = false;
+      // Nothing new to cast: keep what is drawn until the next refresh.
+      // Counted like buildSequencePrimitives: a cast line needs two points.
+      const castable = lines.filter(
+        (coords) => caster.castLine(coords)?.length >= 6,
+      ).length;
+      if (castable <= (entry.castLines || 0)) {
+        entry.castRequested = (entry.castLines || 0) > 0;
         return;
       }
       // A remesh may have cleared the flag while this was in flight.
@@ -718,11 +724,12 @@ export function createCoverage({ state, source }) {
     for (const tile of tiles) loadTile(tile, kind);
     if (!state.coverage.pending.size) purgeStale();
     // The camera moved: cells that were out of the sampler's range may not be,
-    // and a tile left draped by a failed or dropped cast gets another try.
+    // and lines left draped by a failed, partial or dropped cast get another try.
     if (terrainMode())
-      for (const entry of state.coverage.tiles.values())
+      for (const entry of state.coverage.tiles.values()) {
         if (entry.castRequested) requestMesh(entry);
-        else if (entry.drapedLines) castTile(entry);
+        if (entry.drapedLines) castTile(entry, { retry: true });
+      }
     notify();
   }
 

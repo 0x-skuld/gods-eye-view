@@ -930,3 +930,60 @@ test('a tile that fails before the terrain table loads is reported at once, neve
     process.off('unhandledRejection', onUnhandled);
   }
 });
+
+test('lines a partial terrain lookup left draped are cast once the terrain recovers', async () => {
+  // Two lines: the west one's heights arrive, the east one's fail at first.
+  let eastUp = false;
+  let prepares = 0;
+  const groundCaster = {
+    prepareLines: async () => {
+      prepares++;
+      return eastUp;
+    },
+    castLine: (coords) =>
+      coords[0][0] < centreLon || eastUp
+        ? coords.flatMap(([lon, lat]) => [lon, lat, 30])
+        : null,
+  };
+  const { state, source, coverage, centre } = setup({
+    surface: 'terrain',
+    groundCaster,
+  });
+  const centreLon = centre.lon;
+  const line = (from, to) => [
+    [
+      [from, centre.lat],
+      [to, centre.lat],
+    ],
+  ];
+  coverage.refresh();
+  source.calls[0].resolve(
+    encodeCoverageTile(centre.tile, {
+      sequences: [
+        { id: 'west', parts: line(centre.lon - 0.002, centre.lon - 0.001) },
+        { id: 'east', parts: line(centre.lon + 0.001, centre.lon + 0.002) },
+      ],
+    }),
+  );
+  await settle();
+  await settle();
+  const [entry] = state.coverage.tiles.values();
+  assert.equal(prepares, 1);
+  assert.deepEqual([entry.castLines, entry.drapedLines], [1, 1], 'partial');
+  await settle();
+  assert.equal(prepares, 1, 'no retry loop while the lookup fails');
+
+  // A refresh while still failing asks again but rebuilds nothing.
+  const drawn = entry.primitives;
+  coverage.refresh();
+  await settle();
+  assert.equal(prepares, 2);
+  assert.equal(entry.primitives, drawn, 'no rebuild without new heights');
+
+  eastUp = true; // the terrain proxy recovers
+  coverage.refresh();
+  await settle();
+  assert.equal(prepares, 3, 'the next refresh tries the draped line again');
+  assert.deepEqual([entry.castLines, entry.drapedLines], [2, 0], 'all cast');
+  coverage.clear();
+});
