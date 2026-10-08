@@ -9,6 +9,7 @@ import {
   createVoiceCostTracker,
   resolveVoiceModel,
   formatCostUsd,
+  estimateTranscriptionCostUsd,
 } from './voiceCost.js';
 
 /** Own next-session preferences and the immutable-model session cost meter. */
@@ -20,6 +21,7 @@ export class RealtimeCost {
     this.cloudVoiceAuth = readStoredCloudVoiceAuthMode();
     this.sessionCloudVoiceAuth = null;
     this.oauthUsage = { responses: 0, input: 0, output: 0 };
+    this.transcribeModel = null;
     this.costTracker = createVoiceCostTracker({
       tier: this.voiceTier,
       limits: this.voiceLimits,
@@ -164,7 +166,28 @@ export class RealtimeCost {
       this.syncCostUi();
       return { ...this.oauthUsage, costKnown: false };
     }
-    const state = this.costTracker.record(usage);
+    return this.applyCost(this.costTracker.record(usage));
+  }
+
+  /**
+   * Meter one input transcription (voice-card captions). It is billed apart
+   * from responses, so it is priced with the transcription model the server
+   * reported and folded into the same total, warning and cap.
+   */
+  recordTranscriptionUsage(usage) {
+    if (!usage) return null;
+    return this.applyCost(
+      this.costTracker.recordUsd(
+        estimateTranscriptionCostUsd(usage, this.transcribeModel),
+      ),
+    );
+  }
+
+  bindTranscriptionModel(model) {
+    this.transcribeModel = model && model !== 'off' ? model : null;
+  }
+
+  applyCost(state) {
     this.syncCostUi();
     if (state.warnCrossed) {
       // Exactly one line — the latch in the tracker guarantees it.
