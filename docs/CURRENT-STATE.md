@@ -396,7 +396,8 @@ the speaker (`mayVoiceClaimSpeaker()`). Progress lines stay outside the reply
 lifecycle and Radio handoff. `turn.span` debug records carry generation and
 playback latency, silence, preamble and word-count figures. Caption
 transcription (`OPENAI_REALTIME_TRANSCRIBE_MODEL`, default on) is metered into
-the session cost and cap. The debug log omits transcripts, text, tool arguments
+the session cost and cap in API-key sessions; ChatGPT OAuth sessions count
+captions without pricing them. The debug log omits transcripts, text, tool arguments
 and complete tool-result bodies (including serialized function outputs) unless
 `GEV_VOICE_LOG_CONTENT=1`.
 Tool names, call IDs, protocol event metadata and usage remain available.
