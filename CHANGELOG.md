@@ -73,8 +73,12 @@
   the auth button and reports completion, failure, timeout, or expired
   credentials. OAuth credentials stay on the server; local routes require
   loopback access and same-site requests. OAuth sessions retain usage data
-  and show unknown cost. The auth button keeps keyboard focus after a mode
-  change, and pending sign-in does not discard text in the key fields.
+  and show unknown cost; caption transcriptions are counted rather than
+  priced into the API-key cap. The auth button keeps keyboard focus after a
+  mode change, and pending sign-in does not discard text in the key fields.
+  Thanks to [Shayan Khan](https://github.com/devv-shayan) for #621 and
+  [TheSmokeDev](https://github.com/TheSmokeDev) for the credential handling
+  from #653.
 
 - Stdio servers from one install share a panel key so a page read from one
   process can make requests through another. Concurrent malformed-key repairs
