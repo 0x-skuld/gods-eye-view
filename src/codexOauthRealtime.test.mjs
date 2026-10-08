@@ -168,7 +168,13 @@ test('Codex login resolves an installed executable before PATH and starts browse
   const pending = startCodexChatGptLogin({
     executable: '/fixture/codex',
     home: '/home/fixture',
-    environment: { PATH: '/fixture' },
+    environment: {
+      PATH: '/fixture',
+      https_proxy: 'http://proxy.fixture:8080',
+      OPENAI_API_KEY: 'fixture-api-key',
+      GOOGLE_MAPS_SERVER_API_KEY: 'fixture-google-key',
+      OPENSKY_CLIENT_SECRET: 'fixture-opensky-secret',
+    },
     spawnImpl(command, args, options) {
       calls.push({ command, args, options });
       queueMicrotask(() => child.emit('spawn'));
@@ -181,9 +187,14 @@ test('Codex login resolves an installed executable before PATH and starts browse
   assert.deepEqual(calls[0].args, ['login']);
   assert.equal(calls[0].options.detached, true);
   assert.equal(calls[0].options.stdio, 'ignore');
-  assert.equal(
-    calls[0].options.env.CODEX_HOME,
-    path.join('/home/fixture', '.codex'),
+  assert.deepEqual(
+    calls[0].options.env,
+    {
+      PATH: '/fixture',
+      https_proxy: 'http://proxy.fixture:8080',
+      CODEX_HOME: path.join('/home/fixture', '.codex'),
+    },
+    'provider secrets stay out of the login process',
   );
   child.emit('exit', 1);
   assert.deepEqual(await login.completion, { exitCode: 1 });

@@ -138,6 +138,21 @@ export function resolveCodexExecutable({
   return 'codex';
 }
 
+// What `codex login` needs to find its home, open a browser and reach OpenAI.
+// The server's own environment also holds every provider secret, so the
+// child receives only these names.
+const CODEX_LOGIN_ENV =
+  /^(?:PATH|PATHEXT|HOME|USER|USERNAME|LOGNAME|SHELL|LANG|LANGUAGE|LC_[A-Z_]+|TERM|TZ|TMPDIR|TEMP|TMP|XDG_[A-Z_]+|DISPLAY|WAYLAND_DISPLAY|DBUS_SESSION_BUS_ADDRESS|BROWSER|WSL_[A-Z_]+|WSLENV|(?:HTTPS?|ALL|NO)_PROXY|SSL_CERT_(?:FILE|DIR)|NODE_EXTRA_CA_CERTS|SYSTEMROOT|WINDIR|COMSPEC|USERPROFILE|APPDATA|LOCALAPPDATA|PROGRAMDATA|HOMEDRIVE|HOMEPATH|CODEX_[A-Z_]+)$/i;
+
+/** The environment `codex login` runs with: the allowlist, then `CODEX_HOME`. */
+export function codexLoginEnvironment(environment, codexHome) {
+  const env = {};
+  for (const [name, value] of Object.entries(environment || {}))
+    if (CODEX_LOGIN_ENV.test(name) && value !== undefined) env[name] = value;
+  env.CODEX_HOME = codexHome;
+  return env;
+}
+
 export function startCodexChatGptLogin({
   spawnImpl = spawn,
   environment = process.env,
@@ -182,7 +197,7 @@ export function startCodexChatGptLogin({
         cwd: home,
         detached: true,
         stdio: 'ignore',
-        env: { ...environment, CODEX_HOME: loginHome },
+        env: codexLoginEnvironment(environment, loginHome),
       });
     } catch {
       fail();
