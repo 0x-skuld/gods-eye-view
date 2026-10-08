@@ -1,5 +1,10 @@
 # Changelog
 
+- Vector tile sources take their allowed tile origin from the configured
+  `tileJsonUrl`, so repointing only that URL at a mirror loads tiles from the
+  mirror or fails visibly instead of silently using OpenFreeMap. Thanks to
+  [daikaginza](https://github.com/daikaginza) (#935).
+
 - MCP setup examples use the app's default port, `4173`. Thanks to
   [Huanyi Xie](https://github.com/xiehuanyi) (#934) and
   [shirunjies8-png](https://github.com/shirunjies8-png) (#959) for the same fix.
